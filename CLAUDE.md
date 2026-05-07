@@ -10,9 +10,14 @@ findings. Binary name: `otsniff`.
 plaintext credentials, internet egress from OT subnets, ICS engineering-class
 commands, and unexpected protocols on OT VLANs.
 
+**v0.2 adds** scrub/unscrub for AI-assisted triage: produce an LLM-safe
+markdown report with every IP and MAC replaced by stable pseudonyms,
+plus a local map file to reverse the substitution on the LLM's response.
+See ADR-0006.
+
 **Out of scope:** live capture, agent mode, dashboards, IDS/SIEM integration,
-DNP3/S7Comm/OPC-UA/BACnet/IEC-104 (deferred to v0.2 if there's demand). See
-`README.md` for the user-facing scope statement.
+DNP3/S7Comm/OPC-UA/BACnet/IEC-104 (deferred). See `README.md` for the
+user-facing scope statement.
 
 ## Architecture
 
@@ -20,7 +25,7 @@ DNP3/S7Comm/OPC-UA/BACnet/IEC-104 (deferred to v0.2 if there's demand). See
 src/
 ├── main.rs            # Entry, maps OtError → exit code via ExitCode
 ├── lib.rs             # Crate root (re-exports for integration tests)
-├── cli.rs             # clap derive + run() — single command, no subcommands
+├── cli.rs             # clap subcommands: report / scrub / unscrub
 ├── error.rs           # OtError enum + sysexits-style exit codes
 ├── pcap.rs            # PCAP/PCAPNG iterator (pcap-parser + etherparse)
 ├── parse/
@@ -34,7 +39,9 @@ src/
 │   ├── engineering_commands.rs
 │   └── unexpected_protocols.rs
 ├── oui.rs             # Embedded OT-vendor OUI lookup
-└── report.rs          # askama HTML rendering (templates/report.html)
+├── report.rs          # askama HTML rendering (templates/report.html)
+├── report_md.rs       # Markdown rendering (LLM-friendly text)
+└── scrub.rs           # Pseudonym minting + scrub/unscrub round-trip
 
 tests/
 ├── cli_smoke.rs       # End-to-end binary tests (assert_cmd + predicates)
@@ -76,6 +83,18 @@ INSTA_UPDATE=always cargo test     # accept all on first creation
 - **No unsafe code** without a `// SAFETY:` justification.
 - **No lint suppression without refactoring.** If clippy warns, fix the root cause.
 
+## Subcommands
+
+```
+otsniff report <PCAP> [-o report.html] [--ot-subnet ...] [--json X]
+otsniff scrub <PCAP> -o report.md --map map.json [--ot-subnet ...]
+otsniff unscrub --map map.json [INPUT_FILE] [-o OUTPUT] [--strict]
+```
+
+`report` is the v0.1 behavior. `scrub` produces an LLM-safe markdown report
+plus a local pseudonym map. `unscrub` reverses pseudonyms in any text using
+the saved map.
+
 ## Key Decisions
 
 See `docs/adr/` for rationale:
@@ -85,6 +104,7 @@ See `docs/adr/` for rationale:
 - **ADR-0003** — askama compile-time templating with pre-formatted view structs (avoids custom-filter fragility)
 - **ADR-0004** — Owned packet payloads in `Packet` struct (simplicity > per-packet alloc savings)
 - **ADR-0005** — Embedded OT-vendor OUI table (full IEEE registry is overkill for v0.1)
+- **ADR-0006** — Scrub/unscrub for AI-assisted triage (no embedded AI client; pseudonym round-trip via local map file)
 
 When adding a non-trivial feature or making an architectural decision, add a new ADR.
 

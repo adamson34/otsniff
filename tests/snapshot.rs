@@ -18,6 +18,8 @@ use otsniff::observe::{
     Observations,
 };
 use otsniff::report::render_html;
+use otsniff::report_md::render_markdown;
+use otsniff::scrub::{build_map_at, scrub_text, unscrub_text};
 
 fn fixed_ts() -> chrono::DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap()
@@ -181,4 +183,49 @@ fn findings_json_snapshot() {
         "findings": findings,
     });
     insta::assert_json_snapshot!("findings_json", payload);
+}
+
+#[test]
+fn scrubbed_markdown_snapshot_does_not_leak_real_values() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts()).unwrap();
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed = scrub_text(&raw_md, &map);
+
+    // Hard assertions: no real value from the fixture should survive.
+    assert!(!scrubbed.contains("10.10.0.5"));
+    assert!(!scrubbed.contains("10.10.0.20"));
+    assert!(!scrubbed.contains("AA:BB:CC:DD:EE:01"));
+    // 8.8.8.8 is observed in the fixture (external_flows), so it gets a
+    // pseudonym; verify it's gone too.
+    assert!(!scrubbed.contains("8.8.8.8"));
+
+    insta::assert_snapshot!("scrubbed_markdown", scrubbed);
+}
+
+#[test]
+fn unscrub_round_trip_recovers_real_values() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts()).unwrap();
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed = scrub_text(&raw_md, &map);
+    let (back, replaced, unmapped) = unscrub_text(&scrubbed, &map);
+
+    assert_eq!(back, raw_md, "unscrub should perfectly reverse scrub");
+    assert!(replaced > 0, "expected at least some pseudonyms replaced");
+    assert!(
+        unmapped.is_empty(),
+        "no unmapped pseudonyms expected on round-trip"
+    );
+}
+
+#[test]
+fn scrub_map_snapshot() {
+    let obs = build_fixture();
+    let map = build_map_at(&obs, fixed_ts());
+    insta::assert_json_snapshot!("scrub_map", map);
 }

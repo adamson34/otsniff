@@ -3,7 +3,7 @@
 One-shot OT-aware PCAP triage. Feed it a span-port capture, get a self-contained HTML report you can hand to a plant manager, IT director, or on-site engineer.
 
 ```
-otsniff plant-capture.pcap -o report.html
+otsniff report plant-capture.pcap -o report.html
 ```
 
 ## Why this exists
@@ -37,7 +37,7 @@ Plus an **asset inventory** (IP, MAC, OUI vendor, inferred role: PLC / HMI / EWS
 cargo install --path .
 ```
 
-Requires Rust 1.75+.
+Requires Rust 1.85+.
 
 ### Pre-built binaries
 
@@ -46,22 +46,50 @@ See the latest [release](https://github.com/example/otsniff/releases) — static
 ## Usage
 
 ```sh
-otsniff input.pcap -o report.html
+# Standard HTML report:
+otsniff report input.pcap -o report.html
 
 # Treat extra subnets as OT (in addition to RFC1918):
-otsniff input.pcap --ot-subnet 100.64.0.0/16 --ot-subnet 198.18.0.0/15
+otsniff report input.pcap --ot-subnet 100.64.0.0/16
 
 # Also emit findings as JSON:
-otsniff input.pcap --json findings.json
+otsniff report input.pcap --json findings.json
 ```
+
+### AI-assisted triage (v0.2)
+
+For when you want to ask an LLM about a capture but can't legally send raw
+plant data to an external API. `scrub` produces a markdown report with every
+IP and MAC replaced by stable pseudonyms (`host_001`, `mac_002`, ...) plus
+a local map file. Vendor names, role labels, and protocol details are
+preserved — that's the context the AI needs.
+
+```sh
+# 1. Scrub: produces an LLM-safe markdown report + a local map.
+otsniff scrub plant.pcap -o scrubbed.md --map plant.scrubmap.json
+
+# 2. Paste scrubbed.md into Claude / GPT-4 / your local model. Get a response.
+#    The AI sees pseudonyms only — never the real IPs or MACs.
+
+# 3. Unscrub: replace pseudonyms in the AI's response with real values.
+otsniff unscrub --map plant.scrubmap.json ai-response.txt > final.txt
+
+# Or pipe directly:
+pbpaste | otsniff unscrub --map plant.scrubmap.json
+```
+
+The map file is the only thing tying pseudonyms to real values — keep it
+where you'd keep the original PCAP. Without it, the scrubbed report is
+just `host_NNN` references with no way back to a real network.
 
 ## Scope and non-goals
 
-**In scope (v0.1):**
+**In scope (through v0.2):**
 
 - Offline PCAP / PCAPNG analysis on Ethernet captures
 - Modbus/TCP and EtherNet/IP protocol awareness
 - Findings + asset inventory in self-contained HTML
+- Scrub/unscrub for AI-assisted triage (v0.2)
 
 **Not in scope:**
 
