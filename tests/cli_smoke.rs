@@ -3,7 +3,7 @@
 //! These exercise the binary through `assert_cmd`. They do *not* assert on
 //! report contents — that's what the snapshot tests cover. Their job is to
 //! catch obvious regressions in arg parsing, exit codes, and the
-//! input-error → exit-code mapping.
+//! input-error → exit-code mapping across all subcommands.
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -16,8 +16,9 @@ fn help_flag_succeeds() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("PCAP triage"))
-        .stdout(predicate::str::contains("--ot-subnet"));
+        .stdout(predicate::str::contains("report"))
+        .stdout(predicate::str::contains("scrub"))
+        .stdout(predicate::str::contains("unscrub"));
 }
 
 #[test]
@@ -31,8 +32,7 @@ fn version_flag_succeeds() {
 }
 
 #[test]
-fn missing_input_arg_exits_with_clap_error() {
-    // clap's missing-required-arg path; exits 2 by clap convention.
+fn no_subcommand_fails() {
     Command::cargo_bin("otsniff")
         .unwrap()
         .assert()
@@ -41,11 +41,45 @@ fn missing_input_arg_exits_with_clap_error() {
 }
 
 #[test]
-fn nonexistent_input_exits_2() {
+fn report_help_describes_command() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["report", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("HTML report"))
+        .stdout(predicate::str::contains("--ot-subnet"));
+}
+
+#[test]
+fn scrub_help_describes_command() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["scrub", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pseudonyms"))
+        .stdout(predicate::str::contains("--map"));
+}
+
+#[test]
+fn unscrub_help_describes_command() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["unscrub", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pseudonyms"))
+        .stdout(predicate::str::contains("--map"));
+}
+
+#[test]
+fn report_nonexistent_input_exits_2() {
     let tmp = TempDir::new().unwrap();
     let bogus = tmp.path().join("does-not-exist.pcap");
     Command::cargo_bin("otsniff")
         .unwrap()
+        .args(["report"])
         .arg(&bogus)
         .arg("-o")
         .arg(tmp.path().join("out.html"))
@@ -55,12 +89,13 @@ fn nonexistent_input_exits_2() {
 }
 
 #[test]
-fn malformed_input_exits_2() {
+fn report_malformed_input_exits_2() {
     let tmp = TempDir::new().unwrap();
     let bad = tmp.path().join("garbage.pcap");
     std::fs::write(&bad, b"this is not a pcap file at all").unwrap();
     Command::cargo_bin("otsniff")
         .unwrap()
+        .args(["report"])
         .arg(&bad)
         .arg("-o")
         .arg(tmp.path().join("out.html"))
@@ -70,7 +105,7 @@ fn malformed_input_exits_2() {
 }
 
 #[test]
-fn valid_pcap_produces_html_and_exits_0() {
+fn report_valid_pcap_produces_html_and_exits_0() {
     let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
     if !pcap.exists() {
         eprintln!("skipping: tests/fixtures/Modbus.pcap not present");
@@ -80,6 +115,7 @@ fn valid_pcap_produces_html_and_exits_0() {
     let out = tmp.path().join("report.html");
     Command::cargo_bin("otsniff")
         .unwrap()
+        .args(["report"])
         .arg(&pcap)
         .arg("-o")
         .arg(&out)
@@ -91,15 +127,76 @@ fn valid_pcap_produces_html_and_exits_0() {
 }
 
 #[test]
-fn ot_subnet_flag_parses_cidr() {
+fn scrub_round_trip_via_pcap() {
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    if !pcap.exists() {
+        eprintln!("skipping: tests/fixtures/Modbus.pcap not present");
+        return;
+    }
     let tmp = TempDir::new().unwrap();
-    let bogus = tmp.path().join("does-not-exist.pcap");
+    let md = tmp.path().join("scrubbed.md");
+    let map = tmp.path().join("map.json");
+
     Command::cargo_bin("otsniff")
         .unwrap()
-        .arg("--ot-subnet")
-        .arg("not-a-cidr")
-        .arg(&bogus)
+        .args(["scrub"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&md)
+        .arg("--map")
+        .arg(&map)
+        .assert()
+        .success();
+
+    let scrubbed = std::fs::read_to_string(&md).unwrap();
+    let map_text = std::fs::read_to_string(&map).unwrap();
+
+    // The Modbus.pcap fixture has 192.168.110.131 and 192.168.110.138 — neither
+    // should appear in the scrubbed report.
+    assert!(!scrubbed.contains("192.168.110.131"));
+    assert!(!scrubbed.contains("192.168.110.138"));
+    assert!(scrubbed.contains("host_001"));
+    // Map should mention both real IPs.
+    assert!(map_text.contains("192.168.110.131"));
+    assert!(map_text.contains("192.168.110.138"));
+
+    // Now unscrub a synthetic AI response.
+    let llm_response = tmp.path().join("ai.txt");
+    std::fs::write(
+        &llm_response,
+        "Look at host_001 and host_999 — only host_001 is real.\n",
+    )
+    .unwrap();
+    let final_out = tmp.path().join("final.txt");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["unscrub", "--map"])
+        .arg(&map)
+        .arg(&llm_response)
+        .arg("-o")
+        .arg(&final_out)
+        .assert()
+        .success();
+    let final_text = std::fs::read_to_string(&final_out).unwrap();
+    assert!(final_text.contains("192.168.110.131"));
+    assert!(final_text.contains("host_999")); // unmapped pseudonym left as-is
+}
+
+#[test]
+fn unscrub_strict_mode_fails_on_unknown_token() {
+    let tmp = TempDir::new().unwrap();
+    let map_path = tmp.path().join("empty-map.json");
+    let empty_map = r#"{"version":1,"created_at":"2026-05-07T12:00:00Z","ips":{},"macs":{}}"#;
+    std::fs::write(&map_path, empty_map).unwrap();
+    let input = tmp.path().join("ai.txt");
+    std::fs::write(&input, "host_007 is suspicious").unwrap();
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["unscrub", "--map"])
+        .arg(&map_path)
+        .arg(&input)
+        .arg("--strict")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("invalid value").or(predicate::str::contains("error")));
+        .stderr(predicate::str::contains("strict mode"));
 }

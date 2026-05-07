@@ -7,6 +7,8 @@ pub mod oui;
 pub mod parse;
 pub mod pcap;
 pub mod report;
+pub mod report_md;
+pub mod scrub;
 
 pub use error::{OtError, Result};
 
