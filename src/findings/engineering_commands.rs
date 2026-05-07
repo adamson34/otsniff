@@ -33,9 +33,7 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         let evidence: Vec<String> = by_pair
             .iter()
             .take(15)
-            .map(|((src, dst), fcs)| {
-                format!("{src} -> {dst} : {}", fcs.to_vec().join(", "))
-            })
+            .map(|((src, dst), fcs)| format!("{src} -> {dst} : {}", fcs.to_vec().join(", ")))
             .collect();
 
         let unknown_origin = modbus_eng
