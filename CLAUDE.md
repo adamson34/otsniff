@@ -72,6 +72,7 @@ INSTA_UPDATE=always cargo test     # accept all on first creation
 - **Output stability:** Any change to HTML or JSON output must be accepted via `cargo insta review`. Don't blindly `INSTA_UPDATE=always` in commits.
 - **Findings layer:** Each detector is a free function in `src/findings/`. New detectors should: read `Observations`, return `Vec<Finding>`, use `BTreeMap` for grouping (deterministic iteration), cap evidence samples (~5 per finding) to keep reports readable.
 - **Tests:** Unit tests inline (`#[cfg(test)] mod tests`), integration tests in `tests/`. New parsers must include round-trip unit tests with raw byte fixtures.
+- **MSRV is 1.85** — bumped from 1.75 in early v0.1 because transitive deps (clap_lex via clap 4.5) started requiring `edition = "2024"`, which needs cargo 1.85+. If a future dep pushes us higher, bump again rather than pinning workarounds.
 - **No unsafe code** without a `// SAFETY:` justification.
 - **No lint suppression without refactoring.** If clippy warns, fix the root cause.
 
