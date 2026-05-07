@@ -1,0 +1,22 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Test fixtures (large PCAPs not committed)
+tests/fixtures/*.pcap
+tests/fixtures/*.pcapng
+tests/fixtures/*.json
+tests/fixtures/*.html
+
+# Pending insta snapshots (must be reviewed, not committed)
+*.snap.new
+.snap-rejects/
+
+# Reports / scratch
+*.report.html
+out/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
