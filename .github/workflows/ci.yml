@@ -48,7 +48,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.75.0
+      # NB: pin the toolchain via `with: toolchain:`, not via the action ref
+      # (`@1.75.0` would be parsed by dependabot as an action version and
+      # "updated" to a non-existent rust release).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.75.0"
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-features
 
