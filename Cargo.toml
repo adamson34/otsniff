@@ -11,7 +11,7 @@ categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-pcap-parser = { version = "0.16", features = ["data"] }
+pcap-parser = { version = "0.17", features = ["data"] }
 etherparse = "0.15"
 askama = "0.12"
 serde = { version = "1", features = ["derive"] }
