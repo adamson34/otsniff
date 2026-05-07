@@ -1,0 +1,245 @@
+---
+source: tests/snapshot.rs
+expression: html
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>otsniff report — tests/fixtures/synthetic.pcap</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #666;
+    --bg: #fff;
+    --card: #f7f7f8;
+    --line: #e3e3e7;
+    --crit: #b3261e;
+    --high: #b9520b;
+    --med: #8b6e00;
+    --info: #4d6580;
+    --ok: #2e7d32;
+  }
+  html { background: var(--bg); color: var(--fg); }
+  body {
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    max-width: 1100px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid var(--line); padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin: 0.5rem 0 0.25rem 0; }
+  .muted { color: var(--muted); }
+  .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin: 1rem 0 1.5rem 0; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 0.75rem 1rem; }
+  .stat .n { font-size: 1.4rem; font-weight: 600; }
+  .stat .l { color: var(--muted); font-size: 0.85rem; }
+  .finding {
+    border: 1px solid var(--line);
+    border-left-width: 4px;
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    margin: 0.75rem 0;
+    background: var(--card);
+  }
+  .finding.sev-critical { border-left-color: var(--crit); }
+  .finding.sev-high { border-left-color: var(--high); }
+  .finding.sev-medium { border-left-color: var(--med); }
+  .finding.sev-info { border-left-color: var(--info); }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-weight: 600;
+    color: #fff;
+    margin-right: 0.5rem;
+    vertical-align: 1px;
+  }
+  .badge.sev-critical { background: var(--crit); }
+  .badge.sev-high { background: var(--high); }
+  .badge.sev-medium { background: var(--med); }
+  .badge.sev-info { background: var(--info); }
+  .ot-badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 3px; background: #1f3b5e; color: #fff; }
+  details { margin-top: 0.5rem; }
+  details summary { cursor: pointer; color: var(--muted); }
+  pre.evidence {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.6rem 0.75rem;
+    font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0.4rem 0 0 0;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--card); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .no-findings { color: var(--ok); padding: 0.5rem 0; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
+  @media print {
+    body { max-width: none; margin: 0; padding: 1rem; }
+    .finding { break-inside: avoid; }
+    details[open] summary { display: none; }
+    details { margin: 0; }
+  }
+</style>
+</head>
+<body>
+
+<h1>otsniff report</h1>
+<div class="meta">
+  Source: <code>tests/fixtures/synthetic.pcap</code><br>
+  Generated: 2026-05-07 12:00:00 UTC &middot; otsniff v0.1.0
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="n">505</div><div class="l">packets parsed</div></div>
+  <div class="stat"><div class="n">48.6 KB</div><div class="l">payload bytes</div></div>
+  <div class="stat"><div class="n">3</div><div class="l">hosts (2 in OT zones)</div></div>
+  <div class="stat"><div class="n">4</div><div class="l">findings</div></div>
+</div>
+<div class="muted" style="margin-bottom:1rem;">Capture window: 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC</div>
+
+<h2>Findings</h2>
+
+  
+  <div class="finding sev-critical">
+    <h3><span class="badge sev-critical">critical</span>Telnet session observed (cleartext by definition)</h3>
+    <div>1 Telnet packet(s) seen to 10.10.0.20:23. Credentials traversing this flow should be considered exposed.</div>
+    
+    <details>
+      <summary>Evidence (1 sample)</summary>
+      <pre class="evidence">Telnet session (cleartext)
+</pre>
+    </details>
+    
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Migrate the device to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.</div>
+    <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>creds.telnet</code></div>
+  </div>
+  
+  <div class="finding sev-critical">
+    <h3><span class="badge sev-critical">critical</span>Internet-bound traffic from OT subnets</h3>
+    <div>Saw 1 distinct flow(s) (600 bytes total) from hosts inside the configured OT subnets to public internet addresses. Plant networks should be egress-restricted at the IT/OT boundary.</div>
+    
+    <details>
+      <summary>Evidence (1 sample)</summary>
+      <pre class="evidence">10.10.0.5 -&gt; 8.8.8.8:80 (tcp, 5 pkts, 600 bytes)
+</pre>
+    </details>
+    
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Audit the IT/OT firewall ruleset. OT zones should only egress to specifically allowed update servers and vendor cloud endpoints, brokered through a DMZ with logging. Block, then add explicit allow rules.</div>
+    <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>egress.ot_to_internet</code></div>
+  </div>
+  
+  <div class="finding sev-high">
+    <h3><span class="badge sev-high">high</span>EtherNet/IP CIP engineering-class services observed</h3>
+    <div>1 CIP engineering-class request(s) (Set/Reset/Start/Stop/Forward Open with config) seen across 1 pair(s). These services change controller configuration or run state.</div>
+    
+    <details>
+      <summary>Evidence (1 sample)</summary>
+      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20 : SendRRData / Stop
+</pre>
+    </details>
+    
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Limit which engineering workstations can talk to controllers on tcp/44818 + udp/2222. Lock controller keyswitches to RUN/REMOTE-ONLY where possible to refuse program downloads.</div>
+    <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.cip_engineering</code></div>
+  </div>
+  
+  <div class="finding sev-high">
+    <h3><span class="badge sev-high">high</span>Modbus engineering-class commands on the wire</h3>
+    <div>1 write/diagnostic Modbus call(s) observed across 1 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.</div>
+    
+    <details>
+      <summary>Evidence (1 sample)</summary>
+      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20 : fc=0x05 (Write Single Coil)
+</pre>
+    </details>
+    
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.</div>
+    <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.modbus_writes</code></div>
+  </div>
+  
+
+
+<h2>Asset inventory</h2>
+<table>
+  <thead><tr>
+    <th>IP</th><th>Zone</th><th>MAC</th><th>Vendor</th><th>Inferred role</th><th>Protocols</th><th class="num">Packets</th><th class="num">Bytes</th>
+  </tr></thead>
+  <tbody>
+  
+    <tr>
+      <td><code>10.10.0.5</code></td>
+      <td><span class="ot-badge">OT</span></td>
+      <td><code>AA:BB:CC:DD:EE:01</code></td>
+      <td>—</td>
+      <td>HMI</td>
+      <td>modbus, smb</td>
+      <td class="num">250</td>
+      <td class="num">24.0 KB</td>
+    </tr>
+  
+    <tr>
+      <td><code>10.10.0.20</code></td>
+      <td><span class="ot-badge">OT</span></td>
+      <td><code>00:1B:1B:11:22:33</code></td>
+      <td>Siemens</td>
+      <td>PLC / controller</td>
+      <td>modbus</td>
+      <td class="num">250</td>
+      <td class="num">24.0 KB</td>
+    </tr>
+  
+    <tr>
+      <td><code>8.8.8.8</code></td>
+      <td>IT</td>
+      <td><code>AA:BB:CC:DD:EE:99</code></td>
+      <td>—</td>
+      <td>Unknown</td>
+      <td>http</td>
+      <td class="num">5</td>
+      <td class="num">600.0 B</td>
+    </tr>
+  
+  </tbody>
+</table>
+
+<h2>Top flows</h2>
+<table>
+  <thead><tr>
+    <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Packets</th><th class="num">Bytes</th>
+  </tr></thead>
+  <tbody>
+  
+    <tr>
+      <td><code>10.10.0.5:54000</code></td>
+      <td><code>10.10.0.20:502</code></td>
+      <td>modbus</td>
+      <td class="num">500</td>
+      <td class="num">48.0 KB</td>
+    </tr>
+  
+    <tr>
+      <td><code>10.10.0.5:54200</code></td>
+      <td><code>8.8.8.8:80</code></td>
+      <td>http</td>
+      <td class="num">5</td>
+      <td class="num">600.0 B</td>
+    </tr>
+  
+  </tbody>
+</table>
+
+<footer>
+  Generated by otsniff. This is a triage tool — findings are heuristic and a clean report is not an audit. Validate with the on-site team before acting.
+</footer>
+
+</body>
+</html>

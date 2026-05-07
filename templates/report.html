@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>otsniff report — {{ input }}</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #666;
+    --bg: #fff;
+    --card: #f7f7f8;
+    --line: #e3e3e7;
+    --crit: #b3261e;
+    --high: #b9520b;
+    --med: #8b6e00;
+    --info: #4d6580;
+    --ok: #2e7d32;
+  }
+  html { background: var(--bg); color: var(--fg); }
+  body {
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    max-width: 1100px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid var(--line); padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin: 0.5rem 0 0.25rem 0; }
+  .muted { color: var(--muted); }
+  .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin: 1rem 0 1.5rem 0; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 0.75rem 1rem; }
+  .stat .n { font-size: 1.4rem; font-weight: 600; }
+  .stat .l { color: var(--muted); font-size: 0.85rem; }
+  .finding {
+    border: 1px solid var(--line);
+    border-left-width: 4px;
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    margin: 0.75rem 0;
+    background: var(--card);
+  }
+  .finding.sev-critical { border-left-color: var(--crit); }
+  .finding.sev-high { border-left-color: var(--high); }
+  .finding.sev-medium { border-left-color: var(--med); }
+  .finding.sev-info { border-left-color: var(--info); }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-weight: 600;
+    color: #fff;
+    margin-right: 0.5rem;
+    vertical-align: 1px;
+  }
+  .badge.sev-critical { background: var(--crit); }
+  .badge.sev-high { background: var(--high); }
+  .badge.sev-medium { background: var(--med); }
+  .badge.sev-info { background: var(--info); }
+  .ot-badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 3px; background: #1f3b5e; color: #fff; }
+  details { margin-top: 0.5rem; }
+  details summary { cursor: pointer; color: var(--muted); }
+  pre.evidence {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.6rem 0.75rem;
+    font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0.4rem 0 0 0;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--card); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .no-findings { color: var(--ok); padding: 0.5rem 0; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
+  @media print {
+    body { max-width: none; margin: 0; padding: 1rem; }
+    .finding { break-inside: avoid; }
+    details[open] summary { display: none; }
+    details { margin: 0; }
+  }
+</style>
+</head>
+<body>
+
+<h1>otsniff report</h1>
+<div class="meta">
+  Source: <code>{{ input }}</code><br>
+  Generated: {{ generated }} &middot; otsniff v{{ version }}
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="n">{{ total_packets }}</div><div class="l">packets parsed</div></div>
+  <div class="stat"><div class="n">{{ total_bytes }}</div><div class="l">payload bytes</div></div>
+  <div class="stat"><div class="n">{{ asset_count }}</div><div class="l">hosts ({{ ot_asset_count }} in OT zones)</div></div>
+  <div class="stat"><div class="n">{{ finding_count }}</div><div class="l">findings</div></div>
+</div>
+<div class="muted" style="margin-bottom:1rem;">Capture window: {{ span }}</div>
+
+<h2>Findings</h2>
+{% if findings.is_empty() %}
+  <div class="no-findings">No findings raised. Spot-check the asset inventory and top flows below — quiet captures sometimes mean the right things were filtered out at the SPAN port.</div>
+{% else %}
+  {% for f in findings %}
+  <div class="finding sev-{{ f.severity_class }}">
+    <h3><span class="badge sev-{{ f.severity_class }}">{{ f.severity_label }}</span>{{ f.title }}</h3>
+    <div>{{ f.summary }}</div>
+    {% if !f.evidence.is_empty() %}
+    <details>
+      <summary>Evidence ({{ f.evidence_count }} sample{% if f.evidence_count != 1 %}s{% endif %})</summary>
+      <pre class="evidence">{% for e in f.evidence %}{{ e }}
+{% endfor %}</pre>
+    </details>
+    {% endif %}
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> {{ f.recommendation }}</div>
+    <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>{{ f.id }}</code></div>
+  </div>
+  {% endfor %}
+{% endif %}
+
+<h2>Asset inventory</h2>
+<table>
+  <thead><tr>
+    <th>IP</th><th>Zone</th><th>MAC</th><th>Vendor</th><th>Inferred role</th><th>Protocols</th><th class="num">Packets</th><th class="num">Bytes</th>
+  </tr></thead>
+  <tbody>
+  {% for a in assets %}
+    <tr>
+      <td><code>{{ a.ip }}</code></td>
+      <td>{% if a.in_ot_zone %}<span class="ot-badge">OT</span>{% else %}IT{% endif %}</td>
+      <td><code>{{ a.mac }}</code></td>
+      <td>{{ a.vendor }}</td>
+      <td>{{ a.role }}</td>
+      <td>{{ a.protocols }}</td>
+      <td class="num">{{ a.packets }}</td>
+      <td class="num">{{ a.bytes }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Top flows</h2>
+<table>
+  <thead><tr>
+    <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Packets</th><th class="num">Bytes</th>
+  </tr></thead>
+  <tbody>
+  {% for f in top_flows %}
+    <tr>
+      <td><code>{{ f.src }}</code></td>
+      <td><code>{{ f.dst }}</code></td>
+      <td>{{ f.label }}</td>
+      <td class="num">{{ f.packets }}</td>
+      <td class="num">{{ f.bytes }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<footer>
+  Generated by otsniff. This is a triage tool — findings are heuristic and a clean report is not an audit. Validate with the on-site team before acting.
+</footer>
+
+</body>
+</html>

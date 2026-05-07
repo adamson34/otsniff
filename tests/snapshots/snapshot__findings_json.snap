@@ -1,0 +1,87 @@
+---
+source: tests/snapshot.rs
+expression: payload
+---
+{
+  "findings": [
+    {
+      "evidence": [
+        "Telnet session (cleartext)"
+      ],
+      "id": "creds.telnet",
+      "recommendation": "Migrate the device to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.",
+      "severity": "Critical",
+      "summary": "1 Telnet packet(s) seen to 10.10.0.20:23. Credentials traversing this flow should be considered exposed.",
+      "title": "Telnet session observed (cleartext by definition)"
+    },
+    {
+      "evidence": [
+        "10.10.0.5 -> 8.8.8.8:80 (tcp, 5 pkts, 600 bytes)"
+      ],
+      "id": "egress.ot_to_internet",
+      "recommendation": "Audit the IT/OT firewall ruleset. OT zones should only egress to specifically allowed update servers and vendor cloud endpoints, brokered through a DMZ with logging. Block, then add explicit allow rules.",
+      "severity": "Critical",
+      "summary": "Saw 1 distinct flow(s) (600 bytes total) from hosts inside the configured OT subnets to public internet addresses. Plant networks should be egress-restricted at the IT/OT boundary.",
+      "title": "Internet-bound traffic from OT subnets"
+    },
+    {
+      "evidence": [
+        "10.10.0.5 -> 10.10.0.20 : SendRRData / Stop"
+      ],
+      "id": "ics.cip_engineering",
+      "recommendation": "Limit which engineering workstations can talk to controllers on tcp/44818 + udp/2222. Lock controller keyswitches to RUN/REMOTE-ONLY where possible to refuse program downloads.",
+      "severity": "High",
+      "summary": "1 CIP engineering-class request(s) (Set/Reset/Start/Stop/Forward Open with config) seen across 1 pair(s). These services change controller configuration or run state.",
+      "title": "EtherNet/IP CIP engineering-class services observed"
+    },
+    {
+      "evidence": [
+        "10.10.0.5 -> 10.10.0.20 : fc=0x05 (Write Single Coil)"
+      ],
+      "id": "ics.modbus_writes",
+      "recommendation": "Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.",
+      "severity": "High",
+      "summary": "1 write/diagnostic Modbus call(s) observed across 1 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.",
+      "title": "Modbus engineering-class commands on the wire"
+    }
+  ],
+  "inventory": [
+    {
+      "bytes": 24000,
+      "in_ot_zone": true,
+      "ip": "10.10.0.5",
+      "mac": "AA:BB:CC:DD:EE:01",
+      "packets": 250,
+      "protocols": [
+        "modbus",
+        "smb"
+      ],
+      "role": "Hmi",
+      "vendor": null
+    },
+    {
+      "bytes": 24000,
+      "in_ot_zone": true,
+      "ip": "10.10.0.20",
+      "mac": "00:1B:1B:11:22:33",
+      "packets": 250,
+      "protocols": [
+        "modbus"
+      ],
+      "role": "Plc",
+      "vendor": "Siemens"
+    },
+    {
+      "bytes": 600,
+      "in_ot_zone": false,
+      "ip": "8.8.8.8",
+      "mac": "AA:BB:CC:DD:EE:99",
+      "packets": 5,
+      "protocols": [
+        "http"
+      ],
+      "role": "Unknown",
+      "vendor": null
+    }
+  ]
+}
