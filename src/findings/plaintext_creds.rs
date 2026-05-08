@@ -37,8 +37,7 @@ fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
     let total_packets = events.len();
     let host_count = packets_per_dst.len();
 
-    let mut sorted_dsts: Vec<((IpAddr, u16), u64)> =
-        packets_per_dst.into_iter().map(|(k, v)| (k, v)).collect();
+    let mut sorted_dsts: Vec<((IpAddr, u16), u64)> = packets_per_dst.into_iter().collect();
     sorted_dsts.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
 
     let evidence: Vec<String> = sorted_dsts
