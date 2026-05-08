@@ -13,10 +13,17 @@ picked up.
 
 ## Released
 
-- **v0.1.0** (tagged on `main`) — initial release. Pure-Rust PCAP triage,
-  Modbus + EtherNet/IP, four findings (plaintext credentials, internet egress
-  from OT, ICS engineering commands, unexpected protocols on OT VLANs),
-  HTML + JSON output. See [GitHub releases](https://github.com/adamson34/otsniff/releases).
+- **v0.2.1** (tagged on `main`, current) — patch release adding
+  `install.sh` curl-pipe-sh installer + repo URL fix. No binary changes
+  vs. v0.2.0.
+- **v0.2.0** — first substantive release after v0.1.0. Scrub/unscrub,
+  `analyze` subcommand (Claude Code CLI integration), capture-source
+  detector, logical flow grouping, S7Comm parser, plaintext-cred
+  finding dedup.
+- **v0.1.0** — initial release. Pure-Rust PCAP triage, Modbus +
+  EtherNet/IP, four findings, HTML + JSON output.
+
+See [GitHub releases](https://github.com/adamson34/otsniff/releases).
 
 ## On `develop` (unreleased, will land in the next stable cut)
 
@@ -365,9 +372,10 @@ Release PR `develop → main`, decide on version (probably 0.2.0), follow the
 `/release` slash command. Then the four merged features (scrub, analyze,
 capture-source, flow-grouping, S7Comm) ship as a coherent release.
 
-**Why:** main is at v0.1.0 today, develop is 10+ commits ahead. The longer
-this gap grows, the less useful main is. **Open question:** version number
-and changelog framing.
+**Status:** Done in v0.2.0 + v0.2.1. Kept in roadmap as a recurring
+discipline — the `release/v0.X.Y` branch + `develop → main` PR + tag
+flow runs after every meaningful develop accumulation. See
+`.claude/commands/release.md` for the current playbook.
 
 ---
 

@@ -6,23 +6,29 @@ findings. Binary name: `otsniff`.
 
 ## Scope
 
-**v0.1 covers** Modbus/TCP and EtherNet/IP, plus four findings:
-plaintext credentials, internet egress from OT subnets, ICS engineering-class
-commands, and unexpected protocols on OT VLANs.
+**Currently shipped:**
 
-**v0.2 adds** scrub/unscrub for AI-assisted triage: produce an LLM-safe
-markdown report with every IP and MAC replaced by stable pseudonyms,
-plus a local map file to reverse the substitution on the LLM's response.
-See ADR-0006.
+- Modbus/TCP, EtherNet/IP, and S7Comm protocol decoding (function-code level)
+- Six rule-based findings: plaintext credentials (rolled up by kind),
+  internet egress from OT subnets, Modbus engineering commands,
+  EtherNet/IP CIP engineering services, S7Comm engineering commands,
+  unexpected protocols on OT VLANs
+- Asset inventory with role inference + OUI vendor lookup
+- Capture-source heuristic (SPAN / host-side / TAP / ambiguous)
+- Logical flow grouping (drops ephemeral src_port; tracks unique
+  connections per logical flow)
+- Scrub/unscrub for AI-assisted triage (ADR-0006) — every IP and MAC
+  replaced with stable pseudonyms before any AI sees the report
+- `analyze` subcommand (ADR-0007) — closes the scrub → AI → unscrub
+  loop via the user's local `claude` CLI. A fail-closed leak detector
+  enforces the privacy invariant even if the scrub layer has a bug.
 
-**v0.3 adds** the `analyze` subcommand — closes the scrub→AI→unscrub loop
-in one command by shelling out to the user's local `claude` CLI. The AI
-never sees real identifiers; a fail-closed leak detector enforces this
-even if the scrub layer has a bug. See ADR-0007.
+See `docs/ROADMAP.md` for the prioritized backlog of what's next.
 
-**Out of scope:** live capture, agent mode, dashboards, IDS/SIEM integration,
-DNP3/S7Comm/OPC-UA/BACnet/IEC-104 (deferred). See `README.md` for the
-user-facing scope statement.
+**Out of scope:** live capture, agent / sensor mode, vendor cloud
+integration, audit-grade certification, general-purpose IT triage,
+SIEM/IDS event-stream integration. See `docs/ROADMAP.md` for the full
+list with rationale per item.
 
 ## Architecture
 
@@ -89,7 +95,7 @@ INSTA_UPDATE=always cargo test     # accept all on first creation
 - **Output stability:** Any change to HTML or JSON output must be accepted via `cargo insta review`. Don't blindly `INSTA_UPDATE=always` in commits.
 - **Findings layer:** Each detector is a free function in `src/findings/`. New detectors should: read `Observations`, return `Vec<Finding>`, use `BTreeMap` for grouping (deterministic iteration), cap evidence samples (~5 per finding) to keep reports readable.
 - **Tests:** Unit tests inline (`#[cfg(test)] mod tests`), integration tests in `tests/`. New parsers must include round-trip unit tests with raw byte fixtures.
-- **MSRV is 1.85** — bumped from 1.75 in early v0.1 because transitive deps (clap_lex via clap 4.5) started requiring `edition = "2024"`, which needs cargo 1.85+. If a future dep pushes us higher, bump again rather than pinning workarounds.
+- **MSRV is 1.85** — bumped from 1.75 because transitive deps (clap_lex via clap 4.5) started requiring `edition = "2024"`, which needs cargo 1.85+. If a future dep pushes us higher, bump again rather than pinning workarounds.
 - **No unsafe code** without a `// SAFETY:` justification.
 - **No lint suppression without refactoring.** If clippy warns, fix the root cause.
 
@@ -102,10 +108,11 @@ otsniff unscrub --map map.json [INPUT_FILE] [-o OUTPUT] [--strict]
 otsniff analyze <PCAP> [-o report.md] [--map map.json] [--model M]
 ```
 
-`report` is the v0.1 behavior. `scrub` produces an LLM-safe markdown report
-plus a local pseudonym map. `unscrub` reverses pseudonyms in any text using
-the saved map. `analyze` closes the loop: scrub → leak-check → invoke local
-`claude` CLI → unscrub the response → append to a markdown report.
+`report` produces an HTML report. `scrub` produces an LLM-safe markdown
+report plus a local pseudonym map. `unscrub` reverses pseudonyms in any
+text using the saved map. `analyze` closes the loop: scrub → leak-check
+→ invoke local `claude` CLI → unscrub the response → append to a
+markdown report.
 
 **The privacy invariant is enforced by code, not convention.** See ADR-0007.
 `src/ai/leak_detector.rs` sits between scrub and any AI provider call and
@@ -119,10 +126,10 @@ will block the commit.
 See `docs/adr/` for rationale:
 
 - **ADR-0001** — Pure Rust, no Zeek dependency (single-binary UX over richer parsers)
-- **ADR-0002** — Hand-rolled minimal protocol parsers (only function-code fidelity needed for v0.1 findings)
+- **ADR-0002** — Hand-rolled minimal protocol parsers (only function-code fidelity needed for the findings layer)
 - **ADR-0003** — askama compile-time templating with pre-formatted view structs (avoids custom-filter fragility)
 - **ADR-0004** — Owned packet payloads in `Packet` struct (simplicity > per-packet alloc savings)
-- **ADR-0005** — Embedded OT-vendor OUI table (full IEEE registry is overkill for v0.1)
+- **ADR-0005** — Embedded OT-vendor OUI table (full IEEE registry is overkill for the current scope)
 - **ADR-0006** — Scrub/unscrub for AI-assisted triage (no embedded AI client; pseudonym round-trip via local map file)
 - **ADR-0007** — AI via the Claude Code CLI (shell-out, no HTTP/SDK, fail-closed leak detector enforces privacy)
 
