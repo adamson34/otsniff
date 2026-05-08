@@ -216,22 +216,24 @@ expression: html
 <h2>Top flows</h2>
 <table>
   <thead><tr>
-    <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Packets</th><th class="num">Bytes</th>
+    <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Conns</th><th class="num">Packets</th><th class="num">Bytes</th>
   </tr></thead>
   <tbody>
   
     <tr>
-      <td><code>10.10.0.5:54000</code></td>
+      <td><code>10.10.0.5</code></td>
       <td><code>10.10.0.20:502</code></td>
       <td>modbus</td>
+      <td class="num">1</td>
       <td class="num">500</td>
       <td class="num">48.0 KB</td>
     </tr>
   
     <tr>
-      <td><code>10.10.0.5:54200</code></td>
+      <td><code>10.10.0.5</code></td>
       <td><code>8.8.8.8:80</code></td>
       <td>http</td>
+      <td class="num">1</td>
       <td class="num">5</td>
       <td class="num">600.0 B</td>
     </tr>
