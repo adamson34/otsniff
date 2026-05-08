@@ -27,11 +27,15 @@ pub struct HostObs {
     pub in_ot_zone: bool,
 }
 
+/// Logical flow key: aggregates by source IP, destination IP+port, and
+/// transport protocol. Source port is intentionally excluded — TCP/UDP
+/// source ports are ephemeral, so including them in the key produced a
+/// noisy comms matrix where each TCP connection appeared as a separate
+/// flow. See docs/specs/flow-grouping.md.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
 pub struct FlowKey {
     pub src: IpAddr,
     pub dst: IpAddr,
-    pub src_port: u16,
     pub dst_port: u16,
     pub proto: u8,
 }
@@ -44,6 +48,19 @@ pub struct FlowObs {
     pub first_seen: DateTime<Utc>,
     pub last_seen: DateTime<Utc>,
     pub label: Option<String>,
+    /// Distinct source ports observed for this logical flow. The size of
+    /// this set is the number of TCP/UDP connections (or unconnected
+    /// datagram sources) that contributed to the flow. Bursts of unique
+    /// connections are themselves a signal — typical of probe / scan /
+    /// fuzz traffic.
+    pub unique_src_ports: HashSet<u16>,
+}
+
+impl FlowObs {
+    /// Number of distinct source ports seen for this logical flow.
+    pub fn connections(&self) -> usize {
+        self.unique_src_ports.len()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -166,12 +183,12 @@ impl Observer {
         let key = FlowKey {
             src: pkt.src_ip,
             dst: pkt.dst_ip,
-            src_port: pkt.src_port,
             dst_port: pkt.dst_port,
             proto: proto_byte,
         };
         let key_str = flow_key_str(&key);
         let label = classify_flow(pkt);
+        let src_port = pkt.src_port;
         self.obs
             .flows
             .entry(key_str)
@@ -179,17 +196,23 @@ impl Observer {
                 f.packets += 1;
                 f.bytes += bytes;
                 f.last_seen = pkt.ts;
+                f.unique_src_ports.insert(src_port);
                 if f.label.is_none() {
                     f.label = label.clone();
                 }
             })
-            .or_insert_with(|| FlowObs {
-                key: key.clone(),
-                packets: 1,
-                bytes,
-                first_seen: pkt.ts,
-                last_seen: pkt.ts,
-                label,
+            .or_insert_with(|| {
+                let mut ports = HashSet::new();
+                ports.insert(src_port);
+                FlowObs {
+                    key: key.clone(),
+                    packets: 1,
+                    bytes,
+                    first_seen: pkt.ts,
+                    last_seen: pkt.ts,
+                    label,
+                    unique_src_ports: ports,
+                }
             });
 
         // Protocol-specific observations
@@ -370,10 +393,7 @@ fn is_broadcast_or_multicast(mac: &[u8; 6]) -> bool {
 }
 
 fn flow_key_str(k: &FlowKey) -> String {
-    format!(
-        "{}:{}->{}:{}/{}",
-        k.src, k.src_port, k.dst, k.dst_port, k.proto
-    )
+    format!("{}->{}:{}/{}", k.src, k.dst, k.dst_port, k.proto)
 }
 
 fn classify_flow(pkt: &Packet) -> Option<String> {
