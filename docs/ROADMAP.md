@@ -71,24 +71,93 @@ miss today. Compounds the value-per-capture without expanding the protocol
 surface. **Touches:** new modules under `findings/`, possibly new flow-label
 recognizers in `observe.rs::classify_flow`. **Deps:** none.
 
-### P0-3: Hostname / NetBIOS extraction + scrub (M)
+### P0-3: Hostname / NetBIOS extraction + NERC-CIP-aware scrub (M)
 
 Inventory becomes much more useful with hostnames. "PLC-LINE3" beats
 "10.10.10.10" for an exec reading the report. Sources: DHCP option 12,
 NetBIOS name service responses, mDNS PTR records.
 
-**Privacy:** hostnames can leak operational context (`ACME-LINE3-PLC` says
-something a real IP doesn't). Must be scrubbed via the same map: `name_NNN`
-pseudonyms in addition to `host_NNN` / `mac_NNN`. Updates ADR-0006 and the
-leak detector.
+**Compliance framing — load-bearing.** Hostnames that identify critical
+assets fall under NERC CIP-011 (BES Cyber System Information). A name
+like `ACME-SUB-LINE3-PLC` is BCSI even though `10.10.10.10` arguably is
+not. The scrub support for hostnames is **not optional** — extracting
+without scrubbing would actively make the AI flow worse from a
+compliance posture, not better. Every hostname we extract goes into the
+scrub map as a `name_NNN` pseudonym, and the leak detector gains a
+hostname-shaped pattern check.
 
-**Why:** asset inventory readability is one of the things users will judge
-the tool on. Today's "Unknown" rows on real captures hurt the perceived
-quality. **Touches:** `observe.rs` (extraction), `scrub.rs` (new pseudonym
-class), `inventory.rs` (display), `ai/leak_detector.rs` (extend regex).
-**Deps:** none.
+**Why:** asset inventory readability *and* required to keep the privacy
+invariant honest as we extract more identifier types. **Touches:**
+`observe.rs` (extraction), `scrub.rs` (new pseudonym class),
+`inventory.rs` (display), `ai/leak_detector.rs` (extend regex). Updates
+ADR-0006 to name CIP-011 as the framing reference. **Deps:** none.
 
-### P0-4: OUI table refresh (S)
+### P0-4: NERC CIP / IEC 62443 scrub audit (M)
+
+Systematic review of every field otsniff extracts or renders against
+BCSI categories under NERC CIP-011 and analogous IEC 62443 / TSA
+pipeline / NIS2 frameworks. Anything that could uniquely identify a
+BES Cyber System or expose its operating characteristics goes into the
+scrub map.
+
+Items to audit (incomplete; the audit is the work):
+
+- **Usernames** extracted from FTP USER, Telnet logins, HTTP Basic
+  (b64-decoded). Operational account names like `ENGINEER1` or
+  `OPERATOR-NIGHT` are BCSI. New pseudonym class: `user_NNN`.
+- **Serial numbers** if we add EtherNet/IP Identity / BACnet Device
+  Object decoding in the future. Pseudonym class: `serial_NNN`.
+- **Firmware / vendor model strings** if extracted from protocol fields
+  (ENIP Identity reply, Modbus device ID via fc=0x2B, S7Comm CPU info).
+  These pinpoint specific firmware vulnerabilities — high BCSI value.
+  Pseudonym class: `model_NNN`.
+- **Modbus tag / S7 DB names** if we ever decode them. PLC tag naming
+  conventions reveal operational logic. We don't extract these today
+  but the rule should be: any new payload-aware finding has to declare
+  what it scrubs before landing.
+
+**Why:** the scrub layer is the project's load-bearing privacy claim.
+Doing this audit now — and making it a repeatable process for new
+features — is what lets us say "designed to align with BCSI handling"
+honestly. Without it, the AI feature accumulates leak vectors as we
+add more extractors.
+
+**Touches:** `scrub.rs` (new pseudonym classes), `ai/leak_detector.rs`
+(new patterns), `ai/prompts.rs` (system prompt extends to mention new
+pseudonym vocabulary), ADR-0006 (regulatory framing), per-feature
+specs (each declares its scrub stance).
+
+**Deps:** none, but ideally lands together with or right after P0-3.
+
+### P0-5: Source-type flag (CLI-recommended, heuristic as guard) (S)
+
+`otsniff <subcommand> --source-type span|host-side|tap` becomes the
+recommended way to declare capture provenance. The heuristic detector
+demotes from "primary inference" to "guard": it runs on every capture
+regardless of `--source-type`, and emits a warning when the user-
+declared type disagrees with what the heuristic would have classified.
+
+```
+otsniff report capture.pcap --source-type span -o report.html
+# (clean run)
+
+otsniff report tcpdump.pcap --source-type span -o report.html
+# WARNING: --source-type span declared, but heuristic suggests
+# host-side (87% of frames involve MAC 70:71:BC:3A:0D:E8). Findings
+# that depend on SPAN assumption (gateway inference, "no HMI seen")
+# may be misleading. Re-run with --source-type host-side or
+# investigate the capture.
+```
+
+**Why:** users typically know where the PCAP came from. Making them
+say so is cheap; making the heuristic the default puts a guess in
+the report's first line. The guard catches the "I thought this was
+SPAN but it isn't" mistake.
+
+**Touches:** `cli.rs` (flag), `capture_source.rs` (warning emission
+when user-declared and heuristic disagree). **Deps:** none.
+
+### P0-6: OUI table refresh (S)
 
 The 4SICS captures had Siemens devices we mostly identified, but real plant
 captures will have many vendors we don't. Curated subset of the IEEE OUI
@@ -121,33 +190,7 @@ Data (15), Save Configuration (24), Disable/Enable Unsolicited (20/21).
 DNP3 fixture is a fuzz test — we'd need a real-traffic capture to validate
 quality. Worth verifying that one exists publicly before starting.
 
-### P1-2: Ollama local provider (M)
-
-Second `AiProvider` implementation alongside `ClaudeCliProvider`. Shells out
-to `ollama run <model>` with the same scrubbed input. Fulfills the air-gap
-promise from ADR-0007 — analyze flow that doesn't require any external
-service.
-
-**Why:** ADR-0007 explicitly named this as the v0.4 follow-on and a
-key differentiator vs. all existing OT AI tooling. Closes the most-cited
-procurement objection ("data residency"). Trait abstraction is already in
-place; this is mostly an additive impl + prompt-tuning for smaller models.
-
-**Open question:** which local models are good enough for OT triage?
-Probably qwen2.5-7b or llama3.1-8b at a minimum. Output quality varies.
-
-### P1-3: PCAP source override flag (S)
-
-`otsniff <subcommand> --source-type span|host-side|tap` to override the
-heuristic when the user knows. Useful when the heuristic falls to "ambiguous"
-on a pre-filtered capture.
-
-**Why:** completes the capture-source feature. Today the heuristic correctly
-classifies SPAN/host/TAP in clear cases and falls to "ambiguous" otherwise;
-giving the user an override removes one source of friction. **Touches:**
-`cli.rs` only. **Deps:** none.
-
-### P1-4: Better progress feedback (S)
+### P1-2: Better progress feedback (S)
 
 `-v` mode currently emits one line at end-of-parse. For multi-GB captures the
 user sees nothing for minutes. Periodic progress (every N packets, or every
@@ -156,7 +199,7 @@ user sees nothing for minutes. Periodic progress (every N packets, or every
 **Why:** quality of life on big captures. Cheap. **Touches:** `cli.rs`,
 `pcap.rs`. **Deps:** none.
 
-### P1-5: Tagged release of the develop accumulation (S)
+### P1-3: Tagged release of the develop accumulation (S)
 
 Release PR `develop → main`, decide on version (probably 0.2.0), follow the
 `/release` slash command. Then the four merged features (scrub, analyze,
@@ -241,8 +284,23 @@ TOS. Defer until and unless there's a demonstrated need.
 ### P2-7: Native packaging (S each, M total)
 
 Homebrew formula, Debian/RPM packages, scoop manifest. Requires a stable
-release cadence to be worth automating. **Deps:** P1-5 (a stable v0.2.0 to
+release cadence to be worth automating. **Deps:** P1-3 (a stable v0.2.0 to
 package).
+
+### P2-8: Ollama local provider (M)
+
+Second `AiProvider` implementation alongside `ClaudeCliProvider`. Shells
+out to `ollama run <model>` with the same scrubbed input. Fulfills the
+air-gap promise from ADR-0007 — analyze flow that doesn't require any
+external service.
+
+**Why P2 / not P1:** named as a v0.4 follow-on in ADR-0007 but no user
+has asked for it yet, and the `claude` CLI integration covers the
+majority of use cases. Move to P1 if a regulated entity surfaces who
+literally cannot use any external AI service.
+
+**Open question:** which local models are good enough for OT triage?
+Probably qwen2.5-7b or llama3.1-8b at a minimum. Output quality varies.
 
 ---
 
@@ -270,6 +328,14 @@ via an ADR — not a backlog item.
 - **SIEM / IDS integration.** otsniff produces a report, not a stream of
   events for a SOC. The triage→report→action loop is the product, not
   alert-feeding.
+- **Compliance certification.** otsniff is *designed to align* with
+  NERC CIP-011 (BCSI handling), IEC 62443, NIS2, and similar
+  frameworks — the scrub layer, leak detector, and per-feature scrub
+  audit (P0-4) are all shaped by those principles. But the project
+  does not undergo certification, does not produce attestation
+  documents, and a clean otsniff report is *not* compliance evidence.
+  Certification is a separate commercial process; we provide tools
+  designed to be used by compliant programs, not the program itself.
 
 ---
 
@@ -293,6 +359,12 @@ in docs and to users, not pretend will be fixed by the next feature.
   the tool reads on a real plant capture from a real operator. Without that
   feedback the priority order in this roadmap is informed-guess, not
   evidence-based.
+- **Privacy / compliance is best-effort, not certified.** The scrub
+  layer + leak detector are designed to align with NERC CIP-011 BCSI
+  handling and similar frameworks. They are *not* an attestation. A
+  regulated entity that needs documented compliance must do their own
+  audit and shouldn't rely on the tool's word for it. P0-3 and P0-4
+  exist specifically to keep the alignment honest as the tool grows.
 - **v0.x — semver not binding.** CLI shape, output format, and library API
   may all change before 1.0. Most recent example: subcommands replaced the
   flat CLI in v0.2.
