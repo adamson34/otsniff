@@ -9,6 +9,12 @@ expression: payload
         "10.10.0.20:23 (1 packet(s))"
       ],
       "id": "creds.telnet",
+      "playbook": [
+        "Treat any password used during the Telnet sessions to `10.10.0.20:23` as exposed. Plan a rotation with the on-shift engineer for those devices and any account whose credentials may be reused (a Telnet password on a switch is often the same engineer account used elsewhere).",
+        "Migrate the listed devices to SSH where they support it. The asset inventory shows which hosts also speak the secure equivalent — use that as the starting list.",
+        "For devices without a secure alternative (older Moxa serial servers, legacy HMIs, managed switches that only support Telnet), place behind a jump host on a hardened management VLAN. Document the exception with a revocation date.",
+        "Record the credentials-exposed window in the change log so future investigations know which sessions to consider compromised. Capture window: see report header."
+      ],
       "recommendation": "Migrate the device(s) to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.",
       "severity": "Critical",
       "summary": "1 Telnet packet(s) seen across 1 host(s). Credentials traversing these flows should be considered exposed.",
@@ -19,6 +25,12 @@ expression: payload
         "10.10.0.5 -> 8.8.8.8:80 (tcp, 5 pkts, 600 bytes)"
       ],
       "id": "egress.ot_to_internet",
+      "playbook": [
+        "Identify the IT/OT gateway physically. The flows below traverse it — look at the asset inventory for hosts whose MACs appear on both sides of the boundary (a single MAC showing up for an OT IP and a public IP is the gateway interface).",
+        "Pull the running config / ruleset from the gateway (firewall, L3 switch, or whatever serves as the OT boundary). Look for an explicit deny-all-by-default with named exceptions. The expected answer for a plant boundary is \"deny everything; allow these specific update servers / vendor cloud endpoints / time sources.\"",
+        "Cross-reference each flow in the evidence against that ruleset. Any flow not covered by an explicit allow is either a missing rule or a control gap — both worth fixing.",
+        "After the rules are tightened, log the changes in the change-management system and re-capture in 24 hours to confirm the egress is blocked."
+      ],
       "recommendation": "Audit the IT/OT firewall ruleset. OT zones should only egress to specifically allowed update servers and vendor cloud endpoints, brokered through a DMZ with logging. Block, then add explicit allow rules.",
       "severity": "Critical",
       "summary": "Saw 1 distinct flow(s) (600 bytes total) from hosts inside the configured OT subnets to public internet addresses. Plant networks should be egress-restricted at the IT/OT boundary.",
@@ -29,6 +41,13 @@ expression: payload
         "10.10.0.5 -> 10.10.0.20 : SendRRData / Stop"
       ],
       "id": "ics.cip_engineering",
+      "playbook": [
+        "Identify the source host(s) physically: `10.10.0.5`. Use the same MAC-table approach as for the Modbus playbook. Engineering workstations running Studio 5000 / RSLogix or Rockwell Connected Components Workbench are the usual culprits.",
+        "Lock controller keyswitches to RUN or REMOTE-ONLY where possible. Allen-Bradley ControlLogix, CompactLogix, and Micro800-series controllers physically refuse program downloads in those positions.",
+        "In Studio 5000 (or the equivalent for your platform), pull the controller's audit log and download history for `10.10.0.20`. Look for unauthorized program downloads, online edits, or tag changes during the capture window.",
+        "Limit which engineering workstations can reach controllers on tcp/44818 + udp/2222 via switch ACL or firewall rule. Engineering access should be a known-IP allow list, not \"everyone on the OT VLAN.\"",
+        "If any unauthorized download is confirmed, treat as a controller-integrity incident. Plan a recovery window with operations to verify the running program against a known-good backup before resuming."
+      ],
       "recommendation": "Limit which engineering workstations can talk to controllers on tcp/44818 + udp/2222. Lock controller keyswitches to RUN/REMOTE-ONLY where possible to refuse program downloads.",
       "severity": "High",
       "summary": "1 CIP engineering-class request(s) (Set/Reset/Start/Stop/Forward Open with config) seen across 1 pair(s). These services change controller configuration or run state.",
@@ -39,6 +58,13 @@ expression: payload
         "10.10.0.5 -> 10.10.0.20 : fc=0x05 (Write Single Coil)"
       ],
       "id": "ics.modbus_writes",
+      "playbook": [
+        "Identify the source host(s) physically: `10.10.0.5`. Run `show mac address-table address <mac>` on the access switch (or your switch vendor's equivalent), then walk the cable. The asset inventory in this report has the MAC for each host.",
+        "Ask the on-shift control engineer whether `10.10.0.5` is the authorized Modbus master for `10.10.0.20`. Common authorized masters: SCADA servers, Niagara N4 supervisors, RTUs polling downstream PLCs. If yes, the finding is expected — but the host hygiene (other ports open on the asset inventory) is worth a separate look.",
+        "Pull session / event logs from `10.10.0.20`. Most controllers can show which coil and register addresses were written, with timestamps. Cross-reference against change-management tickets covering the capture window.",
+        "If the source is not an authorized writer, do NOT block at the switch yet. An unexpected ACL on a Modbus path is an availability event. Coordinate with operations first — schedule the change, run it past the control engineer.",
+        "Once the unauthorized path is confirmed: ACL the switch port (or VLAN) so only the authorized writer can reach tcp/502 on the target controllers. Consider Modbus-aware filtering (DPI) in front of safety-critical PLCs."
+      ],
       "recommendation": "Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.",
       "severity": "High",
       "summary": "1 write/diagnostic Modbus call(s) observed across 1 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.",
@@ -49,6 +75,13 @@ expression: payload
         "10.10.0.5 -> 10.10.0.20 : fc=0x1A (Request download)"
       ],
       "id": "ics.s7_engineering",
+      "playbook": [
+        "Identify the source host(s) physically: `10.10.0.5`. For TIA Portal / Step 7 Manager-class hosts, expect a Windows engineering laptop or a permanent PG.",
+        "In TIA Portal, set the controller's access level on `10.10.0.20` to \"no access (complete protection)\" or \"read access\" — anything looser allows variable writes from anyone reaching tcp/102.",
+        "Pull the controller diagnostic buffer for `10.10.0.20` (TIA Portal: Online & Diagnostics → Diagnostic Buffer). Look for download events, mode changes (RUN → STOP), and password-protection changes during the capture window.",
+        "For S7-1500: enable Secure Communication with TLS and pin the controller's certificate. For S7-300/400 (no native TLS): physical keyswitch lock plus a switch-level ACL is the path.",
+        "STOP commands or program downloads were seen — treat as a controller-integrity incident. Compare the running program against a known-good project backup before resuming production. Plan a recovery window with operations."
+      ],
       "recommendation": "Limit which engineering workstations can talk to controllers on tcp/102. For S7-1500 / TIA Portal environments, set the controller access level to \"no access (complete protection)\" or \"read access\" and require known-fingerprint TLS via Secure Communication. For older S7-300/400, use switch ACLs and physically lock the keyswitch to RUN.",
       "severity": "High",
       "summary": "1 S7 engineering call(s) — 1 download op(s) across 1 client→server pair(s). S7Comm has no authentication; any host that can reach a controller on tcp/102 can read/write variables, download programs, or stop the CPU.",

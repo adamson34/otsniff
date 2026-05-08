@@ -73,6 +73,21 @@
     word-break: break-all;
     margin: 0.4rem 0 0 0;
   }
+  ol.playbook {
+    margin: 0.4rem 0 0 0;
+    padding-left: 1.4rem;
+  }
+  ol.playbook li {
+    padding: 0.15rem 0;
+    line-height: 1.5;
+  }
+  ol.playbook code {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0 0.25rem;
+    font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
   table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
   th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { background: var(--card); font-weight: 600; }
@@ -123,6 +138,14 @@
     </details>
     {% endif %}
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> {{ f.recommendation }}</div>
+    {% if !f.playbook.is_empty() %}
+    <details open>
+      <summary>Investigation playbook ({{ f.playbook_count }} step{% if f.playbook_count != 1 %}s{% endif %})</summary>
+      <ol class="playbook">
+        {% for step in f.playbook %}<li>{{ step }}</li>{% endfor %}
+      </ol>
+    </details>
+    {% endif %}
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>{{ f.id }}</code></div>
   </div>
   {% endfor %}

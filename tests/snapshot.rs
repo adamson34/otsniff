@@ -335,6 +335,29 @@ fn classification_report_line_does_not_leak_unscrubbed_values_via_pseudonym_path
 }
 
 #[test]
+fn every_finding_has_a_non_empty_playbook() {
+    // P0-7 contract: each detector must populate a playbook with concrete
+    // steps. If a detector ships without one, the rules-based report
+    // value-add regresses to "static recommendation only" and the whole
+    // point of the feature is lost. Catch the regression here.
+    let obs = build_fixture();
+    let findings = run_all(&obs, &ot_subnets());
+    assert!(!findings.is_empty(), "fixture should produce findings");
+    for f in &findings {
+        assert!(
+            !f.playbook.is_empty(),
+            "finding {} has no playbook — every detector must populate one",
+            f.id
+        );
+        assert!(
+            f.playbook.iter().all(|s| !s.is_empty()),
+            "finding {} has an empty playbook step",
+            f.id
+        );
+    }
+}
+
+#[test]
 fn prompts_contain_no_real_identifiers() {
     // Catches the most common authoring mistake: writing an example IP or
     // MAC into the prompt template. Every analyze run uses these strings,
