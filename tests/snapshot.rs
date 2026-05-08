@@ -18,7 +18,7 @@ use otsniff::findings::run_all;
 use otsniff::inventory::build as build_inventory;
 use otsniff::observe::{
     CredEvent, CredKind, EnipEvent, ExternalFlow, FlowKey, FlowObs, HostObs, ModbusEvent,
-    Observations,
+    Observations, S7Event,
 };
 use otsniff::report::render_html;
 use otsniff::report_md::render_markdown;
@@ -143,6 +143,15 @@ fn build_fixture() -> Observations {
             command_label: "SendRRData".to_string(),
             cip_service: Some("Stop".to_string()),
             engineering_class: true,
+        }],
+        s7_events: vec![S7Event {
+            ts: fixed_ts(),
+            src: ip("10.10.0.5"),
+            dst: ip("10.10.0.20"),
+            function_code: 0x1A,
+            label: "Request download".to_string(),
+            engineering_class: true,
+            read_class: false,
         }],
         cred_events: vec![CredEvent {
             ts: fixed_ts(),

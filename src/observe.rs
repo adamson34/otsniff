@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{enip, modbus};
+use crate::parse::{enip, modbus, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,6 +85,17 @@ pub struct EnipEvent {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct S7Event {
+    pub ts: DateTime<Utc>,
+    pub src: IpAddr,
+    pub dst: IpAddr,
+    pub function_code: u8,
+    pub label: String,
+    pub engineering_class: bool,
+    pub read_class: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CredEvent {
     pub ts: DateTime<Utc>,
     pub src: IpAddr,
@@ -118,6 +129,7 @@ pub struct Observations {
     pub flows: HashMap<String, FlowObs>,
     pub modbus_events: Vec<ModbusEvent>,
     pub enip_events: Vec<EnipEvent>,
+    pub s7_events: Vec<S7Event>,
     pub cred_events: Vec<CredEvent>,
     pub external_flows: HashMap<String, ExternalFlow>,
     pub first_ts: Option<DateTime<Utc>>,
@@ -287,6 +299,21 @@ impl Observer {
                     function_code: pdu.function_code,
                     label: pdu.label().to_string(),
                     engineering_class: pdu.is_engineering_class(),
+                });
+            }
+        }
+
+        // S7Comm (Siemens S7-1200/300/400, TCP/102)
+        if pkt.dst_port == s7comm::PORT || pkt.src_port == s7comm::PORT {
+            if let Some(pdu) = s7comm::parse(payload) {
+                self.obs.s7_events.push(S7Event {
+                    ts: pkt.ts,
+                    src: pkt.src_ip,
+                    dst: pkt.dst_ip,
+                    function_code: pdu.function_code,
+                    label: pdu.label().to_string(),
+                    engineering_class: pdu.is_engineering_class(),
+                    read_class: pdu.is_read_class(),
                 });
             }
         }
