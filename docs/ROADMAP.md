@@ -88,7 +88,7 @@ miss today. Compounds the value-per-capture without expanding the protocol
 surface. **Touches:** new modules under `findings/`, possibly new flow-label
 recognizers in `observe.rs::classify_flow`. **Deps:** none.
 
-### P0-3: Hostname / NetBIOS extraction + NERC-CIP-aware scrub (M)
+### P0-3: Hostname / NetBIOS extraction + NERC-CIP-aware scrub (M) — ✅ shipped (DHCP only; mDNS / NetBIOS deferred)
 
 Inventory becomes much more useful with hostnames. "PLC-LINE3" beats
 "10.10.10.10" for an exec reading the report. Sources: DHCP option 12,

@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 258
 expression: scrubbed
 ---
 # otsniff report
@@ -184,11 +185,11 @@ _id: `compat.stale_tls`_
 
 ## Asset inventory
 
-| IP | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |
-|----|------|-----|--------|---------------|-----------|---------|-------|
-| `host_002` | OT | `mac_002` | — | HMI | modbus, smb | 250 | 24.0 KB |
-| `host_003` | OT | `mac_003` | Siemens | PLC / controller | modbus | 250 | 24.0 KB |
-| `host_001` | IT | `mac_001` | — | Unknown | http | 5 | 600.0 B |
+| IP | Hostname | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |
+|----|----------|------|-----|--------|---------------|-----------|---------|-------|
+| `host_002` | `name_001` | OT | `mac_002` | — | HMI | modbus, smb | 250 | 24.0 KB |
+| `host_003` | `name_002` | OT | `mac_003` | Siemens | PLC / controller | modbus | 250 | 24.0 KB |
+| `host_001` | — | IT | `mac_001` | — | Unknown | http | 5 | 600.0 B |
 
 ## Top flows
 

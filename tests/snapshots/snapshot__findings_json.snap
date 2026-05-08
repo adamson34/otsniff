@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 233
 expression: payload
 ---
 {
@@ -142,6 +143,7 @@ expression: payload
   "inventory": [
     {
       "bytes": 24000,
+      "hostname": "ENG-WS-01",
       "in_ot_zone": true,
       "ip": "10.10.0.5",
       "mac": "AA:BB:CC:DD:EE:01",
@@ -155,6 +157,7 @@ expression: payload
     },
     {
       "bytes": 24000,
+      "hostname": "PLC-LINE3",
       "in_ot_zone": true,
       "ip": "10.10.0.20",
       "mac": "00:1B:1B:11:22:33",
@@ -167,6 +170,7 @@ expression: payload
     },
     {
       "bytes": 600,
+      "hostname": null,
       "in_ot_zone": false,
       "ip": "8.8.8.8",
       "mac": "AA:BB:CC:DD:EE:99",
