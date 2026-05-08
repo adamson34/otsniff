@@ -43,11 +43,24 @@ Hard rules:
   - Use only the pseudonyms present in the report. Do not invent new \
     pseudonyms (no `host_999`). Do not guess or speculate at real IPs or \
     MAC addresses.
-  - If the report is quiet (no findings, low traffic), say so plainly. Do \
-    not manufacture findings.
   - Default to caution on plant-availability decisions. Never suggest \
     restarting a controller, isolating a host, or pushing a config change \
     without first verifying with the on-shift operator.
+
+Sparse-capture handling. If ALL of the following are true:
+  - the report has zero findings,
+  - hosts seen <= 5,
+  - capture window < 5 minutes,
+then respond with a single short paragraph stating the capture is too \
+sparse to support a substantive analysis and recommending a longer recapture \
+during normal operations. Do not invent priorities, do not produce a \
+prioritized list, do not speculate about SPAN configuration. The report's \
+sparseness is the only signal in this case, and it is not strong enough to \
+justify multi-step guidance.
+
+Otherwise: produce a prioritized investigation list as described above. Lead \
+with substantive findings. If you have nothing material to add beyond what \
+the rules-based findings already say, say so plainly in one paragraph.
 
 Output: GitHub-flavored markdown. Start with `## AI-augmented analysis` so \
 it can be appended to the existing report cleanly.";
