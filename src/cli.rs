@@ -5,6 +5,10 @@ use chrono::Utc;
 use clap::{Args, Parser, Subcommand};
 use ipnet::IpNet;
 
+use crate::ai::claude_cli::ClaudeCliProvider;
+use crate::ai::leak_detector;
+use crate::ai::prompts;
+use crate::ai::AiProvider;
 use crate::error::{OtError, Result};
 use crate::observe::Observer;
 use crate::pcap::iter_packets;
@@ -34,6 +38,10 @@ pub enum Command {
     /// Replace pseudonyms in a text file (e.g. an LLM's response) with their
     /// real values, using a previously saved map.
     Unscrub(UnscrubArgs),
+    /// Analyze a PCAP with Claude. Internally: scrub → leak-check → invoke
+    /// the local Claude Code CLI → unscrub the response → append to the
+    /// markdown report. The AI never sees real IPs or MACs.
+    Analyze(AnalyzeArgs),
 }
 
 #[derive(Args, Debug)]
@@ -74,6 +82,31 @@ pub struct ScrubArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct AnalyzeArgs {
+    /// Path to input PCAP/PCAPNG.
+    pub input: PathBuf,
+    /// Output markdown report path. The rules-based report is written here,
+    /// then the AI-augmented analysis is appended.
+    #[arg(short = 'o', long = "output", default_value = "report.md")]
+    pub output: PathBuf,
+    /// Optional path to write the pseudonym map. If omitted, the map is
+    /// kept in-memory only and not persisted (you can still unscrub the
+    /// run's output because it's done in-process; you just can't unscrub
+    /// later text against this run).
+    #[arg(long = "map", value_name = "PATH")]
+    pub map: Option<PathBuf>,
+    /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
+    #[arg(long = "ot-subnet", value_name = "CIDR")]
+    pub ot_subnets: Vec<IpNet>,
+    /// Optional Claude model override, passed through to `claude --model`.
+    #[arg(long = "model", value_name = "MODEL")]
+    pub model: Option<String>,
+    /// Print parse summary to stderr.
+    #[arg(short = 'v', long = "verbose")]
+    pub verbose: bool,
+}
+
+#[derive(Args, Debug)]
 pub struct UnscrubArgs {
     /// Path to the map produced by `scrub`.
     #[arg(long = "map", value_name = "PATH")]
@@ -95,6 +128,7 @@ pub fn run() -> Result<()> {
         Command::Report(a) => run_report(a),
         Command::Scrub(a) => run_scrub(a),
         Command::Unscrub(a) => run_unscrub(a),
+        Command::Analyze(a) => run_analyze(a),
     }
 }
 
@@ -217,6 +251,87 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
         args.map.display(),
         args.output.display(),
         args.map.display()
+    );
+    Ok(())
+}
+
+fn run_analyze(args: AnalyzeArgs) -> Result<()> {
+    let ot_subnets = ot_or_default(&args.ot_subnets);
+    if args.verbose {
+        eprintln!(
+            "otsniff {} — analyzing {}",
+            crate::VERSION,
+            args.input.display()
+        );
+    }
+    let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let inventory = crate::inventory::build(&obs);
+    let findings = crate::findings::run_all(&obs, &ot_subnets);
+
+    // 1. Build the rules-based markdown report (real values, never sent
+    //    to AI).
+    let raw_md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", Utc::now())?;
+
+    // 2. Mint pseudonyms and produce the scrubbed payload that will go
+    //    to the AI.
+    let map = build_map(&obs);
+    let scrubbed_md = scrub_text(&raw_md, &map);
+
+    // 3. FAIL-CLOSED LEAK CHECK. This is the kill switch — if any
+    //    real-looking identifier survived the scrub, abort here before
+    //    invoking the provider.
+    leak_detector::ensure_clean(&scrubbed_md)?;
+
+    // 4. Compose the user message (default task + scrubbed report) and
+    //    invoke the provider.
+    let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);
+    leak_detector::ensure_clean(&user_message)?; // belt-and-braces
+
+    if args.verbose {
+        eprintln!(
+            "  invoking claude (model: {})...",
+            args.model.as_deref().unwrap_or("default")
+        );
+    }
+    let provider = ClaudeCliProvider::new(args.model.clone());
+    let scrubbed_response = provider.analyze(prompts::SYSTEM_PROMPT, &user_message)?;
+
+    // 5. Unscrub the AI response on this side of the boundary.
+    let (unscrubbed_response, replaced, unmapped) = unscrub_text(&scrubbed_response, &map);
+
+    // 6. Write the combined report: rules-based markdown + AI section,
+    //    using the unscrubbed (real-value) versions for the user.
+    let mut combined = raw_md;
+    combined.push('\n');
+    combined.push_str(&unscrubbed_response);
+    combined.push('\n');
+
+    std::fs::write(&args.output, combined).map_err(|source| OtError::WriteOutput {
+        path: args.output.clone(),
+        source,
+    })?;
+
+    if let Some(map_path) = &args.map {
+        let map_json = serde_json::to_string_pretty(&map)?;
+        std::fs::write(map_path, map_json).map_err(|source| OtError::WriteOutput {
+            path: map_path.clone(),
+            source,
+        })?;
+    }
+
+    eprintln!(
+        "wrote {} ({} pseudonyms unscrubbed{}{})",
+        args.output.display(),
+        replaced,
+        if unmapped.is_empty() {
+            String::new()
+        } else {
+            format!(", {} unknown left as-is", unmapped.len())
+        },
+        match &args.map {
+            Some(p) => format!(", map saved to {}", p.display()),
+            None => String::new(),
+        }
     );
     Ok(())
 }
