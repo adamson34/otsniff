@@ -431,3 +431,64 @@ fn invariant_no_real_values_reach_ai_provider() {
     leak_detector::ensure_no_map_values(&user_message, &map)
         .expect("user message contains an unscrambled value from the scrub map");
 }
+
+#[test]
+fn cred_event_note_must_not_reach_any_rendered_output() {
+    // CIP-011 audit Finding #1: CredEvent.note can hold High-BCSI bytes
+    // (literal `USER ENGINEER1` lines, b64'd HTTP Basic auth headers).
+    // Today it is in-memory only — but a future detector could regress
+    // by including `note` in finding evidence. This sentinel injects a
+    // recognizable username into a synthetic `note` and asserts it
+    // appears nowhere in the rendered HTML, the rendered markdown, or
+    // the scrubbed markdown.
+    let mut obs = build_fixture();
+    let canary = "CANARY-USER-DO-NOT-LEAK";
+    obs.cred_events.push(CredEvent {
+        ts: fixed_ts(),
+        src: ip("10.10.0.5"),
+        dst: ip("10.10.0.20"),
+        dst_port: 21,
+        kind: CredKind::FtpAuth,
+        note: format!("USER {canary}"),
+    });
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+    )
+    .unwrap();
+    assert!(
+        !html.contains(canary),
+        "CredEvent.note bytes leaked into HTML output — this is a CIP-011 \
+         BCSI regression. See docs/audits/scrub-audit-cip011.md Finding #1."
+    );
+
+    let md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    assert!(
+        !md.contains(canary),
+        "CredEvent.note bytes leaked into markdown output — this is a CIP-011 \
+         BCSI regression. See docs/audits/scrub-audit-cip011.md Finding #1."
+    );
+
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed = scrub_text(&md, &map);
+    assert!(
+        !scrubbed.contains(canary),
+        "CredEvent.note bytes leaked into the AI-bound scrubbed payload."
+    );
+
+    // Also verify the field is excluded from any JSON serialization of
+    // the observations themselves — this is what `#[serde(skip)]`
+    // gives us.
+    let cred_json = serde_json::to_string(obs.cred_events.last().unwrap()).unwrap();
+    assert!(
+        !cred_json.contains(canary),
+        "CredEvent serialized with the `note` field — `#[serde(skip)]` is missing."
+    );
+}
