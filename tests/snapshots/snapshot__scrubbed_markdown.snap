@@ -11,7 +11,7 @@ _Source: `<scrubbed>` · Generated: 2026-05-07 12:00:00 UTC · otsniff v0.3.0-de
 - **Packets parsed:** 505
 - **Payload bytes:** 48.6 KB
 - **Hosts seen:** 3 (2 in OT zones)
-- **Findings:** 5
+- **Findings:** 8
 - **Capture window:** 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC
 
 ## Findings
@@ -55,6 +55,27 @@ host_002 -> host_001:80 (tcp, 5 pkts, 600 bytes)
 4. After the rules are tightened, log the changes in the change-management system and re-capture in 24 hours to confirm the egress is blocked.
 
 _id: `egress.ot_to_internet`_
+
+### [HIGH] SMBv1 traffic on the wire
+
+12 SMBv1 packet(s) seen across 1 host pair(s). SMBv1 is deprecated, blocked by default in modern Windows, and a known exploitation surface (WannaCry / EternalBlue). Its presence indicates legacy clients, legacy servers, or both.
+
+**Evidence (1 sample(s)):**
+```
+host_002 -> host_003:445 (12 SMBv1 packet(s))
+```
+
+**Recommendation:** Identify the legacy hosts and migrate to SMBv2/v3 or retire. Disable SMB1 via Group Policy on Windows hosts. SMBv1 is the protocol EternalBlue / WannaCry exploited; its presence is a known-bad pattern.
+
+**Investigation playbook:**
+
+1. Identify the hosts physically: `host_002` and `host_003`. Walk each MAC to a switch port using the asset inventory's MAC for that host.
+2. For Windows hosts: disable SMB1 via Group Policy (Computer Configuration → Policies → Windows Settings → Security Settings → ...) or PowerShell (`Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol`). After SMB1 is off, a host that legitimately needed it will fail loudly — better than failing silently.
+3. For embedded / OT-class devices that can only speak SMB1 (older Moxa NAS, legacy HMI file shares): isolate on a hardened management VLAN, document the exception with a decommission target date. Do not just leave it on the OT VLAN with no plan.
+4. Patch / decommission known-vulnerable Windows versions (Windows 7, Server 2008 / 2008 R2 without SMB1-disable) that depend on SMB1 for file shares. These are the hosts WannaCry-class malware actually pivoted through.
+5. Audit the OT-zone firewall ruleset for SMB allow rules between zones. SMB / CIFS file transfer should not cross the IT/OT boundary in either direction outside narrow, documented operational paths.
+
+_id: `compat.smbv1`_
 
 ### [HIGH] EtherNet/IP CIP engineering-class services observed
 
@@ -119,6 +140,48 @@ host_002 -> host_003 : fc=0x1A (Request download)
 
 _id: `ics.s7_engineering`_
 
+### [MEDIUM] DNS queries to a non-OT resolver
+
+1 OT host(s) sending DNS queries to resolvers outside the configured OT subnets (100 total query packet(s)). Cross-zone DNS leaks query patterns to the IT side and trusts an external resolver's answers. Both belong on the OT side under change control.
+
+**Evidence (1 sample(s)):**
+```
+host_002 -> host_001:53 (UDP/TCP, 100 packet(s))
+```
+
+**Recommendation:** Repoint OT hosts at an in-zone (or DMZ-relayed) DNS resolver. Add an outbound UDP/53 deny rule at the IT/OT boundary for everything except the sanctioned resolver(s).
+
+**Investigation playbook:**
+
+1. Identify each source host's configured DNS server: `host_002`. On Windows: `ipconfig /all` shows DNS Servers per interface. On Linux: `/etc/resolv.conf` (or `systemd-resolve --status` on systemd hosts). Don't change anything yet — read-only check.
+2. Verify whether an in-zone resolver exists. The asset inventory in this report shows which OT hosts speak DNS — a host running a DNS server on the OT side will show up with `dns` in its protocol list. If one exists, the listed clients should point at it.
+3. If no in-zone resolver: stand one up in the OT zone (or a dedicated DMZ). Configure it with a strict upstream relationship — only resolves a known set of plant-relevant names; everything else fails closed. CoreDNS or BIND with a small zone file is the standard pattern here.
+4. Once OT clients are repointed at the in-zone resolver, add an outbound UDP/53 deny rule at the IT/OT firewall for OT subnets that aren't the resolver itself. This catches any host that gets reverted to its old config and prevents cross-zone DNS from being a quiet failure mode.
+5. Cross-reference the destination resolver IPs against your IT team's documented DNS infrastructure. If a host is querying a known public resolver (Google, Cloudflare, etc.) that's a different problem than querying an internal IT resolver — the public case is also caught by the egress finding; the internal case is a routing / config gap on the OT side.
+
+_id: `boundary.dns_resolver`_
+
+### [MEDIUM] Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1)
+
+4 ClientHello(s) using deprecated TLS versions seen across 1 host pair(s): TLS 1.0 (4 hello(s)). These versions are deprecated and blocked by default in modern Windows / browsers. Their presence indicates legacy clients (older Java runtimes, embedded devices) or legacy services.
+
+**Evidence (1 sample(s)):**
+```
+host_002 -> host_003:443 : TLS 1.0 (4 hello(s))
+```
+
+**Recommendation:** Identify the source clients and services. Modern Windows blocks TLS 1.0/1.1 by default; their presence indicates legacy clients (older Java, embedded devices) or services worth replacing. Cipher suites available at these versions are vulnerable to BEAST / POODLE / downgrade attacks.
+
+**Investigation playbook:**
+
+1. Identify the source hosts and the services they're connecting to: `host_002`. A legacy TLS ClientHello almost always traces to one of: an older Java runtime, a Windows host with TLS 1.0/1.1 still enabled in Schannel, or an embedded device whose firmware predates TLS 1.2.
+2. For Windows clients: confirm TLS 1.2+ is enabled and TLS 1.0 / TLS 1.1 / SSL 3.0 are disabled in Schannel registry settings (HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols). Microsoft has a tested registry script for this — use that, don't hand-edit.
+3. For services / servers: upgrade the TLS implementation. If it's an embedded device that only supports TLS 1.0 (older Moxa, older Schneider HMIs), put it behind a TLS-terminating reverse proxy that speaks modern TLS to clients.
+4. Treat any captured authentication traffic from these connections as suspect — cipher suites available with TLS 1.0/1.1 are vulnerable to known attacks (BEAST, POODLE, downgrade-to-RC4). Rotate any credentials or session tokens that crossed these flows.
+5. Audit the firewall ruleset for outbound TLS to legacy services on OT — the modern answer is "only allow tcp/443 to a known set of update servers and vendor cloud endpoints, all of which speak TLS 1.2+."
+
+_id: `compat.stale_tls`_
+
 ## Asset inventory
 
 | IP | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |
@@ -132,4 +195,5 @@ _id: `ics.s7_engineering`_
 | Source | Destination | Protocol | Conns | Packets | Bytes |
 |--------|-------------|----------|-------|---------|-------|
 | `host_002` | `host_003:502` | modbus | 1 | 500 | 48.0 KB |
+| `host_002` | `host_001:53` | dns | 1 | 100 | 8.0 KB |
 | `host_002` | `host_001:80` | http | 1 | 5 | 600.0 B |

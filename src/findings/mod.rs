@@ -4,9 +4,12 @@
 //! zero or more `Finding`s. The CLI runs them all and renders the union into
 //! the report, sorted by severity.
 
+mod dns_resolver;
 mod engineering_commands;
 mod internet_egress;
 mod plaintext_creds;
+mod smbv1;
+mod stale_tls;
 mod unexpected_protocols;
 
 use ipnet::IpNet;
@@ -55,6 +58,9 @@ pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     out.extend(internet_egress::detect(obs));
     out.extend(engineering_commands::detect(obs, ot_subnets));
     out.extend(unexpected_protocols::detect(obs, ot_subnets));
+    out.extend(smbv1::detect(obs));
+    out.extend(stale_tls::detect(obs));
+    out.extend(dns_resolver::detect(obs, ot_subnets));
     out.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(b.id)));
     out
 }
