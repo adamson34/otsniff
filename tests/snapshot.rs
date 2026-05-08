@@ -11,6 +11,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use chrono::{TimeZone, Utc};
 use ipnet::IpNet;
 
+use otsniff::ai::leak_detector;
+use otsniff::ai::prompts;
 use otsniff::findings::run_all;
 use otsniff::inventory::build as build_inventory;
 use otsniff::observe::{
@@ -228,4 +230,50 @@ fn scrub_map_snapshot() {
     let obs = build_fixture();
     let map = build_map_at(&obs, fixed_ts());
     insta::assert_json_snapshot!("scrub_map", map);
+}
+
+#[test]
+fn system_prompt_snapshot() {
+    // Locks the OT-analyst persona contract. Any change to behavior
+    // requires explicit snapshot review.
+    insta::assert_snapshot!("ai_system_prompt", prompts::SYSTEM_PROMPT);
+}
+
+#[test]
+fn default_task_snapshot() {
+    insta::assert_snapshot!("ai_default_task", prompts::DEFAULT_TASK);
+}
+
+#[test]
+fn prompts_contain_no_real_identifiers() {
+    // Catches the most common authoring mistake: writing an example IP or
+    // MAC into the prompt template. Every analyze run uses these strings,
+    // so any leak here leaks on every invocation regardless of the
+    // scrubber.
+    leak_detector::ensure_clean(prompts::SYSTEM_PROMPT)
+        .expect("system prompt should not contain real-looking identifiers");
+    leak_detector::ensure_clean(prompts::DEFAULT_TASK)
+        .expect("default task should not contain real-looking identifiers");
+}
+
+#[test]
+fn invariant_no_real_values_reach_ai_provider() {
+    // The load-bearing test for the AI feature: build the exact bytes
+    // that `analyze` would send to the provider and run them through the
+    // leak detector. If this ever fails, the AI feature is unsafe to
+    // ship.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts()).unwrap();
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed_md = scrub_text(&raw_md, &map);
+    let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);
+
+    // System prompt must also be clean (sent on every call).
+    leak_detector::ensure_clean(prompts::SYSTEM_PROMPT)
+        .expect("system prompt leak — would reach AI on every analyze call");
+    // Combined user message: default task + scrubbed report.
+    leak_detector::ensure_clean(&user_message)
+        .expect("user message leak — scrubbed payload contains an unscrubbed identifier");
 }

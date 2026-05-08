@@ -15,6 +15,11 @@ markdown report with every IP and MAC replaced by stable pseudonyms,
 plus a local map file to reverse the substitution on the LLM's response.
 See ADR-0006.
 
+**v0.3 adds** the `analyze` subcommand — closes the scrub→AI→unscrub loop
+in one command by shelling out to the user's local `claude` CLI. The AI
+never sees real identifiers; a fail-closed leak detector enforces this
+even if the scrub layer has a bug. See ADR-0007.
+
 **Out of scope:** live capture, agent mode, dashboards, IDS/SIEM integration,
 DNP3/S7Comm/OPC-UA/BACnet/IEC-104 (deferred). See `README.md` for the
 user-facing scope statement.
@@ -41,7 +46,12 @@ src/
 ├── oui.rs             # Embedded OT-vendor OUI lookup
 ├── report.rs          # askama HTML rendering (templates/report.html)
 ├── report_md.rs       # Markdown rendering (LLM-friendly text)
-└── scrub.rs           # Pseudonym minting + scrub/unscrub round-trip
+├── scrub.rs           # Pseudonym minting + scrub/unscrub round-trip
+└── ai/
+    ├── mod.rs              # AiProvider trait
+    ├── claude_cli.rs       # Provider that shells out to `claude -p ...`
+    ├── leak_detector.rs    # Fail-closed kill switch — enforces privacy
+    └── prompts.rs          # Committed system prompt + default task
 
 tests/
 ├── cli_smoke.rs       # End-to-end binary tests (assert_cmd + predicates)
@@ -89,11 +99,20 @@ INSTA_UPDATE=always cargo test     # accept all on first creation
 otsniff report <PCAP> [-o report.html] [--ot-subnet ...] [--json X]
 otsniff scrub <PCAP> -o report.md --map map.json [--ot-subnet ...]
 otsniff unscrub --map map.json [INPUT_FILE] [-o OUTPUT] [--strict]
+otsniff analyze <PCAP> [-o report.md] [--map map.json] [--model M]
 ```
 
 `report` is the v0.1 behavior. `scrub` produces an LLM-safe markdown report
 plus a local pseudonym map. `unscrub` reverses pseudonyms in any text using
-the saved map.
+the saved map. `analyze` closes the loop: scrub → leak-check → invoke local
+`claude` CLI → unscrub the response → append to a markdown report.
+
+**The privacy invariant is enforced by code, not convention.** See ADR-0007.
+`src/ai/leak_detector.rs` sits between scrub and any AI provider call and
+fails closed if it detects un-scrubbed IPv4/IPv6/MAC patterns. Any change
+that adds a code path bypassing scrub must also pass the leak detector
+or the invariant test (`tests/snapshot.rs::invariant_no_real_values_reach_ai_provider`)
+will block the commit.
 
 ## Key Decisions
 
@@ -105,6 +124,7 @@ See `docs/adr/` for rationale:
 - **ADR-0004** — Owned packet payloads in `Packet` struct (simplicity > per-packet alloc savings)
 - **ADR-0005** — Embedded OT-vendor OUI table (full IEEE registry is overkill for v0.1)
 - **ADR-0006** — Scrub/unscrub for AI-assisted triage (no embedded AI client; pseudonym round-trip via local map file)
+- **ADR-0007** — AI via the Claude Code CLI (shell-out, no HTTP/SDK, fail-closed leak detector enforces privacy)
 
 When adding a non-trivial feature or making an architectural decision, add a new ADR.
 

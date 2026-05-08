@@ -56,31 +56,44 @@ otsniff report input.pcap --ot-subnet 100.64.0.0/16
 otsniff report input.pcap --json findings.json
 ```
 
-### AI-assisted triage (v0.2)
+### AI-assisted triage
 
-For when you want to ask an LLM about a capture but can't legally send raw
-plant data to an external API. `scrub` produces a markdown report with every
-IP and MAC replaced by stable pseudonyms (`host_001`, `mac_002`, ...) plus
-a local map file. Vendor names, role labels, and protocol details are
-preserved — that's the context the AI needs.
+For when you want an AI to look at a capture but can't legally send raw
+plant data to an external API. otsniff replaces every IP and MAC with
+stable pseudonyms before any AI sees the report, then unscrubs the AI's
+response on your machine. Vendor names, role labels, and protocol details
+pass through — that's the context the AI needs.
+
+**v0.3 (preferred): one command via your local Claude Code CLI.**
+
+```sh
+otsniff analyze plant.pcap -o report.md
+```
+
+Internally: scrub → fail-closed leak check → invoke `claude -p` (which uses
+your existing Claude Code auth and subscription) → unscrub the response →
+append to `report.md`. The AI never sees real IPs or MACs at any point.
+
+Requires the [Claude Code CLI](https://claude.com/code) installed and
+authenticated. Optional flags: `--model` (passthrough to `claude --model`),
+`--map PATH` (persist the pseudonym map for later unscrub of follow-up
+text), `--ot-subnet` (extra OT CIDRs).
+
+**v0.2 (manual flow, useful with any AI):**
 
 ```sh
 # 1. Scrub: produces an LLM-safe markdown report + a local map.
 otsniff scrub plant.pcap -o scrubbed.md --map plant.scrubmap.json
 
-# 2. Paste scrubbed.md into Claude / GPT-4 / your local model. Get a response.
-#    The AI sees pseudonyms only — never the real IPs or MACs.
+# 2. Paste scrubbed.md into Claude / GPT-4 / your local model.
 
 # 3. Unscrub: replace pseudonyms in the AI's response with real values.
 otsniff unscrub --map plant.scrubmap.json ai-response.txt > final.txt
-
-# Or pipe directly:
-pbpaste | otsniff unscrub --map plant.scrubmap.json
 ```
 
 The map file is the only thing tying pseudonyms to real values — keep it
-where you'd keep the original PCAP. Without it, the scrubbed report is
-just `host_NNN` references with no way back to a real network.
+where you'd keep the original PCAP. Without it, scrubbed output is
+`host_NNN` references with no way back to a real network.
 
 ## Scope and non-goals
 
