@@ -18,14 +18,14 @@ _Source: `<scrubbed>` · Generated: 2026-05-07 12:00:00 UTC · otsniff v0.2.0-de
 
 ### [CRITICAL] Telnet session observed (cleartext by definition)
 
-1 Telnet packet(s) seen to host_003:23. Credentials traversing this flow should be considered exposed.
+1 Telnet packet(s) seen across 1 host(s). Credentials traversing these flows should be considered exposed.
 
 **Evidence (1 sample(s)):**
 ```
-Telnet session (cleartext)
+host_003:23 (1 packet(s))
 ```
 
-**Recommendation:** Migrate the device to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.
+**Recommendation:** Migrate the device(s) to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.
 
 _id: `creds.telnet`_
 
