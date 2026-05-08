@@ -1,68 +1,90 @@
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 
-use crate::observe::{CredKind, Observations};
+use crate::observe::{CredEvent, CredKind, Observations};
 
 use super::{Finding, Severity};
 
+/// Detect plaintext-credentials traffic. Produces one `Finding` per
+/// `CredKind` (Telnet, FTP, HTTP-Basic, SNMPv1/v2c), regardless of how
+/// many destinations carry that kind of traffic. Destinations are
+/// surfaced as evidence, not as separate findings — see
+/// `docs/specs/finding-dedup.md`.
 pub fn detect(obs: &Observations) -> Vec<Finding> {
     if obs.cred_events.is_empty() {
         return Vec::new();
     }
 
-    // Group by (kind, dst) so the report doesn't list 50,000 individual
-    // Telnet packets — one finding per service.
-    let mut groups: BTreeMap<(CredKind, std::net::IpAddr, u16), Vec<&str>> = BTreeMap::new();
-    let mut counts: BTreeMap<(CredKind, std::net::IpAddr, u16), usize> = BTreeMap::new();
-
+    let mut by_kind: BTreeMap<CredKind, Vec<&CredEvent>> = BTreeMap::new();
     for ev in &obs.cred_events {
-        let key = (ev.kind, ev.dst, ev.dst_port);
-        *counts.entry(key).or_insert(0) += 1;
-        let bucket = groups.entry(key).or_default();
-        if bucket.len() < 5 {
-            bucket.push(ev.note.as_str());
-        }
+        by_kind.entry(ev.kind).or_default().push(ev);
     }
 
-    groups
+    by_kind
         .into_iter()
-        .map(|((kind, dst, port), examples)| {
-            let total = counts[&(kind, dst, port)];
-            let (id, title, recommendation) = match kind {
-                CredKind::FtpAuth => (
-                    "creds.ftp",
-                    "Plaintext FTP authentication observed",
-                    "Replace FTP with SFTP/FTPS, or restrict to a management VLAN. Rotate any credentials seen on the wire — assume compromised.",
-                ),
-                CredKind::TelnetSession => (
-                    "creds.telnet",
-                    "Telnet session observed (cleartext by definition)",
-                    "Migrate the device to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.",
-                ),
-                CredKind::HttpBasic => (
-                    "creds.http_basic",
-                    "HTTP Basic authentication over plaintext HTTP",
-                    "Move the service behind TLS (HTTPS) or restrict to an isolated mgmt network. Rotate exposed credentials.",
-                ),
-                CredKind::Snmpv1v2c => (
-                    "creds.snmp",
-                    "SNMPv1/v2c traffic (plaintext community strings)",
-                    "Migrate to SNMPv3 with auth+priv, or restrict polling to a hardened mgmt VLAN. Rotate community strings — they pass in the clear.",
-                ),
-            };
-            let summary = format!(
-                "{total} {} packet(s) seen to {dst}:{port}. Credentials traversing this flow should be considered exposed.",
-                kind_label(kind)
-            );
-            Finding {
-                id,
-                severity: Severity::Critical,
-                title: title.to_string(),
-                summary,
-                evidence: examples.iter().map(|s| s.to_string()).collect(),
-                recommendation,
-            }
-        })
+        .map(|(kind, events)| build_finding(kind, &events))
         .collect()
+}
+
+fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
+    // Aggregate per (dst, port) — one evidence line per destination,
+    // sorted by packet count descending so the noisiest hosts are
+    // listed first.
+    let mut packets_per_dst: BTreeMap<(IpAddr, u16), u64> = BTreeMap::new();
+    for ev in events {
+        *packets_per_dst.entry((ev.dst, ev.dst_port)).or_insert(0) += 1;
+    }
+    let total_packets = events.len();
+    let host_count = packets_per_dst.len();
+
+    let mut sorted_dsts: Vec<((IpAddr, u16), u64)> =
+        packets_per_dst.into_iter().map(|(k, v)| (k, v)).collect();
+    sorted_dsts.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+
+    let evidence: Vec<String> = sorted_dsts
+        .iter()
+        .take(15)
+        .map(|((dst, port), n)| format!("{dst}:{port} ({n} packet(s))"))
+        .collect();
+
+    let (id, title, recommendation) = match kind {
+        CredKind::FtpAuth => (
+            "creds.ftp",
+            "Plaintext FTP authentication observed",
+            "Replace FTP with SFTP/FTPS, or restrict to a management VLAN. Rotate any credentials seen on the wire — assume compromised.",
+        ),
+        CredKind::TelnetSession => (
+            "creds.telnet",
+            "Telnet session observed (cleartext by definition)",
+            "Migrate the device(s) to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.",
+        ),
+        CredKind::HttpBasic => (
+            "creds.http_basic",
+            "HTTP Basic authentication over plaintext HTTP",
+            "Move the service(s) behind TLS (HTTPS) or restrict to an isolated mgmt network. Rotate exposed credentials.",
+        ),
+        CredKind::Snmpv1v2c => (
+            "creds.snmp",
+            "SNMPv1/v2c traffic (plaintext community strings)",
+            "Migrate to SNMPv3 with auth+priv, or restrict polling to a hardened mgmt VLAN. Rotate community strings — they pass in the clear.",
+        ),
+    };
+
+    let summary = format!(
+        "{} {} packet(s) seen across {} host(s). Credentials traversing these flows should be considered exposed.",
+        total_packets,
+        kind_label(kind),
+        host_count
+    );
+
+    Finding {
+        id,
+        severity: Severity::Critical,
+        title: title.to_string(),
+        summary,
+        evidence,
+        recommendation,
+    }
 }
 
 fn kind_label(k: CredKind) -> &'static str {
@@ -71,5 +93,106 @@ fn kind_label(k: CredKind) -> &'static str {
         CredKind::TelnetSession => "Telnet",
         CredKind::HttpBasic => "HTTP Basic",
         CredKind::Snmpv1v2c => "SNMPv1/v2c",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::observe::{CredEvent, CredKind, Observations};
+    use chrono::TimeZone;
+    use std::net::Ipv4Addr;
+
+    fn ip(s: &str) -> IpAddr {
+        IpAddr::V4(s.parse::<Ipv4Addr>().unwrap())
+    }
+
+    fn ts() -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc.with_ymd_and_hms(2026, 5, 8, 12, 0, 0).unwrap()
+    }
+
+    fn telnet_event(dst: &str) -> CredEvent {
+        CredEvent {
+            ts: ts(),
+            src: ip("10.0.0.1"),
+            dst: ip(dst),
+            dst_port: 23,
+            kind: CredKind::TelnetSession,
+            note: "Telnet session (cleartext)".to_string(),
+        }
+    }
+
+    #[test]
+    fn rolls_up_one_finding_per_kind_across_many_hosts() {
+        // 12 distinct telnet destinations, multiple events each.
+        let mut events = Vec::new();
+        for i in 1..=12u8 {
+            // 5 packets per host, varying count to test sort order
+            for _ in 0..(13 - i) {
+                events.push(telnet_event(&format!("192.168.1.{i}")));
+            }
+        }
+        let obs = Observations {
+            cred_events: events,
+            ..Default::default()
+        };
+        let findings = detect(&obs);
+        assert_eq!(findings.len(), 1, "must roll up to one finding per kind");
+        let f = &findings[0];
+        assert_eq!(f.id, "creds.telnet");
+        assert!(f.summary.contains("12 host(s)"));
+        // Evidence sorted by packet count desc — host .1 should appear
+        // first (12 packets) and host .12 last (1 packet).
+        let first_evidence = &f.evidence[0];
+        assert!(
+            first_evidence.starts_with("192.168.1.1:23"),
+            "expected most-packets-first ordering; got: {first_evidence}"
+        );
+    }
+
+    #[test]
+    fn distinct_kinds_produce_distinct_findings() {
+        let obs = Observations {
+            cred_events: vec![
+                telnet_event("10.0.0.5"),
+                CredEvent {
+                    ts: ts(),
+                    src: ip("10.0.0.1"),
+                    dst: ip("10.0.0.5"),
+                    dst_port: 21,
+                    kind: CredKind::FtpAuth,
+                    note: "USER admin".to_string(),
+                },
+            ],
+            ..Default::default()
+        };
+        let findings = detect(&obs);
+        assert_eq!(findings.len(), 2);
+        let ids: Vec<_> = findings.iter().map(|f| f.id).collect();
+        assert!(ids.contains(&"creds.telnet"));
+        assert!(ids.contains(&"creds.ftp"));
+    }
+
+    #[test]
+    fn empty_input_produces_no_findings() {
+        let obs = Observations::default();
+        assert!(detect(&obs).is_empty());
+    }
+
+    #[test]
+    fn evidence_capped_at_15_destinations() {
+        // 30 distinct destinations, one event each.
+        let events: Vec<CredEvent> = (1..=30u8)
+            .map(|i| telnet_event(&format!("10.0.0.{i}")))
+            .collect();
+        let obs = Observations {
+            cred_events: events,
+            ..Default::default()
+        };
+        let findings = detect(&obs);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].evidence.len(), 15);
+        // Summary still reports the full count even though evidence is capped.
+        assert!(findings[0].summary.contains("30 host(s)"));
     }
 }
