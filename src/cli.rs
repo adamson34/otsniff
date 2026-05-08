@@ -176,6 +176,7 @@ fn run_report(args: ReportArgs) -> Result<()> {
         );
     }
     let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let classification = crate::capture_source::classify(&obs);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
     let html = render_html(
@@ -184,6 +185,7 @@ fn run_report(args: ReportArgs) -> Result<()> {
         &obs,
         &args.input.display().to_string(),
         Utc::now(),
+        Some(&classification),
     )?;
     std::fs::write(&args.output, html).map_err(|source| OtError::WriteOutput {
         path: args.output.clone(),
@@ -222,6 +224,7 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
         );
     }
     let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let classification = crate::capture_source::classify(&obs);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
 
@@ -231,7 +234,14 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
     // saw, which avoids accidentally rewriting IP-shaped substrings in
     // unrelated text.
     let map = build_map(&obs);
-    let raw_md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", Utc::now())?;
+    let raw_md = render_markdown(
+        &inventory,
+        &findings,
+        &obs,
+        "<scrubbed>",
+        Utc::now(),
+        Some(&classification),
+    )?;
     let md = scrub_text(&raw_md, &map);
 
     std::fs::write(&args.output, md).map_err(|source| OtError::WriteOutput {
@@ -265,12 +275,20 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         );
     }
     let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let classification = crate::capture_source::classify(&obs);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
 
     // 1. Build the rules-based markdown report (real values, never sent
     //    to AI).
-    let raw_md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", Utc::now())?;
+    let raw_md = render_markdown(
+        &inventory,
+        &findings,
+        &obs,
+        "<scrubbed>",
+        Utc::now(),
+        Some(&classification),
+    )?;
 
     // 2. Mint pseudonyms and produce the scrubbed payload that will go
     //    to the AI.
@@ -282,8 +300,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     //    invoking the provider.
     leak_detector::ensure_clean(&scrubbed_md)?;
 
-    // 4. Compose the user message (default task + scrubbed report) and
-    //    invoke the provider.
+    // 4. Assemble the system prompt with the capture-source qualifier and
+    //    compose the user message. Both are leak-checked.
+    let system_prompt = prompts::system_prompt_for(classification.ai_qualifier_tag());
+    leak_detector::ensure_clean(&system_prompt)?;
     let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);
     leak_detector::ensure_clean(&user_message)?; // belt-and-braces
 
@@ -294,7 +314,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         );
     }
     let provider = ClaudeCliProvider::new(args.model.clone());
-    let scrubbed_response = provider.analyze(prompts::SYSTEM_PROMPT, &user_message)?;
+    let scrubbed_response = provider.analyze(&system_prompt, &user_message)?;
 
     // 5. Unscrub the AI response on this side of the boundary.
     let (unscrubbed_response, replaced, unmapped) = unscrub_text(&scrubbed_response, &map);
