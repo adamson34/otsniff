@@ -37,6 +37,16 @@ Things that visibly improve tomorrow's report on captures we already test
 against. The 4SICS runs are the benchmark — a P0 item should change those
 outputs in a way an OT defender would notice.
 
+**Track 1 emphasis (next priority).** P0-7 (investigation playbooks) and
+P0-8 (AI-augmented detection) are the items most directly aimed at
+making the tool indispensable through obvious value-add per run, rather
+than expanding reach. They were promoted from P2 after the strategic
+discussion: a single OT defender saving real time on a real capture is
+the difference between "neat tool" and "have to have." Pair P0-7 first
+(no AI dependency, ships standalone), then P0-8 (anchored on richer
+rule coverage). The other P0 items remain valuable but can sequence
+behind these two.
+
 ### P0-1: Finding dedup / rollup (S)
 
 The 4SICS-22 output had 12 duplicate Telnet findings — one per destination
@@ -168,6 +178,100 @@ shipped with ~50 entries.
 "works for any plant we'd realistically see." Trivial to ship, no ongoing
 maintenance burden. **Touches:** `oui.rs` only. **Deps:** none.
 
+### P0-7: Investigation playbooks per finding (M)
+
+Every Finding gains a structured playbook field — concrete next-action
+steps tied to the actual evidence in that finding, not generic advice.
+
+Today the `recommendation` field on each Finding is a static string:
+*"Migrate the device(s) to SSH if supported, or place behind a jump
+host."* Useful but generic — it doesn't reference the actual hosts in
+question, the actual vendor, or the specific tools the on-site engineer
+would use to act on it. The whole point of the tool is to save the
+defender real time, and that means producing output an engineer can act
+on without translation.
+
+What this looks like for a finding like the Modbus engineering-commands
+one on 4SICS-22 (`192.168.2.166` writing coils to three Moxa-OUI
+controllers):
+
+```
+Investigation playbook:
+  1. Identify 192.168.2.166 physically. The MAC is 28:CF:E9:18:B5:ED.
+     Run `show mac address-table address 28cf.e918.b5ed` on the access
+     switch to locate the port.
+  2. Ask the on-shift control engineer whether 192.168.2.166 is the
+     authorized Modbus master for these PLCs. If yes, this finding is
+     expected; the host hygiene (telnet, ftp, smb open) is the issue.
+  3. Pull session/event logs from the three Moxa devices. They'll show
+     which Coil addresses were written — cross-reference against
+     change-management tickets for the capture window.
+  4. If 192.168.2.166 is not the authorized writer, do NOT block at the
+     switch yet. Coordinate with operations — an unexpected ACL on a
+     Modbus master is an availability event.
+  5. After confirmation, ACL the switch port (or VLAN) so only the
+     authorized SCADA host can reach tcp/502 on the controllers.
+```
+
+That's the kind of output that makes the rules-based report useful
+*without* the AI flow being on, and that the AI flow then builds on
+rather than reproducing.
+
+**Why:** the rules-based report becomes valuable to an OT engineer who
+hasn't installed `claude` and doesn't know what `analyze` is. The AI
+flow becomes a multiplier on something already useful, instead of the
+only path to useful output. Track 1's biggest single move.
+
+**Touches:** every detector module under `src/findings/`. Each gets a
+new `playbook: Vec<PlaybookStep>` field on `Finding`, with `PlaybookStep
+{ action: String, references: Vec<EvidenceRef> }`. Renderers (HTML,
+markdown, JSON) gain a Playbook section per finding. Snapshot tests
+extend.
+
+**Deps:** none functionally, but P0-2 (new findings) and P0-3
+(hostname extraction) make the playbooks richer because there's more
+specific evidence to reference. Order: land P0-7 first, then add
+playbook content to new findings as they ship.
+
+### P0-8: AI-augmented detection (M)
+
+Second AI pass anchored on the rules-based findings. After
+`run_all_findings()` produces the deterministic findings, an additional
+`augment_findings()` call hands those findings *plus* the asset
+inventory to the LLM and asks "what else do you see that the rules
+missed, with confidence per item?"
+
+Output: zero or more `AugmentedFinding` records. Each has the same
+shape as a rules-based Finding plus `confidence: Low | Medium | High`
+and `reasoning: String` (the LLM's chain-of-thought, exposed so the
+user can validate). They render in a separate "AI-augmented findings"
+section so a reader can see at a glance which are deterministic and
+which are heuristic.
+
+The 4SICS-22 demo run already showed Claude doing this work informally
+in the AI section — flagging the role-inference misclassifications,
+cross-referencing the same `192.168.2.166` across multiple findings,
+spotting the gateway pattern from MAC sharing. Codifying that as a
+structured second pass means the soft findings appear consistently and
+can be referenced by ID, deduped across runs, and snapshot-tested.
+
+**Why:** the rules layer doesn't cross-reference findings, doesn't
+notice patterns the rules don't already encode, and doesn't critique
+its own role inference. The AI pass does all three. Promoted from P2
+because the existing AI prompt's quality demonstrates this works on
+real data.
+
+**Touches:** new `src/findings/augmented.rs` module. New AI provider
+method (or shared method on `AiProvider`) for the second pass. Prompt
+template committed and snapshot-tested. Renderers gain the new
+section. The privacy invariant test extends to cover the augmented
+prompt path.
+
+**Deps:** P0-2 and P0-3 ideally land first — more rule findings and
+hostname extraction mean richer anchors for the LLM's reasoning.
+Doable in parallel with P0-7 since the entry points are different
+detectors.
+
 ---
 
 ## Mid-term (P1)
@@ -199,7 +303,63 @@ user sees nothing for minutes. Periodic progress (every N packets, or every
 **Why:** quality of life on big captures. Cheap. **Touches:** `cli.rs`,
 `pcap.rs`. **Deps:** none.
 
-### P1-3: Tagged release of the develop accumulation (S)
+### P1-3: Cross-capture diff (M)
+
+`otsniff diff baseline.pcap suspect.pcap --baseline-map baseline.map.json
+--current-map current.map.json -o diff.html`
+
+Compares two captures of the same network and produces a delta:
+
+- Hosts that appeared / disappeared
+- Findings that are new vs. recurring vs. resolved
+- Asset role changes (a host that was an IT endpoint now speaks
+  Modbus, etc.)
+- Comms-matrix shifts (new flow pairs, new ports, traffic-volume
+  deltas above a threshold)
+
+Requires stable pseudonyms across the two runs — the same real IP
+must map to the same `host_NNN` in both maps. P0-3 (hostname
+extraction with persistent maps) provides the foundation; cross-capture
+diff is the user-facing payoff.
+
+**Why:** "what changed since last quarter's scan?" is the highest-value
+question an OT defender asks of repeat captures, and no current open-
+source tool answers it cleanly. Once a customer has six months of
+otsniff runs, switching to anything else throws away the longitudinal
+view. Real network-effect lock-in.
+
+**Touches:** new `src/diff.rs` module. New `diff` CLI subcommand. New
+HTML/Markdown renderers (or extensions to existing). The scrub layer
+gains a "merge maps" operation so pseudonyms are stable across new
+captures of an existing network.
+
+**Deps:** P0-3 (hostname extraction + persistent map operation).
+Promoted from P2 in the Track 1 prioritization.
+
+### P1-4: Prompt evaluation harness (S)
+
+A small `tests/prompt-evals/` directory with committed expected-shape
+outputs for the AI flow. Each eval is a (Observations fixture,
+expected-shape rubric) pair — *not* an exact-string match (LLM output
+is non-deterministic) but a structural rubric: "must contain a Priority
+1 referencing host_001," "must qualify topology claims if capture
+source is host-side," etc.
+
+When a prompt changes, run the evals on the current Claude version,
+compare results against the rubric, surface regressions before they
+ship.
+
+**Why:** prompt tuning becomes "discipline" instead of "vibes." Without
+this, every prompt change is uncovered — we'd find out about
+regressions only when a real user noticed the AI got worse.
+
+**Touches:** new directory `tests/prompt-evals/`, new test harness in
+`tests/`, possibly a `cargo xtask eval-prompts` runner that supports
+the non-deterministic LLM testing pattern.
+
+**Deps:** none.
+
+### P1-5: Tagged release of the develop accumulation (S)
 
 Release PR `develop → main`, decide on version (probably 0.2.0), follow the
 `/release` slash command. Then the four merged features (scrub, analyze,
@@ -253,41 +413,19 @@ together they meaningfully expand what otsniff finds. **Caveat:** moves us
 toward "audit-grade" territory — false positives bite harder when the rule
 references payload bytes.
 
-### P2-4: AI-augmented detection layer (L)
-
-LLM as a soft-detector alongside rules. The rules layer continues finding
-deterministic things; an LLM pass over the observations adds fuzzy findings
-("looks like a programming session," "byte profile is anomalous," "I don't
-recognize this device"). Each soft finding includes the LLM's reasoning so
-the user can validate.
-
-**Why:** the most-different play in the original "AI powers" discussion.
-Hardest to ship well — non-deterministic output, prompt engineering is real
-work, false-positive risk is high in OT. Belongs after we have more rule
-coverage to anchor against.
-
-### P2-5: Multi-capture diff / temporal analysis (L)
-
-`otsniff diff baseline.pcap suspect.pcap` — compare asset inventories and
-findings between two captures of the same plant. Useful for "what changed
-since last quarter's scan."
-
-**Why:** unique to having a stable scrub map (so pseudonyms stay consistent
-across runs). Powerful for change-detection workflows. Big design.
-
-### P2-6: Web playground (L)
+### P2-4: Web playground (L)
 
 `otsniff.example.com` — upload a PCAP, get a report. Real engineering:
 hosting, file-size limits, rate limiting, cost management, abuse vectors,
 TOS. Defer until and unless there's a demonstrated need.
 
-### P2-7: Native packaging (S each, M total)
+### P2-5: Native packaging (S each, M total)
 
 Homebrew formula, Debian/RPM packages, scoop manifest. Requires a stable
-release cadence to be worth automating. **Deps:** P1-3 (a stable v0.2.0 to
+release cadence to be worth automating. **Deps:** P1-5 (a stable v0.2.0 to
 package).
 
-### P2-8: Ollama local provider (M)
+### P2-6: Ollama local provider (M)
 
 Second `AiProvider` implementation alongside `ClaudeCliProvider`. Shells
 out to `ollama run <model>` with the same scrubbed input. Fulfills the
@@ -353,7 +491,7 @@ in docs and to users, not pretend will be fixed by the next feature.
   automation (BACnet) or modern OPC-UA-only deployments.
 - **Capture-source classification can be inconclusive.** Pre-filtered
   captures often classify as "ambiguous" — we report this honestly rather
-  than guess. The override flag (P1-3) is the workaround.
+  than guess. The override flag (P0-5) is the workaround.
 - **No production deployment / real-user feedback loop.** Validated against
   the 4SICS lab captures and a couple of small fixtures. We don't know how
   the tool reads on a real plant capture from a real operator. Without that
