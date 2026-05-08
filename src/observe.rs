@@ -5,7 +5,7 @@
 //! plaintext credentials, external egress). The findings layer reads this
 //! struct after iteration completes — keeps the parse loop tight.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::IpAddr;
 
 use chrono::{DateTime, Utc};
@@ -107,6 +107,15 @@ pub struct Observations {
     pub last_ts: Option<DateTime<Utc>>,
     pub total_packets: u64,
     pub total_bytes: u64,
+    /// Frames where each MAC appeared as src or dst. BTreeMap so iteration
+    /// is deterministic for snapshots and the capture-source classifier.
+    /// A single frame contributes 1 to both endpoints' counts (or 1 if
+    /// src and dst are the same MAC, which would be unusual).
+    pub mac_frame_counts: BTreeMap<[u8; 6], u64>,
+    /// Frames whose destination MAC was broadcast (`ff:ff:ff:ff:ff:ff`)
+    /// or had the multicast bit set. Used by the capture-source detector
+    /// as a SPAN signal.
+    pub broadcast_frames: u64,
 }
 
 pub struct Observer {
@@ -130,6 +139,19 @@ impl Observer {
         let bytes = pkt.payload.len() as u64;
         self.obs.total_packets += 1;
         self.obs.total_bytes += bytes;
+
+        // Capture-source signals: per-MAC frame counts + broadcast tally.
+        // A single frame contributes 1 to src_mac and 1 to dst_mac
+        // (or just 1 if src == dst, which is rare).
+        if pkt.src_mac != [0u8; 6] {
+            *self.obs.mac_frame_counts.entry(pkt.src_mac).or_insert(0) += 1;
+        }
+        if pkt.dst_mac != [0u8; 6] && pkt.dst_mac != pkt.src_mac {
+            *self.obs.mac_frame_counts.entry(pkt.dst_mac).or_insert(0) += 1;
+        }
+        if is_broadcast_or_multicast(&pkt.dst_mac) {
+            self.obs.broadcast_frames += 1;
+        }
         self.obs.first_ts.get_or_insert(pkt.ts);
         self.obs.last_ts = Some(pkt.ts);
 
@@ -335,6 +357,16 @@ impl Observer {
             }
         }
     }
+}
+
+fn is_broadcast_or_multicast(mac: &[u8; 6]) -> bool {
+    if mac == &[0xffu8; 6] {
+        return true;
+    }
+    // IEEE 802.3: the lowest bit of the first byte is the I/G bit (1 =
+    // multicast/broadcast). All Ethernet broadcast and IP-multicast MACs
+    // (e.g., 33:33:... for IPv6) match this.
+    mac[0] & 0x01 != 0
 }
 
 fn flow_key_str(k: &FlowKey) -> String {

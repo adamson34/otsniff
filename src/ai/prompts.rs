@@ -9,15 +9,10 @@
 //! `analyze` invocation leaks those examples into the AI context window
 //! regardless of how good the scrub layer is.
 
-/// System persona + behavior contract.
-///
-/// Three things this needs to communicate clearly:
-///   1. The analyst persona (OT/ICS triage focus).
-///   2. The pseudonym contract — pseudonyms must round-trip cleanly, the
-///      AI must never invent identifiers that look like the pseudonym
-///      vocabulary, must never claim to know real values.
-///   3. The output format (prioritized investigation list, markdown).
-pub const SYSTEM_PROMPT: &str = "\
+/// System persona + behavior contract (base, with no capture-source-specific
+/// qualifier appended). Use `system_prompt_for(tag)` to assemble the full
+/// prompt with the appropriate qualifier added when the source isn't SPAN.
+pub const SYSTEM_PROMPT_BASE: &str = "\
 You are an OT (operational technology) / ICS security triage analyst. The user \
 is going to paste a markdown report produced by a passive PCAP triage tool. The \
 report describes asset inventory, observed flows, and rule-based findings from \
@@ -65,8 +60,32 @@ the rules-based findings already say, say so plainly in one paragraph.
 Output: GitHub-flavored markdown. Start with `## AI-augmented analysis` so \
 it can be appended to the existing report cleanly.";
 
+/// Backwards-compatibility alias used by snapshot tests. Equivalent to
+/// `SYSTEM_PROMPT_BASE`; the dynamic prompt assembly happens in
+/// `system_prompt_for`.
+pub const SYSTEM_PROMPT: &str = SYSTEM_PROMPT_BASE;
+
 /// Default task / user message preamble. The scrubbed report is appended
 /// after this when the prompt is sent.
 pub const DEFAULT_TASK: &str = "\
 Below is a scrubbed otsniff report. Produce a prioritized investigation list \
 following the rules in the system prompt.";
+
+/// Capture-source qualifier appended to the system prompt when the
+/// detector reports anything other than SPAN. The qualifier tells the AI
+/// when not to make confident topology / gateway claims.
+pub fn capture_source_qualifier(tag: &str) -> &'static str {
+    match tag {
+        "host-side" => "\n\nCapture-source qualifier: this capture appears to be host-side (the same MAC dominates nearly every frame as src or dst). MAC-based gateway / topology inference is unreliable on a host-side capture — treat the asset inventory as biased toward the capturing host's peers, not as a complete view of the network. Do not infer L3 topology from shared MACs in this case. \"Internet egress\" findings should be read as \"this host did this,\" not \"this segment did this.\"",
+        "tap" => "\n\nCapture-source qualifier: this capture appears to be a TAP on a single link (two MACs cover nearly every frame). Topology view is limited to that one cable — the asset inventory describes only the two endpoints and what crosses between them. Do not infer broader segment shape from this capture.",
+        "ambiguous" => "\n\nCapture-source qualifier: the capture-source heuristic was inconclusive. Avoid confident topology / gateway claims. If your analysis depends on a specific assumption about where the capture came from, state the assumption.",
+        _ => "", // SPAN — no qualifier needed.
+    }
+}
+
+/// Assemble the full system prompt for a given capture-source tag.
+pub fn system_prompt_for(tag: &str) -> String {
+    let mut s = SYSTEM_PROMPT_BASE.to_string();
+    s.push_str(capture_source_qualifier(tag));
+    s
+}
