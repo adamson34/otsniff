@@ -303,7 +303,63 @@ user sees nothing for minutes. Periodic progress (every N packets, or every
 **Why:** quality of life on big captures. Cheap. **Touches:** `cli.rs`,
 `pcap.rs`. **Deps:** none.
 
-### P1-3: Tagged release of the develop accumulation (S)
+### P1-3: Cross-capture diff (M)
+
+`otsniff diff baseline.pcap suspect.pcap --baseline-map baseline.map.json
+--current-map current.map.json -o diff.html`
+
+Compares two captures of the same network and produces a delta:
+
+- Hosts that appeared / disappeared
+- Findings that are new vs. recurring vs. resolved
+- Asset role changes (a host that was an IT endpoint now speaks
+  Modbus, etc.)
+- Comms-matrix shifts (new flow pairs, new ports, traffic-volume
+  deltas above a threshold)
+
+Requires stable pseudonyms across the two runs — the same real IP
+must map to the same `host_NNN` in both maps. P0-3 (hostname
+extraction with persistent maps) provides the foundation; cross-capture
+diff is the user-facing payoff.
+
+**Why:** "what changed since last quarter's scan?" is the highest-value
+question an OT defender asks of repeat captures, and no current open-
+source tool answers it cleanly. Once a customer has six months of
+otsniff runs, switching to anything else throws away the longitudinal
+view. Real network-effect lock-in.
+
+**Touches:** new `src/diff.rs` module. New `diff` CLI subcommand. New
+HTML/Markdown renderers (or extensions to existing). The scrub layer
+gains a "merge maps" operation so pseudonyms are stable across new
+captures of an existing network.
+
+**Deps:** P0-3 (hostname extraction + persistent map operation).
+Promoted from P2 in the Track 1 prioritization.
+
+### P1-4: Prompt evaluation harness (S)
+
+A small `tests/prompt-evals/` directory with committed expected-shape
+outputs for the AI flow. Each eval is a (Observations fixture,
+expected-shape rubric) pair — *not* an exact-string match (LLM output
+is non-deterministic) but a structural rubric: "must contain a Priority
+1 referencing host_001," "must qualify topology claims if capture
+source is host-side," etc.
+
+When a prompt changes, run the evals on the current Claude version,
+compare results against the rubric, surface regressions before they
+ship.
+
+**Why:** prompt tuning becomes "discipline" instead of "vibes." Without
+this, every prompt change is uncovered — we'd find out about
+regressions only when a real user noticed the AI got worse.
+
+**Touches:** new directory `tests/prompt-evals/`, new test harness in
+`tests/`, possibly a `cargo xtask eval-prompts` runner that supports
+the non-deterministic LLM testing pattern.
+
+**Deps:** none.
+
+### P1-5: Tagged release of the develop accumulation (S)
 
 Release PR `develop → main`, decide on version (probably 0.2.0), follow the
 `/release` slash command. Then the four merged features (scrub, analyze,
@@ -366,7 +422,7 @@ TOS. Defer until and unless there's a demonstrated need.
 ### P2-5: Native packaging (S each, M total)
 
 Homebrew formula, Debian/RPM packages, scoop manifest. Requires a stable
-release cadence to be worth automating. **Deps:** P1-6 (a stable v0.2.0 to
+release cadence to be worth automating. **Deps:** P1-5 (a stable v0.2.0 to
 package).
 
 ### P2-6: Ollama local provider (M)
@@ -435,7 +491,7 @@ in docs and to users, not pretend will be fixed by the next feature.
   automation (BACnet) or modern OPC-UA-only deployments.
 - **Capture-source classification can be inconclusive.** Pre-filtered
   captures often classify as "ambiguous" — we report this honestly rather
-  than guess. The override flag (P1-3) is the workaround.
+  than guess. The override flag (P0-5) is the workaround.
 - **No production deployment / real-user feedback loop.** Validated against
   the 4SICS lab captures and a couple of small fixtures. We don't know how
   the tool reads on a real plant capture from a real operator. Without that
