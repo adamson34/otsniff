@@ -199,7 +199,20 @@ user sees nothing for minutes. Periodic progress (every N packets, or every
 **Why:** quality of life on big captures. Cheap. **Touches:** `cli.rs`,
 `pcap.rs`. **Deps:** none.
 
-### P1-3: Tagged release of the develop accumulation (S)
+### P1-3: Dark-mode HTML report (S)
+
+The HTML report currently has a single light theme. Add a
+`prefers-color-scheme: dark` media query block (or a small toggle in the
+header) so the report respects the reader's system theme. Self-contained
+CSS, no JS dependency.
+
+**Why:** the report is read on whatever the user's terminal / browser is
+configured for. Light-only is jarring at night and out-of-place in any
+dark-themed dashboard the user might embed the file in. ~30 lines of CSS
+in `templates/report.html`. **Touches:** `templates/report.html` only.
+**Deps:** none.
+
+### P1-4: Tagged release of the develop accumulation (S)
 
 Release PR `develop → main`, decide on version (probably 0.2.0), follow the
 `/release` slash command. Then the four merged features (scrub, analyze,
