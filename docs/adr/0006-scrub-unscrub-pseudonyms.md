@@ -102,6 +102,22 @@ the LLM didn't make anything up.
   any prompt; structured output is a v0.3 hardening if/when we see
   enough usage to justify it.
 
+## Audit and process
+
+The systematic audit of the currently-shipped extraction and rendering
+surface against NERC CIP-011 / IEC 62443 lives at
+`docs/audits/scrub-audit-cip011.md`. Every new feature spec must
+declare its scrub stance using the template at
+`docs/specs/scrub-stance-template.md` — answering: what does it
+extract, what does it render, what's the BCSI classification, what's
+the scrub stance. PRs that add extractors or rendered fields without
+that section will be requested to add it.
+
+The audit is re-run when a new event type is added to `Observations`,
+when a new pseudonym class is added, when a new output surface is
+added, or when one of the referenced regulatory frameworks is
+materially updated.
+
 ## Identifier classes and the NERC CIP-011 framing
 
 The pseudonym vocabulary is **extensible by design**, but adding a new

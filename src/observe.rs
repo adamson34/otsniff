@@ -102,6 +102,14 @@ pub struct CredEvent {
     pub dst: IpAddr,
     pub dst_port: u16,
     pub kind: CredKind,
+    /// Internal-only diagnostic captured from the wire. May contain
+    /// CIP-011 High-BCSI bytes (literal `USER` lines, b64-encoded
+    /// HTTP Basic credentials). MUST NOT reach any rendered output
+    /// without first being routed through a scrub class — see
+    /// `docs/audits/scrub-audit-cip011.md` Finding #1. The
+    /// `#[serde(skip)]` keeps it out of any JSON path even if a
+    /// future feature accidentally serializes the parent struct.
+    #[serde(skip)]
     pub note: String,
 }
 
