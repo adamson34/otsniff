@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod capture_source;
 pub mod cli;
 pub mod error;
 pub mod findings;

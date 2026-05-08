@@ -13,6 +13,7 @@ use ipnet::IpNet;
 
 use otsniff::ai::leak_detector;
 use otsniff::ai::prompts;
+use otsniff::capture_source::{classify, CaptureSource, Classification, Confidence};
 use otsniff::findings::run_all;
 use otsniff::inventory::build as build_inventory;
 use otsniff::observe::{
@@ -156,6 +157,8 @@ fn build_fixture() -> Observations {
         last_ts: Some(fixed_ts()),
         total_packets: 505,
         total_bytes: 48_600,
+        mac_frame_counts: std::collections::BTreeMap::new(),
+        broadcast_frames: 0,
     }
 }
 
@@ -170,6 +173,7 @@ fn html_report_snapshot() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
     )
     .unwrap();
     insta::assert_snapshot!("report_html", html);
@@ -192,7 +196,8 @@ fn scrubbed_markdown_snapshot_does_not_leak_real_values() {
     let obs = build_fixture();
     let inventory = build_inventory(&obs);
     let findings = run_all(&obs, &ot_subnets());
-    let raw_md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts()).unwrap();
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
     let map = build_map_at(&obs, fixed_ts());
     let scrubbed = scrub_text(&raw_md, &map);
 
@@ -212,7 +217,8 @@ fn unscrub_round_trip_recovers_real_values() {
     let obs = build_fixture();
     let inventory = build_inventory(&obs);
     let findings = run_all(&obs, &ot_subnets());
-    let raw_md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts()).unwrap();
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
     let map = build_map_at(&obs, fixed_ts());
     let scrubbed = scrub_text(&raw_md, &map);
     let (back, replaced, unmapped) = unscrub_text(&scrubbed, &map);
@@ -245,6 +251,81 @@ fn default_task_snapshot() {
 }
 
 #[test]
+fn system_prompt_for_each_source_tag_snapshots() {
+    // Locks the dynamic prompt assembly. SPAN gets the base; the others
+    // get base + qualifier.
+    insta::assert_snapshot!("ai_prompt_span", prompts::system_prompt_for("span"));
+    insta::assert_snapshot!(
+        "ai_prompt_host_side",
+        prompts::system_prompt_for("host-side")
+    );
+    insta::assert_snapshot!("ai_prompt_tap", prompts::system_prompt_for("tap"));
+    insta::assert_snapshot!(
+        "ai_prompt_ambiguous",
+        prompts::system_prompt_for("ambiguous")
+    );
+}
+
+#[test]
+fn classify_on_default_observations_returns_ambiguous() {
+    // No frame counts populated → not enough signal to classify.
+    let obs = build_fixture();
+    let c = classify(&obs);
+    assert!(matches!(c.source, CaptureSource::Ambiguous { .. }));
+}
+
+#[test]
+fn classification_report_line_does_not_leak_unscrubbed_values_via_pseudonym_path() {
+    // The capture-source line will contain real MAC strings when host-side
+    // or TAP. Verify that a synthetic host-side classification's line, when
+    // run through scrub_text against a map containing that MAC, has the
+    // MAC replaced by a pseudonym (the property the analyze pipeline relies
+    // on for the AI-bound version).
+    let mac = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01];
+    let mac_str = otsniff::oui::format_mac(&mac);
+    let classification = Classification {
+        source: CaptureSource::HostSide {
+            dominant_mac: mac,
+            appearance_pct: 0.99,
+        },
+        confidence: Confidence::High,
+        frames_analyzed: 10_000,
+    };
+    let line = classification.report_line();
+    assert!(line.contains(&mac_str));
+
+    // Build a map that has this MAC in it (simulating the analyze flow).
+    let obs = otsniff::observe::Observations {
+        hosts: {
+            let mut h = std::collections::HashMap::new();
+            h.insert(
+                ip("10.10.0.5"),
+                otsniff::observe::HostObs {
+                    ip: ip("10.10.0.5"),
+                    macs: vec![mac],
+                    protocols: std::collections::HashSet::new(),
+                    first_seen: fixed_ts(),
+                    last_seen: fixed_ts(),
+                    packets: 1,
+                    bytes: 1,
+                    in_ot_zone: true,
+                },
+            );
+            h
+        },
+        ..Default::default()
+    };
+    let map = otsniff::scrub::build_map_at(&obs, fixed_ts());
+    let scrubbed_line = scrub_text(&line, &map);
+    assert!(
+        !scrubbed_line.contains(&mac_str),
+        "real MAC must be replaced by pseudonym; got: {scrubbed_line}"
+    );
+    leak_detector::ensure_clean(&scrubbed_line)
+        .expect("scrubbed capture-source line must pass the leak detector");
+}
+
+#[test]
 fn prompts_contain_no_real_identifiers() {
     // Catches the most common authoring mistake: writing an example IP or
     // MAC into the prompt template. Every analyze run uses these strings,
@@ -265,7 +346,8 @@ fn invariant_no_real_values_reach_ai_provider() {
     let obs = build_fixture();
     let inventory = build_inventory(&obs);
     let findings = run_all(&obs, &ot_subnets());
-    let raw_md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts()).unwrap();
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
     let map = build_map_at(&obs, fixed_ts());
     let scrubbed_md = scrub_text(&raw_md, &map);
     let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);

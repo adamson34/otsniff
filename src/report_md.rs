@@ -12,6 +12,7 @@ use std::fmt::Write;
 
 use chrono::{DateTime, Utc};
 
+use crate::capture_source::Classification;
 use crate::error::Result;
 use crate::findings::{Finding, Severity};
 use crate::inventory::{Asset, Role};
@@ -23,6 +24,7 @@ pub fn render_markdown(
     obs: &Observations,
     input_label: &str,
     generated_at: DateTime<Utc>,
+    capture_source: Option<&Classification>,
 ) -> Result<String> {
     let mut out = String::new();
 
@@ -57,6 +59,9 @@ pub fn render_markdown(
         _ => "(no timestamps)".to_string(),
     };
     writeln!(out, "- **Capture window:** {}", span).unwrap();
+    if let Some(c) = capture_source {
+        writeln!(out, "- **Capture source:** {}", c.report_line()).unwrap();
+    }
     writeln!(out).unwrap();
 
     // Findings
