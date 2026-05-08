@@ -11,7 +11,7 @@ _Source: `<scrubbed>` · Generated: 2026-05-07 12:00:00 UTC · otsniff v0.2.0-de
 - **Packets parsed:** 505
 - **Payload bytes:** 48.6 KB
 - **Hosts seen:** 3 (2 in OT zones)
-- **Findings:** 4
+- **Findings:** 5
 - **Capture window:** 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC
 
 ## Findings
@@ -67,6 +67,19 @@ host_002 -> host_003 : fc=0x05 (Write Single Coil)
 **Recommendation:** Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.
 
 _id: `ics.modbus_writes`_
+
+### [HIGH] S7Comm engineering-class commands on the wire
+
+1 S7 engineering call(s) — 1 download op(s) across 1 client→server pair(s). S7Comm has no authentication; any host that can reach a controller on tcp/102 can read/write variables, download programs, or stop the CPU.
+
+**Evidence (1 sample(s)):**
+```
+host_002 -> host_003 : fc=0x1A (Request download)
+```
+
+**Recommendation:** Limit which engineering workstations can talk to controllers on tcp/102. For S7-1500 / TIA Portal environments, set the controller access level to "no access (complete protection)" or "read access" and require known-fingerprint TLS via Secure Communication. For older S7-300/400, use switch ACLs and physically lock the keyswitch to RUN.
+
+_id: `ics.s7_engineering`_
 
 ## Asset inventory
 
