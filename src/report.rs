@@ -8,6 +8,7 @@
 use askama::Template;
 use chrono::{DateTime, Utc};
 
+use crate::capture_source::Classification;
 use crate::error::Result;
 use crate::findings::{Finding, Severity};
 use crate::inventory::Asset;
@@ -22,6 +23,7 @@ struct ReportView {
     total_packets: String,
     total_bytes: String,
     span: String,
+    capture_source: Option<String>,
     finding_count: usize,
     asset_count: usize,
     ot_asset_count: usize,
@@ -56,6 +58,7 @@ struct TopFlow {
     src: String,
     dst: String,
     label: String,
+    connections: String,
     packets: String,
     bytes: String,
 }
@@ -66,6 +69,7 @@ pub fn render_html(
     obs: &Observations,
     input_label: &str,
     generated_at: DateTime<Utc>,
+    capture_source: Option<&Classification>,
 ) -> Result<String> {
     let span = match (obs.first_ts, obs.last_ts) {
         (Some(a), Some(b)) => format!("{} → {}", fmt_ts(a), fmt_ts(b)),
@@ -78,13 +82,14 @@ pub fn render_html(
         .into_iter()
         .take(25)
         .map(|f| TopFlow {
-            src: format!("{}:{}", f.key.src, f.key.src_port),
+            src: f.key.src.to_string(),
             dst: format!("{}:{}", f.key.dst, f.key.dst_port),
             label: f.label.clone().unwrap_or_else(|| match f.key.proto {
                 6 => "tcp".to_string(),
                 17 => "udp".to_string(),
                 _ => format!("ip/{}", f.key.proto),
             }),
+            connections: f.connections().to_string(),
             packets: f.packets.to_string(),
             bytes: human_bytes(f.bytes),
         })
@@ -129,6 +134,7 @@ pub fn render_html(
         total_packets: obs.total_packets.to_string(),
         total_bytes: human_bytes(obs.total_bytes),
         span,
+        capture_source: capture_source.map(|c| c.report_line()),
         finding_count: findings.len(),
         asset_count: inventory.len(),
         ot_asset_count: inventory.iter().filter(|a| a.in_ot_zone).count(),

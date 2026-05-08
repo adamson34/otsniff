@@ -96,31 +96,33 @@ expression: html
 <h1>otsniff report</h1>
 <div class="meta">
   Source: <code>tests/fixtures/synthetic.pcap</code><br>
-  Generated: 2026-05-07 12:00:00 UTC &middot; otsniff v0.1.0
+  Generated: 2026-05-07 12:00:00 UTC &middot; otsniff v0.2.0
 </div>
 
 <div class="stats">
   <div class="stat"><div class="n">505</div><div class="l">packets parsed</div></div>
   <div class="stat"><div class="n">48.6 KB</div><div class="l">payload bytes</div></div>
   <div class="stat"><div class="n">3</div><div class="l">hosts (2 in OT zones)</div></div>
-  <div class="stat"><div class="n">4</div><div class="l">findings</div></div>
+  <div class="stat"><div class="n">5</div><div class="l">findings</div></div>
 </div>
 <div class="muted" style="margin-bottom:1rem;">Capture window: 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC</div>
+
+
 
 <h2>Findings</h2>
 
   
   <div class="finding sev-critical">
     <h3><span class="badge sev-critical">critical</span>Telnet session observed (cleartext by definition)</h3>
-    <div>1 Telnet packet(s) seen to 10.10.0.20:23. Credentials traversing this flow should be considered exposed.</div>
+    <div>1 Telnet packet(s) seen across 1 host(s). Credentials traversing these flows should be considered exposed.</div>
     
     <details>
       <summary>Evidence (1 sample)</summary>
-      <pre class="evidence">Telnet session (cleartext)
+      <pre class="evidence">10.10.0.20:23 (1 packet(s))
 </pre>
     </details>
     
-    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Migrate the device to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.</div>
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Migrate the device(s) to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.</div>
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>creds.telnet</code></div>
   </div>
   
@@ -164,6 +166,20 @@ expression: html
     
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.</div>
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.modbus_writes</code></div>
+  </div>
+  
+  <div class="finding sev-high">
+    <h3><span class="badge sev-high">high</span>S7Comm engineering-class commands on the wire</h3>
+    <div>1 S7 engineering call(s) — 1 download op(s) across 1 client→server pair(s). S7Comm has no authentication; any host that can reach a controller on tcp/102 can read/write variables, download programs, or stop the CPU.</div>
+    
+    <details>
+      <summary>Evidence (1 sample)</summary>
+      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20 : fc=0x1A (Request download)
+</pre>
+    </details>
+    
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Limit which engineering workstations can talk to controllers on tcp/102. For S7-1500 / TIA Portal environments, set the controller access level to &quot;no access (complete protection)&quot; or &quot;read access&quot; and require known-fingerprint TLS via Secure Communication. For older S7-300/400, use switch ACLs and physically lock the keyswitch to RUN.</div>
+    <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.s7_engineering</code></div>
   </div>
   
 
@@ -214,22 +230,24 @@ expression: html
 <h2>Top flows</h2>
 <table>
   <thead><tr>
-    <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Packets</th><th class="num">Bytes</th>
+    <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Conns</th><th class="num">Packets</th><th class="num">Bytes</th>
   </tr></thead>
   <tbody>
   
     <tr>
-      <td><code>10.10.0.5:54000</code></td>
+      <td><code>10.10.0.5</code></td>
       <td><code>10.10.0.20:502</code></td>
       <td>modbus</td>
+      <td class="num">1</td>
       <td class="num">500</td>
       <td class="num">48.0 KB</td>
     </tr>
   
     <tr>
-      <td><code>10.10.0.5:54200</code></td>
+      <td><code>10.10.0.5</code></td>
       <td><code>8.8.8.8:80</code></td>
       <td>http</td>
+      <td class="num">1</td>
       <td class="num">5</td>
       <td class="num">600.0 B</td>
     </tr>

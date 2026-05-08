@@ -1,6 +1,6 @@
 [package]
 name = "otsniff"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
 description = "One-shot OT-aware PCAP triage. Feed it a span-port capture, get an exec-readable HTML report."
@@ -19,6 +19,7 @@ serde_json = "1"
 thiserror = "2"
 ipnet = { version = "2.10", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+regex = "1.11"
 
 [dev-dependencies]
 pretty_assertions = "1.4"

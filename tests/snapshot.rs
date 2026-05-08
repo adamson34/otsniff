@@ -11,13 +11,18 @@ use std::net::{IpAddr, Ipv4Addr};
 use chrono::{TimeZone, Utc};
 use ipnet::IpNet;
 
+use otsniff::ai::leak_detector;
+use otsniff::ai::prompts;
+use otsniff::capture_source::{classify, CaptureSource, Classification, Confidence};
 use otsniff::findings::run_all;
 use otsniff::inventory::build as build_inventory;
 use otsniff::observe::{
     CredEvent, CredKind, EnipEvent, ExternalFlow, FlowKey, FlowObs, HostObs, ModbusEvent,
-    Observations,
+    Observations, S7Event,
 };
 use otsniff::report::render_html;
+use otsniff::report_md::render_markdown;
+use otsniff::scrub::{build_map_at, scrub_text, unscrub_text};
 
 fn fixed_ts() -> chrono::DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap()
@@ -78,7 +83,6 @@ fn build_fixture() -> Observations {
         key: FlowKey {
             src: ip("10.10.0.5"),
             dst: ip("10.10.0.20"),
-            src_port: 54000,
             dst_port: 502,
             proto: 6,
         },
@@ -87,6 +91,7 @@ fn build_fixture() -> Observations {
         first_seen: fixed_ts(),
         last_seen: fixed_ts(),
         label: Some("modbus".to_string()),
+        unique_src_ports: HashSet::from([54000]),
     };
     flows.insert("a".to_string(), modbus_flow);
 
@@ -94,7 +99,6 @@ fn build_fixture() -> Observations {
         key: FlowKey {
             src: ip("10.10.0.5"),
             dst: ip("8.8.8.8"),
-            src_port: 54200,
             dst_port: 80,
             proto: 6,
         },
@@ -103,6 +107,7 @@ fn build_fixture() -> Observations {
         first_seen: fixed_ts(),
         last_seen: fixed_ts(),
         label: Some("http".to_string()),
+        unique_src_ports: HashSet::from([54200]),
     };
     flows.insert("b".to_string(), egress_flow);
 
@@ -139,6 +144,15 @@ fn build_fixture() -> Observations {
             cip_service: Some("Stop".to_string()),
             engineering_class: true,
         }],
+        s7_events: vec![S7Event {
+            ts: fixed_ts(),
+            src: ip("10.10.0.5"),
+            dst: ip("10.10.0.20"),
+            function_code: 0x1A,
+            label: "Request download".to_string(),
+            engineering_class: true,
+            read_class: false,
+        }],
         cred_events: vec![CredEvent {
             ts: fixed_ts(),
             src: ip("10.10.0.5"),
@@ -152,6 +166,8 @@ fn build_fixture() -> Observations {
         last_ts: Some(fixed_ts()),
         total_packets: 505,
         total_bytes: 48_600,
+        mac_frame_counts: std::collections::BTreeMap::new(),
+        broadcast_frames: 0,
     }
 }
 
@@ -166,6 +182,7 @@ fn html_report_snapshot() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
     )
     .unwrap();
     insta::assert_snapshot!("report_html", html);
@@ -181,4 +198,173 @@ fn findings_json_snapshot() {
         "findings": findings,
     });
     insta::assert_json_snapshot!("findings_json", payload);
+}
+
+#[test]
+fn scrubbed_markdown_snapshot_does_not_leak_real_values() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed = scrub_text(&raw_md, &map);
+
+    // Hard assertions: no real value from the fixture should survive.
+    assert!(!scrubbed.contains("10.10.0.5"));
+    assert!(!scrubbed.contains("10.10.0.20"));
+    assert!(!scrubbed.contains("AA:BB:CC:DD:EE:01"));
+    // 8.8.8.8 is observed in the fixture (external_flows), so it gets a
+    // pseudonym; verify it's gone too.
+    assert!(!scrubbed.contains("8.8.8.8"));
+
+    insta::assert_snapshot!("scrubbed_markdown", scrubbed);
+}
+
+#[test]
+fn unscrub_round_trip_recovers_real_values() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed = scrub_text(&raw_md, &map);
+    let (back, replaced, unmapped) = unscrub_text(&scrubbed, &map);
+
+    assert_eq!(back, raw_md, "unscrub should perfectly reverse scrub");
+    assert!(replaced > 0, "expected at least some pseudonyms replaced");
+    assert!(
+        unmapped.is_empty(),
+        "no unmapped pseudonyms expected on round-trip"
+    );
+}
+
+#[test]
+fn scrub_map_snapshot() {
+    let obs = build_fixture();
+    let map = build_map_at(&obs, fixed_ts());
+    insta::assert_json_snapshot!("scrub_map", map);
+}
+
+#[test]
+fn system_prompt_snapshot() {
+    // Locks the OT-analyst persona contract. Any change to behavior
+    // requires explicit snapshot review.
+    insta::assert_snapshot!("ai_system_prompt", prompts::SYSTEM_PROMPT);
+}
+
+#[test]
+fn default_task_snapshot() {
+    insta::assert_snapshot!("ai_default_task", prompts::DEFAULT_TASK);
+}
+
+#[test]
+fn system_prompt_for_each_source_tag_snapshots() {
+    // Locks the dynamic prompt assembly. SPAN gets the base; the others
+    // get base + qualifier.
+    insta::assert_snapshot!("ai_prompt_span", prompts::system_prompt_for("span"));
+    insta::assert_snapshot!(
+        "ai_prompt_host_side",
+        prompts::system_prompt_for("host-side")
+    );
+    insta::assert_snapshot!("ai_prompt_tap", prompts::system_prompt_for("tap"));
+    insta::assert_snapshot!(
+        "ai_prompt_ambiguous",
+        prompts::system_prompt_for("ambiguous")
+    );
+}
+
+#[test]
+fn classify_on_default_observations_returns_ambiguous() {
+    // No frame counts populated → not enough signal to classify.
+    let obs = build_fixture();
+    let c = classify(&obs);
+    assert!(matches!(c.source, CaptureSource::Ambiguous { .. }));
+}
+
+#[test]
+fn classification_report_line_does_not_leak_unscrubbed_values_via_pseudonym_path() {
+    // The capture-source line will contain real MAC strings when host-side
+    // or TAP. Verify that a synthetic host-side classification's line, when
+    // run through scrub_text against a map containing that MAC, has the
+    // MAC replaced by a pseudonym (the property the analyze pipeline relies
+    // on for the AI-bound version).
+    let mac = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01];
+    let mac_str = otsniff::oui::format_mac(&mac);
+    let classification = Classification {
+        source: CaptureSource::HostSide {
+            dominant_mac: mac,
+            appearance_pct: 0.99,
+        },
+        confidence: Confidence::High,
+        frames_analyzed: 10_000,
+    };
+    let line = classification.report_line();
+    assert!(line.contains(&mac_str));
+
+    // Build a map that has this MAC in it (simulating the analyze flow).
+    let obs = otsniff::observe::Observations {
+        hosts: {
+            let mut h = std::collections::HashMap::new();
+            h.insert(
+                ip("10.10.0.5"),
+                otsniff::observe::HostObs {
+                    ip: ip("10.10.0.5"),
+                    macs: vec![mac],
+                    protocols: std::collections::HashSet::new(),
+                    first_seen: fixed_ts(),
+                    last_seen: fixed_ts(),
+                    packets: 1,
+                    bytes: 1,
+                    in_ot_zone: true,
+                },
+            );
+            h
+        },
+        ..Default::default()
+    };
+    let map = otsniff::scrub::build_map_at(&obs, fixed_ts());
+    let scrubbed_line = scrub_text(&line, &map);
+    assert!(
+        !scrubbed_line.contains(&mac_str),
+        "real MAC must be replaced by pseudonym; got: {scrubbed_line}"
+    );
+    leak_detector::ensure_clean(&scrubbed_line)
+        .expect("scrubbed capture-source line must pass the leak detector");
+}
+
+#[test]
+fn prompts_contain_no_real_identifiers() {
+    // Catches the most common authoring mistake: writing an example IP or
+    // MAC into the prompt template. Every analyze run uses these strings,
+    // so any leak here leaks on every invocation regardless of the
+    // scrubber.
+    leak_detector::ensure_clean(prompts::SYSTEM_PROMPT)
+        .expect("system prompt should not contain real-looking identifiers");
+    leak_detector::ensure_clean(prompts::DEFAULT_TASK)
+        .expect("default task should not contain real-looking identifiers");
+}
+
+#[test]
+fn invariant_no_real_values_reach_ai_provider() {
+    // The load-bearing test for the AI feature: build the exact bytes
+    // that `analyze` would send to the provider and run them through the
+    // leak detector. If this ever fails, the AI feature is unsafe to
+    // ship.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed_md = scrub_text(&raw_md, &map);
+    let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);
+
+    // System prompt must also be clean (sent on every call).
+    leak_detector::ensure_clean(prompts::SYSTEM_PROMPT)
+        .expect("system prompt leak — would reach AI on every analyze call");
+    // Combined user message: default task + scrubbed report.
+    leak_detector::ensure_clean(&user_message)
+        .expect("user message leak — scrubbed payload contains an unscrubbed identifier");
 }

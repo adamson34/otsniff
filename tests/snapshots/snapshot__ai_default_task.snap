@@ -1,0 +1,5 @@
+---
+source: tests/snapshot.rs
+expression: "prompts::DEFAULT_TASK"
+---
+Below is a scrubbed otsniff report. Produce a prioritized investigation list following the rules in the system prompt.

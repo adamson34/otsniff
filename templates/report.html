@@ -102,6 +102,10 @@
   <div class="stat"><div class="n">{{ finding_count }}</div><div class="l">findings</div></div>
 </div>
 <div class="muted" style="margin-bottom:1rem;">Capture window: {{ span }}</div>
+{% match capture_source %}{% when Some with (line) %}
+<div class="muted" style="margin-bottom:1rem;"><strong>Capture source:</strong> {{ line }}</div>
+{% when None %}
+{% endmatch %}
 
 <h2>Findings</h2>
 {% if findings.is_empty() %}
@@ -148,7 +152,7 @@
 <h2>Top flows</h2>
 <table>
   <thead><tr>
-    <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Packets</th><th class="num">Bytes</th>
+    <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Conns</th><th class="num">Packets</th><th class="num">Bytes</th>
   </tr></thead>
   <tbody>
   {% for f in top_flows %}
@@ -156,6 +160,7 @@
       <td><code>{{ f.src }}</code></td>
       <td><code>{{ f.dst }}</code></td>
       <td>{{ f.label }}</td>
+      <td class="num">{{ f.connections }}</td>
       <td class="num">{{ f.packets }}</td>
       <td class="num">{{ f.bytes }}</td>
     </tr>

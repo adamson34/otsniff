@@ -5,14 +5,14 @@
 //! plaintext credentials, external egress). The findings layer reads this
 //! struct after iteration completes — keeps the parse loop tight.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::IpAddr;
 
 use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{enip, modbus};
+use crate::parse::{enip, modbus, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -27,11 +27,15 @@ pub struct HostObs {
     pub in_ot_zone: bool,
 }
 
+/// Logical flow key: aggregates by source IP, destination IP+port, and
+/// transport protocol. Source port is intentionally excluded — TCP/UDP
+/// source ports are ephemeral, so including them in the key produced a
+/// noisy comms matrix where each TCP connection appeared as a separate
+/// flow. See docs/specs/flow-grouping.md.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
 pub struct FlowKey {
     pub src: IpAddr,
     pub dst: IpAddr,
-    pub src_port: u16,
     pub dst_port: u16,
     pub proto: u8,
 }
@@ -44,6 +48,19 @@ pub struct FlowObs {
     pub first_seen: DateTime<Utc>,
     pub last_seen: DateTime<Utc>,
     pub label: Option<String>,
+    /// Distinct source ports observed for this logical flow. The size of
+    /// this set is the number of TCP/UDP connections (or unconnected
+    /// datagram sources) that contributed to the flow. Bursts of unique
+    /// connections are themselves a signal — typical of probe / scan /
+    /// fuzz traffic.
+    pub unique_src_ports: HashSet<u16>,
+}
+
+impl FlowObs {
+    /// Number of distinct source ports seen for this logical flow.
+    pub fn connections(&self) -> usize {
+        self.unique_src_ports.len()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,6 +82,17 @@ pub struct EnipEvent {
     pub command_label: String,
     pub cip_service: Option<String>,
     pub engineering_class: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct S7Event {
+    pub ts: DateTime<Utc>,
+    pub src: IpAddr,
+    pub dst: IpAddr,
+    pub function_code: u8,
+    pub label: String,
+    pub engineering_class: bool,
+    pub read_class: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -101,12 +129,22 @@ pub struct Observations {
     pub flows: HashMap<String, FlowObs>,
     pub modbus_events: Vec<ModbusEvent>,
     pub enip_events: Vec<EnipEvent>,
+    pub s7_events: Vec<S7Event>,
     pub cred_events: Vec<CredEvent>,
     pub external_flows: HashMap<String, ExternalFlow>,
     pub first_ts: Option<DateTime<Utc>>,
     pub last_ts: Option<DateTime<Utc>>,
     pub total_packets: u64,
     pub total_bytes: u64,
+    /// Frames where each MAC appeared as src or dst. BTreeMap so iteration
+    /// is deterministic for snapshots and the capture-source classifier.
+    /// A single frame contributes 1 to both endpoints' counts (or 1 if
+    /// src and dst are the same MAC, which would be unusual).
+    pub mac_frame_counts: BTreeMap<[u8; 6], u64>,
+    /// Frames whose destination MAC was broadcast (`ff:ff:ff:ff:ff:ff`)
+    /// or had the multicast bit set. Used by the capture-source detector
+    /// as a SPAN signal.
+    pub broadcast_frames: u64,
 }
 
 pub struct Observer {
@@ -130,6 +168,19 @@ impl Observer {
         let bytes = pkt.payload.len() as u64;
         self.obs.total_packets += 1;
         self.obs.total_bytes += bytes;
+
+        // Capture-source signals: per-MAC frame counts + broadcast tally.
+        // A single frame contributes 1 to src_mac and 1 to dst_mac
+        // (or just 1 if src == dst, which is rare).
+        if pkt.src_mac != [0u8; 6] {
+            *self.obs.mac_frame_counts.entry(pkt.src_mac).or_insert(0) += 1;
+        }
+        if pkt.dst_mac != [0u8; 6] && pkt.dst_mac != pkt.src_mac {
+            *self.obs.mac_frame_counts.entry(pkt.dst_mac).or_insert(0) += 1;
+        }
+        if is_broadcast_or_multicast(&pkt.dst_mac) {
+            self.obs.broadcast_frames += 1;
+        }
         self.obs.first_ts.get_or_insert(pkt.ts);
         self.obs.last_ts = Some(pkt.ts);
 
@@ -144,12 +195,12 @@ impl Observer {
         let key = FlowKey {
             src: pkt.src_ip,
             dst: pkt.dst_ip,
-            src_port: pkt.src_port,
             dst_port: pkt.dst_port,
             proto: proto_byte,
         };
         let key_str = flow_key_str(&key);
         let label = classify_flow(pkt);
+        let src_port = pkt.src_port;
         self.obs
             .flows
             .entry(key_str)
@@ -157,17 +208,23 @@ impl Observer {
                 f.packets += 1;
                 f.bytes += bytes;
                 f.last_seen = pkt.ts;
+                f.unique_src_ports.insert(src_port);
                 if f.label.is_none() {
                     f.label = label.clone();
                 }
             })
-            .or_insert_with(|| FlowObs {
-                key: key.clone(),
-                packets: 1,
-                bytes,
-                first_seen: pkt.ts,
-                last_seen: pkt.ts,
-                label,
+            .or_insert_with(|| {
+                let mut ports = HashSet::new();
+                ports.insert(src_port);
+                FlowObs {
+                    key: key.clone(),
+                    packets: 1,
+                    bytes,
+                    first_seen: pkt.ts,
+                    last_seen: pkt.ts,
+                    label,
+                    unique_src_ports: ports,
+                }
             });
 
         // Protocol-specific observations
@@ -242,6 +299,21 @@ impl Observer {
                     function_code: pdu.function_code,
                     label: pdu.label().to_string(),
                     engineering_class: pdu.is_engineering_class(),
+                });
+            }
+        }
+
+        // S7Comm (Siemens S7-1200/300/400, TCP/102)
+        if pkt.dst_port == s7comm::PORT || pkt.src_port == s7comm::PORT {
+            if let Some(pdu) = s7comm::parse(payload) {
+                self.obs.s7_events.push(S7Event {
+                    ts: pkt.ts,
+                    src: pkt.src_ip,
+                    dst: pkt.dst_ip,
+                    function_code: pdu.function_code,
+                    label: pdu.label().to_string(),
+                    engineering_class: pdu.is_engineering_class(),
+                    read_class: pdu.is_read_class(),
                 });
             }
         }
@@ -337,11 +409,18 @@ impl Observer {
     }
 }
 
+fn is_broadcast_or_multicast(mac: &[u8; 6]) -> bool {
+    if mac == &[0xffu8; 6] {
+        return true;
+    }
+    // IEEE 802.3: the lowest bit of the first byte is the I/G bit (1 =
+    // multicast/broadcast). All Ethernet broadcast and IP-multicast MACs
+    // (e.g., 33:33:... for IPv6) match this.
+    mac[0] & 0x01 != 0
+}
+
 fn flow_key_str(k: &FlowKey) -> String {
-    format!(
-        "{}:{}->{}:{}/{}",
-        k.src, k.src_port, k.dst, k.dst_port, k.proto
-    )
+    format!("{}->{}:{}/{}", k.src, k.dst, k.dst_port, k.proto)
 }
 
 fn classify_flow(pkt: &Packet) -> Option<String> {

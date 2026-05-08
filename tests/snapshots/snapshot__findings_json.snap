@@ -6,12 +6,12 @@ expression: payload
   "findings": [
     {
       "evidence": [
-        "Telnet session (cleartext)"
+        "10.10.0.20:23 (1 packet(s))"
       ],
       "id": "creds.telnet",
-      "recommendation": "Migrate the device to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.",
+      "recommendation": "Migrate the device(s) to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.",
       "severity": "Critical",
-      "summary": "1 Telnet packet(s) seen to 10.10.0.20:23. Credentials traversing this flow should be considered exposed.",
+      "summary": "1 Telnet packet(s) seen across 1 host(s). Credentials traversing these flows should be considered exposed.",
       "title": "Telnet session observed (cleartext by definition)"
     },
     {
@@ -43,6 +43,16 @@ expression: payload
       "severity": "High",
       "summary": "1 write/diagnostic Modbus call(s) observed across 1 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.",
       "title": "Modbus engineering-class commands on the wire"
+    },
+    {
+      "evidence": [
+        "10.10.0.5 -> 10.10.0.20 : fc=0x1A (Request download)"
+      ],
+      "id": "ics.s7_engineering",
+      "recommendation": "Limit which engineering workstations can talk to controllers on tcp/102. For S7-1500 / TIA Portal environments, set the controller access level to \"no access (complete protection)\" or \"read access\" and require known-fingerprint TLS via Secure Communication. For older S7-300/400, use switch ACLs and physically lock the keyswitch to RUN.",
+      "severity": "High",
+      "summary": "1 S7 engineering call(s) — 1 download op(s) across 1 client→server pair(s). S7Comm has no authentication; any host that can reach a controller on tcp/102 can read/write variables, download programs, or stop the CPU.",
+      "title": "S7Comm engineering-class commands on the wire"
     }
   ],
   "inventory": [
