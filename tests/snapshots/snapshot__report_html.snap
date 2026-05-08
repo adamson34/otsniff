@@ -118,7 +118,7 @@ expression: html
   <div class="stat"><div class="n">505</div><div class="l">packets parsed</div></div>
   <div class="stat"><div class="n">48.6 KB</div><div class="l">payload bytes</div></div>
   <div class="stat"><div class="n">3</div><div class="l">hosts (2 in OT zones)</div></div>
-  <div class="stat"><div class="n">5</div><div class="l">findings</div></div>
+  <div class="stat"><div class="n">8</div><div class="l">findings</div></div>
 </div>
 <div class="muted" style="margin-bottom:1rem;">Capture window: 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC</div>
 
@@ -169,6 +169,28 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>egress.ot_to_internet</code></div>
+  </div>
+  
+  <div class="finding sev-high">
+    <h3><span class="badge sev-high">high</span>SMBv1 traffic on the wire</h3>
+    <div>12 SMBv1 packet(s) seen across 1 host pair(s). SMBv1 is deprecated, blocked by default in modern Windows, and a known exploitation surface (WannaCry / EternalBlue). Its presence indicates legacy clients, legacy servers, or both.</div>
+    
+    <details>
+      <summary>Evidence (1 sample)</summary>
+      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20:445 (12 SMBv1 packet(s))
+</pre>
+    </details>
+    
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Identify the legacy hosts and migrate to SMBv2/v3 or retire. Disable SMB1 via Group Policy on Windows hosts. SMBv1 is the protocol EternalBlue / WannaCry exploited; its presence is a known-bad pattern.</div>
+    
+    <details open>
+      <summary>Investigation playbook (5 steps)</summary>
+      <ol class="playbook">
+        <li>Identify the hosts physically: `10.10.0.5` and `10.10.0.20`. Walk each MAC to a switch port using the asset inventory&#x27;s MAC for that host.</li><li>For Windows hosts: disable SMB1 via Group Policy (Computer Configuration → Policies → Windows Settings → Security Settings → ...) or PowerShell (`Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol`). After SMB1 is off, a host that legitimately needed it will fail loudly — better than failing silently.</li><li>For embedded / OT-class devices that can only speak SMB1 (older Moxa NAS, legacy HMI file shares): isolate on a hardened management VLAN, document the exception with a decommission target date. Do not just leave it on the OT VLAN with no plan.</li><li>Patch / decommission known-vulnerable Windows versions (Windows 7, Server 2008 / 2008 R2 without SMB1-disable) that depend on SMB1 for file shares. These are the hosts WannaCry-class malware actually pivoted through.</li><li>Audit the OT-zone firewall ruleset for SMB allow rules between zones. SMB / CIFS file transfer should not cross the IT/OT boundary in either direction outside narrow, documented operational paths.</li>
+      </ol>
+    </details>
+    
+    <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>compat.smbv1</code></div>
   </div>
   
   <div class="finding sev-high">
@@ -237,6 +259,50 @@ expression: html
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.s7_engineering</code></div>
   </div>
   
+  <div class="finding sev-medium">
+    <h3><span class="badge sev-medium">medium</span>DNS queries to a non-OT resolver</h3>
+    <div>1 OT host(s) sending DNS queries to resolvers outside the configured OT subnets (100 total query packet(s)). Cross-zone DNS leaks query patterns to the IT side and trusts an external resolver&#x27;s answers. Both belong on the OT side under change control.</div>
+    
+    <details>
+      <summary>Evidence (1 sample)</summary>
+      <pre class="evidence">10.10.0.5 -&gt; 8.8.8.8:53 (UDP/TCP, 100 packet(s))
+</pre>
+    </details>
+    
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Repoint OT hosts at an in-zone (or DMZ-relayed) DNS resolver. Add an outbound UDP/53 deny rule at the IT/OT boundary for everything except the sanctioned resolver(s).</div>
+    
+    <details open>
+      <summary>Investigation playbook (5 steps)</summary>
+      <ol class="playbook">
+        <li>Identify each source host&#x27;s configured DNS server: `10.10.0.5`. On Windows: `ipconfig /all` shows DNS Servers per interface. On Linux: `/etc/resolv.conf` (or `systemd-resolve --status` on systemd hosts). Don&#x27;t change anything yet — read-only check.</li><li>Verify whether an in-zone resolver exists. The asset inventory in this report shows which OT hosts speak DNS — a host running a DNS server on the OT side will show up with `dns` in its protocol list. If one exists, the listed clients should point at it.</li><li>If no in-zone resolver: stand one up in the OT zone (or a dedicated DMZ). Configure it with a strict upstream relationship — only resolves a known set of plant-relevant names; everything else fails closed. CoreDNS or BIND with a small zone file is the standard pattern here.</li><li>Once OT clients are repointed at the in-zone resolver, add an outbound UDP/53 deny rule at the IT/OT firewall for OT subnets that aren&#x27;t the resolver itself. This catches any host that gets reverted to its old config and prevents cross-zone DNS from being a quiet failure mode.</li><li>Cross-reference the destination resolver IPs against your IT team&#x27;s documented DNS infrastructure. If a host is querying a known public resolver (Google, Cloudflare, etc.) that&#x27;s a different problem than querying an internal IT resolver — the public case is also caught by the egress finding; the internal case is a routing / config gap on the OT side.</li>
+      </ol>
+    </details>
+    
+    <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>boundary.dns_resolver</code></div>
+  </div>
+  
+  <div class="finding sev-medium">
+    <h3><span class="badge sev-medium">medium</span>Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1)</h3>
+    <div>4 ClientHello(s) using deprecated TLS versions seen across 1 host pair(s): TLS 1.0 (4 hello(s)). These versions are deprecated and blocked by default in modern Windows / browsers. Their presence indicates legacy clients (older Java runtimes, embedded devices) or legacy services.</div>
+    
+    <details>
+      <summary>Evidence (1 sample)</summary>
+      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20:443 : TLS 1.0 (4 hello(s))
+</pre>
+    </details>
+    
+    <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Identify the source clients and services. Modern Windows blocks TLS 1.0/1.1 by default; their presence indicates legacy clients (older Java, embedded devices) or services worth replacing. Cipher suites available at these versions are vulnerable to BEAST / POODLE / downgrade attacks.</div>
+    
+    <details open>
+      <summary>Investigation playbook (5 steps)</summary>
+      <ol class="playbook">
+        <li>Identify the source hosts and the services they&#x27;re connecting to: `10.10.0.5`. A legacy TLS ClientHello almost always traces to one of: an older Java runtime, a Windows host with TLS 1.0/1.1 still enabled in Schannel, or an embedded device whose firmware predates TLS 1.2.</li><li>For Windows clients: confirm TLS 1.2+ is enabled and TLS 1.0 / TLS 1.1 / SSL 3.0 are disabled in Schannel registry settings (HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols). Microsoft has a tested registry script for this — use that, don&#x27;t hand-edit.</li><li>For services / servers: upgrade the TLS implementation. If it&#x27;s an embedded device that only supports TLS 1.0 (older Moxa, older Schneider HMIs), put it behind a TLS-terminating reverse proxy that speaks modern TLS to clients.</li><li>Treat any captured authentication traffic from these connections as suspect — cipher suites available with TLS 1.0/1.1 are vulnerable to known attacks (BEAST, POODLE, downgrade-to-RC4). Rotate any credentials or session tokens that crossed these flows.</li><li>Audit the firewall ruleset for outbound TLS to legacy services on OT — the modern answer is &quot;only allow tcp/443 to a known set of update servers and vendor cloud endpoints, all of which speak TLS 1.2+.&quot;</li>
+      </ol>
+    </details>
+    
+    <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>compat.stale_tls</code></div>
+  </div>
+  
 
 
 <h2>Asset inventory</h2>
@@ -296,6 +362,15 @@ expression: html
       <td class="num">1</td>
       <td class="num">500</td>
       <td class="num">48.0 KB</td>
+    </tr>
+  
+    <tr>
+      <td><code>10.10.0.5</code></td>
+      <td><code>8.8.8.8:53</code></td>
+      <td>dns</td>
+      <td class="num">1</td>
+      <td class="num">100</td>
+      <td class="num">8.0 KB</td>
     </tr>
   
     <tr>

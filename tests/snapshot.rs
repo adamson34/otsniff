@@ -111,6 +111,23 @@ fn build_fixture() -> Observations {
     };
     flows.insert("b".to_string(), egress_flow);
 
+    // DNS to a non-OT resolver — exercises boundary.dns_resolver finding
+    let dns_flow = FlowObs {
+        key: FlowKey {
+            src: ip("10.10.0.5"),
+            dst: ip("8.8.8.8"),
+            dst_port: 53,
+            proto: 17,
+        },
+        packets: 100,
+        bytes: 8_000,
+        first_seen: fixed_ts(),
+        last_seen: fixed_ts(),
+        label: Some("dns".to_string()),
+        unique_src_ports: HashSet::from([55300]),
+    };
+    flows.insert("dns".to_string(), dns_flow);
+
     let mut external_flows = HashMap::new();
     external_flows.insert(
         "ext-1".to_string(),
@@ -168,6 +185,16 @@ fn build_fixture() -> Observations {
         total_bytes: 48_600,
         mac_frame_counts: std::collections::BTreeMap::new(),
         broadcast_frames: 0,
+        smbv1_packets: {
+            let mut m = HashMap::new();
+            m.insert((ip("10.10.0.5"), ip("10.10.0.20"), 445), 12);
+            m
+        },
+        tls_client_hellos: {
+            let mut m = HashMap::new();
+            m.insert((ip("10.10.0.5"), ip("10.10.0.20"), 443, 0x0301), 4);
+            m
+        },
     }
 }
 
