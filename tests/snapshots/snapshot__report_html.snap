@@ -96,7 +96,7 @@ expression: html
 <h1>otsniff report</h1>
 <div class="meta">
   Source: <code>tests/fixtures/synthetic.pcap</code><br>
-  Generated: 2026-05-07 12:00:00 UTC &middot; otsniff v0.2.0-dev.1
+  Generated: 2026-05-07 12:00:00 UTC &middot; otsniff v0.2.0
 </div>
 
 <div class="stats">
