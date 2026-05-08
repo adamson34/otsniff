@@ -101,10 +101,7 @@ pub fn parse(payload: &[u8]) -> Option<DhcpInfo> {
         return None;
     };
 
-    Some(DhcpInfo {
-        ip,
-        hostname: name,
-    })
+    Some(DhcpInfo { ip, hostname: name })
 }
 
 #[cfg(test)]
@@ -123,15 +120,7 @@ mod tests {
 
     #[test]
     fn dhcp_ack_with_yiaddr_and_hostname() {
-        let opts = [
-            OPT_HOSTNAME,
-            5,
-            b'P',
-            b'L',
-            b'C',
-            b'-',
-            b'1',
-        ];
+        let opts = [OPT_HOSTNAME, 5, b'P', b'L', b'C', b'-', b'1'];
         let pkt = build([10, 10, 10, 10], [0, 0, 0, 0], &opts);
         let info = parse(&pkt).expect("parses");
         assert_eq!(info.ip, Ipv4Addr::new(10, 10, 10, 10));
