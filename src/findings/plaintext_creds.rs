@@ -76,6 +76,45 @@ fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
         host_count
     );
 
+    let dst_list = format_dst_list(&sorted_dsts);
+    let secure_alt = match kind {
+        CredKind::FtpAuth => "SFTP / FTPS",
+        CredKind::TelnetSession => "SSH",
+        CredKind::HttpBasic => "HTTPS (TLS)",
+        CredKind::Snmpv1v2c => "SNMPv3 with auth+priv",
+    };
+    let kind_phrase = kind_label(kind);
+    let mut playbook = vec![
+        format!(
+            "Treat any password used during the {kind_phrase} sessions to {dst_list} as exposed. \
+             Plan a rotation with the on-shift engineer for those devices and any account whose \
+             credentials may be reused (a Telnet password on a switch is often the same engineer \
+             account used elsewhere)."
+        ),
+        format!(
+            "Migrate the listed devices to {secure_alt} where they support it. The asset \
+             inventory shows which hosts also speak the secure equivalent — use that as the \
+             starting list."
+        ),
+        format!(
+            "For devices without a secure alternative (older Moxa serial servers, legacy HMIs, \
+             managed switches that only support {kind_phrase}), place behind a jump host on a \
+             hardened management VLAN. Document the exception with a revocation date."
+        ),
+        format!(
+            "Record the credentials-exposed window in the change log so future investigations \
+             know which sessions to consider compromised. Capture window: see report header."
+        ),
+    ];
+    if matches!(kind, CredKind::Snmpv1v2c) {
+        playbook.insert(
+            1,
+            "Rotate the community strings — they pass in the clear and any host on a span port \
+             of the same VLAN can read them."
+                .to_string(),
+        );
+    }
+
     Finding {
         id,
         severity: Severity::Critical,
@@ -83,7 +122,30 @@ fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
         summary,
         evidence,
         recommendation,
+        playbook,
     }
+}
+
+fn format_dst_list(sorted_dsts: &[((IpAddr, u16), u64)]) -> String {
+    if sorted_dsts.is_empty() {
+        return "the listed hosts".to_string();
+    }
+    if sorted_dsts.len() == 1 {
+        return format!("`{}:{}`", sorted_dsts[0].0 .0, sorted_dsts[0].0 .1);
+    }
+    if sorted_dsts.len() <= 3 {
+        let parts: Vec<String> = sorted_dsts
+            .iter()
+            .map(|((ip, port), _)| format!("`{ip}:{port}`"))
+            .collect();
+        return parts.join(", ");
+    }
+    format!(
+        "`{}:{}` and {} other host(s)",
+        sorted_dsts[0].0 .0,
+        sorted_dsts[0].0 .1,
+        sorted_dsts.len() - 1
+    )
 }
 
 fn kind_label(k: CredKind) -> &'static str {

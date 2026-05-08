@@ -100,6 +100,14 @@ pub fn render_markdown(
             }
             writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
             writeln!(out).unwrap();
+            if !f.playbook.is_empty() {
+                writeln!(out, "**Investigation playbook:**").unwrap();
+                writeln!(out).unwrap();
+                for (i, step) in f.playbook.iter().enumerate() {
+                    writeln!(out, "{}. {}", i + 1, step).unwrap();
+                }
+                writeln!(out).unwrap();
+            }
             writeln!(out, "_id: `{}`_", f.id).unwrap();
             writeln!(out).unwrap();
         }

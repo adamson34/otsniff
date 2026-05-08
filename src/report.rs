@@ -41,6 +41,8 @@ struct FindingView {
     evidence: Vec<String>,
     evidence_count: usize,
     recommendation: String,
+    playbook: Vec<String>,
+    playbook_count: usize,
 }
 
 struct AssetView {
@@ -106,6 +108,8 @@ pub fn render_html(
             evidence_count: f.evidence.len(),
             evidence: f.evidence.clone(),
             recommendation: f.recommendation.to_string(),
+            playbook_count: f.playbook.len(),
+            playbook: f.playbook.clone(),
         })
         .collect();
 

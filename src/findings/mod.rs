@@ -40,7 +40,13 @@ pub struct Finding {
     pub title: String,
     pub summary: String,
     pub evidence: Vec<String>,
+    /// Short narrative for someone skimming the report. One sentence.
     pub recommendation: &'static str,
+    /// Sequenced action steps tied to the actual evidence in this
+    /// finding. Each step references the specific hosts / MACs / ports
+    /// observed, not generic advice. See
+    /// `docs/specs/investigation-playbooks.md`.
+    pub playbook: Vec<String>,
 }
 
 pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {

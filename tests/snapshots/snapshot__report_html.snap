@@ -77,6 +77,21 @@ expression: html
     word-break: break-all;
     margin: 0.4rem 0 0 0;
   }
+  ol.playbook {
+    margin: 0.4rem 0 0 0;
+    padding-left: 1.4rem;
+  }
+  ol.playbook li {
+    padding: 0.15rem 0;
+    line-height: 1.5;
+  }
+  ol.playbook code {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0 0.25rem;
+    font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
   table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
   th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { background: var(--card); font-weight: 600; }
@@ -123,6 +138,14 @@ expression: html
     </details>
     
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Migrate the device(s) to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.</div>
+    
+    <details open>
+      <summary>Investigation playbook (4 steps)</summary>
+      <ol class="playbook">
+        <li>Treat any password used during the Telnet sessions to `10.10.0.20:23` as exposed. Plan a rotation with the on-shift engineer for those devices and any account whose credentials may be reused (a Telnet password on a switch is often the same engineer account used elsewhere).</li><li>Migrate the listed devices to SSH where they support it. The asset inventory shows which hosts also speak the secure equivalent — use that as the starting list.</li><li>For devices without a secure alternative (older Moxa serial servers, legacy HMIs, managed switches that only support Telnet), place behind a jump host on a hardened management VLAN. Document the exception with a revocation date.</li><li>Record the credentials-exposed window in the change log so future investigations know which sessions to consider compromised. Capture window: see report header.</li>
+      </ol>
+    </details>
+    
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>creds.telnet</code></div>
   </div>
   
@@ -137,6 +160,14 @@ expression: html
     </details>
     
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Audit the IT/OT firewall ruleset. OT zones should only egress to specifically allowed update servers and vendor cloud endpoints, brokered through a DMZ with logging. Block, then add explicit allow rules.</div>
+    
+    <details open>
+      <summary>Investigation playbook (4 steps)</summary>
+      <ol class="playbook">
+        <li>Identify the IT/OT gateway physically. The flows below traverse it — look at the asset inventory for hosts whose MACs appear on both sides of the boundary (a single MAC showing up for an OT IP and a public IP is the gateway interface).</li><li>Pull the running config / ruleset from the gateway (firewall, L3 switch, or whatever serves as the OT boundary). Look for an explicit deny-all-by-default with named exceptions. The expected answer for a plant boundary is &quot;deny everything; allow these specific update servers / vendor cloud endpoints / time sources.&quot;</li><li>Cross-reference each flow in the evidence against that ruleset. Any flow not covered by an explicit allow is either a missing rule or a control gap — both worth fixing.</li><li>After the rules are tightened, log the changes in the change-management system and re-capture in 24 hours to confirm the egress is blocked.</li>
+      </ol>
+    </details>
+    
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>egress.ot_to_internet</code></div>
   </div>
   
@@ -151,6 +182,14 @@ expression: html
     </details>
     
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Limit which engineering workstations can talk to controllers on tcp/44818 + udp/2222. Lock controller keyswitches to RUN/REMOTE-ONLY where possible to refuse program downloads.</div>
+    
+    <details open>
+      <summary>Investigation playbook (5 steps)</summary>
+      <ol class="playbook">
+        <li>Identify the source host(s) physically: `10.10.0.5`. Use the same MAC-table approach as for the Modbus playbook. Engineering workstations running Studio 5000 / RSLogix or Rockwell Connected Components Workbench are the usual culprits.</li><li>Lock controller keyswitches to RUN or REMOTE-ONLY where possible. Allen-Bradley ControlLogix, CompactLogix, and Micro800-series controllers physically refuse program downloads in those positions.</li><li>In Studio 5000 (or the equivalent for your platform), pull the controller&#x27;s audit log and download history for `10.10.0.20`. Look for unauthorized program downloads, online edits, or tag changes during the capture window.</li><li>Limit which engineering workstations can reach controllers on tcp/44818 + udp/2222 via switch ACL or firewall rule. Engineering access should be a known-IP allow list, not &quot;everyone on the OT VLAN.&quot;</li><li>If any unauthorized download is confirmed, treat as a controller-integrity incident. Plan a recovery window with operations to verify the running program against a known-good backup before resuming.</li>
+      </ol>
+    </details>
+    
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.cip_engineering</code></div>
   </div>
   
@@ -165,6 +204,14 @@ expression: html
     </details>
     
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.</div>
+    
+    <details open>
+      <summary>Investigation playbook (5 steps)</summary>
+      <ol class="playbook">
+        <li>Identify the source host(s) physically: `10.10.0.5`. Run `show mac address-table address &lt;mac&gt;` on the access switch (or your switch vendor&#x27;s equivalent), then walk the cable. The asset inventory in this report has the MAC for each host.</li><li>Ask the on-shift control engineer whether `10.10.0.5` is the authorized Modbus master for `10.10.0.20`. Common authorized masters: SCADA servers, Niagara N4 supervisors, RTUs polling downstream PLCs. If yes, the finding is expected — but the host hygiene (other ports open on the asset inventory) is worth a separate look.</li><li>Pull session / event logs from `10.10.0.20`. Most controllers can show which coil and register addresses were written, with timestamps. Cross-reference against change-management tickets covering the capture window.</li><li>If the source is not an authorized writer, do NOT block at the switch yet. An unexpected ACL on a Modbus path is an availability event. Coordinate with operations first — schedule the change, run it past the control engineer.</li><li>Once the unauthorized path is confirmed: ACL the switch port (or VLAN) so only the authorized writer can reach tcp/502 on the target controllers. Consider Modbus-aware filtering (DPI) in front of safety-critical PLCs.</li>
+      </ol>
+    </details>
+    
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.modbus_writes</code></div>
   </div>
   
@@ -179,6 +226,14 @@ expression: html
     </details>
     
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Limit which engineering workstations can talk to controllers on tcp/102. For S7-1500 / TIA Portal environments, set the controller access level to &quot;no access (complete protection)&quot; or &quot;read access&quot; and require known-fingerprint TLS via Secure Communication. For older S7-300/400, use switch ACLs and physically lock the keyswitch to RUN.</div>
+    
+    <details open>
+      <summary>Investigation playbook (5 steps)</summary>
+      <ol class="playbook">
+        <li>Identify the source host(s) physically: `10.10.0.5`. For TIA Portal / Step 7 Manager-class hosts, expect a Windows engineering laptop or a permanent PG.</li><li>In TIA Portal, set the controller&#x27;s access level on `10.10.0.20` to &quot;no access (complete protection)&quot; or &quot;read access&quot; — anything looser allows variable writes from anyone reaching tcp/102.</li><li>Pull the controller diagnostic buffer for `10.10.0.20` (TIA Portal: Online &amp; Diagnostics → Diagnostic Buffer). Look for download events, mode changes (RUN → STOP), and password-protection changes during the capture window.</li><li>For S7-1500: enable Secure Communication with TLS and pin the controller&#x27;s certificate. For S7-300/400 (no native TLS): physical keyswitch lock plus a switch-level ACL is the path.</li><li>STOP commands or program downloads were seen — treat as a controller-integrity incident. Compare the running program against a known-good project backup before resuming production. Plan a recovery window with operations.</li>
+      </ol>
+    </details>
+    
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.s7_engineering</code></div>
   </div>
   
