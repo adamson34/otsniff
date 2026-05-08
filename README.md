@@ -42,17 +42,43 @@ Run against the public 4SICS ICS Lab captures:
 
 ## Install
 
+### One-liner (macOS, Linux)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/adamson34/otsniff/main/install.sh | sh
+```
+
+To pin a specific version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/adamson34/otsniff/main/install.sh | sh -s -- v0.2.0
+```
+
+Installs to `~/.local/bin/otsniff` by default; set `OTSNIFF_INSTALL_DIR=/usr/local/bin` (or wherever) to override. Verifies the SHA-256 checksum before installing. Reads `--help` after install for the next step.
+
 ### From source
 
 ```sh
+git clone https://github.com/adamson34/otsniff.git
+cd otsniff
 cargo install --path .
 ```
 
 Requires Rust 1.85+.
 
-### Pre-built binaries
+### Pre-built binaries (manual)
 
-See the latest [release](https://github.com/adamson34/otsniff/releases) — static binaries for Linux x86_64, macOS x86_64/aarch64, and Windows.
+[Releases page](https://github.com/adamson34/otsniff/releases) — static binaries for Linux x86_64, macOS x86_64/aarch64, and Windows x86_64. Download the `.tar.gz` for your target plus the `.sha256`, verify, extract, drop on `PATH`.
+
+### Coming soon
+
+```sh
+# Homebrew tap (planned)
+brew install adamson34/tap/otsniff
+
+# crates.io (planned)
+cargo install otsniff
+```
 
 ## Usage
 
