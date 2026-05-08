@@ -123,11 +123,11 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         // Categorize the engineering events for a more specific summary.
         let download_count = s7_eng
             .iter()
-            .filter(|e| matches!(e.function_code, 0x1A | 0x1B | 0x1C))
+            .filter(|e| matches!(e.function_code, 0x1A..=0x1C))
             .count();
         let upload_count = s7_eng
             .iter()
-            .filter(|e| matches!(e.function_code, 0x1D | 0x1E | 0x1F))
+            .filter(|e| matches!(e.function_code, 0x1D..=0x1F))
             .count();
         let plc_control_count = s7_eng
             .iter()
