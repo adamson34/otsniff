@@ -78,7 +78,7 @@ _id: `ics.modbus_writes`_
 
 ## Top flows
 
-| Source | Destination | Protocol | Packets | Bytes |
-|--------|-------------|----------|---------|-------|
-| `host_002:54000` | `host_003:502` | modbus | 500 | 48.0 KB |
-| `host_002:54200` | `host_001:80` | http | 5 | 600.0 B |
+| Source | Destination | Protocol | Conns | Packets | Bytes |
+|--------|-------------|----------|-------|---------|-------|
+| `host_002` | `host_003:502` | modbus | 1 | 500 | 48.0 KB |
+| `host_002` | `host_001:80` | http | 1 | 5 | 600.0 B |

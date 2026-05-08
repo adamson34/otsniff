@@ -42,8 +42,12 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
             let bucket = hits.entry(label).or_default();
             if bucket.len() < 5 {
                 bucket.push(format!(
-                    "{}:{} -> {}:{} ({} pkts)",
-                    flow.key.src, flow.key.src_port, flow.key.dst, flow.key.dst_port, flow.packets
+                    "{} -> {}:{} ({} pkts, {} conns)",
+                    flow.key.src,
+                    flow.key.dst,
+                    flow.key.dst_port,
+                    flow.packets,
+                    flow.connections()
                 ));
             }
         }

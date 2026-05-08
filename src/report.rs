@@ -58,6 +58,7 @@ struct TopFlow {
     src: String,
     dst: String,
     label: String,
+    connections: String,
     packets: String,
     bytes: String,
 }
@@ -81,13 +82,14 @@ pub fn render_html(
         .into_iter()
         .take(25)
         .map(|f| TopFlow {
-            src: format!("{}:{}", f.key.src, f.key.src_port),
+            src: f.key.src.to_string(),
             dst: format!("{}:{}", f.key.dst, f.key.dst_port),
             label: f.label.clone().unwrap_or_else(|| match f.key.proto {
                 6 => "tcp".to_string(),
                 17 => "udp".to_string(),
                 _ => format!("ip/{}", f.key.proto),
             }),
+            connections: f.connections().to_string(),
             packets: f.packets.to_string(),
             bytes: human_bytes(f.bytes),
         })

@@ -83,7 +83,6 @@ fn build_fixture() -> Observations {
         key: FlowKey {
             src: ip("10.10.0.5"),
             dst: ip("10.10.0.20"),
-            src_port: 54000,
             dst_port: 502,
             proto: 6,
         },
@@ -92,6 +91,7 @@ fn build_fixture() -> Observations {
         first_seen: fixed_ts(),
         last_seen: fixed_ts(),
         label: Some("modbus".to_string()),
+        unique_src_ports: HashSet::from([54000]),
     };
     flows.insert("a".to_string(), modbus_flow);
 
@@ -99,7 +99,6 @@ fn build_fixture() -> Observations {
         key: FlowKey {
             src: ip("10.10.0.5"),
             dst: ip("8.8.8.8"),
-            src_port: 54200,
             dst_port: 80,
             proto: 6,
         },
@@ -108,6 +107,7 @@ fn build_fixture() -> Observations {
         first_seen: fixed_ts(),
         last_seen: fixed_ts(),
         label: Some("http".to_string()),
+        unique_src_ports: HashSet::from([54200]),
     };
     flows.insert("b".to_string(), egress_flow);
 

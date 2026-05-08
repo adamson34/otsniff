@@ -142,8 +142,16 @@ pub fn render_markdown(
     // Top flows
     writeln!(out, "## Top flows").unwrap();
     writeln!(out).unwrap();
-    writeln!(out, "| Source | Destination | Protocol | Packets | Bytes |").unwrap();
-    writeln!(out, "|--------|-------------|----------|---------|-------|").unwrap();
+    writeln!(
+        out,
+        "| Source | Destination | Protocol | Conns | Packets | Bytes |"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "|--------|-------------|----------|-------|---------|-------|"
+    )
+    .unwrap();
     let mut flow_refs: Vec<&crate::observe::FlowObs> = obs.flows.values().collect();
     flow_refs.sort_by_key(|f| std::cmp::Reverse(f.bytes));
     for f in flow_refs.into_iter().take(25) {
@@ -154,12 +162,12 @@ pub fn render_markdown(
         });
         writeln!(
             out,
-            "| `{}:{}` | `{}:{}` | {} | {} | {} |",
+            "| `{}` | `{}:{}` | {} | {} | {} | {} |",
             f.key.src,
-            f.key.src_port,
             f.key.dst,
             f.key.dst_port,
             label,
+            f.connections(),
             f.packets,
             human_bytes(f.bytes),
         )
