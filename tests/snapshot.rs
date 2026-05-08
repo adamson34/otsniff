@@ -195,6 +195,12 @@ fn build_fixture() -> Observations {
             m.insert((ip("10.10.0.5"), ip("10.10.0.20"), 443, 0x0301), 4);
             m
         },
+        hostnames: {
+            let mut m = std::collections::BTreeMap::new();
+            m.insert(ip("10.10.0.5"), "ENG-WS-01".to_string());
+            m.insert(ip("10.10.0.20"), "PLC-LINE3".to_string());
+            m
+        },
     }
 }
 
@@ -244,6 +250,10 @@ fn scrubbed_markdown_snapshot_does_not_leak_real_values() {
     // 8.8.8.8 is observed in the fixture (external_flows), so it gets a
     // pseudonym; verify it's gone too.
     assert!(!scrubbed.contains("8.8.8.8"));
+    // Hostnames are NERC CIP-011 BCSI; the privacy contract requires that
+    // they're scrubbed before reaching any AI provider.
+    assert!(!scrubbed.contains("ENG-WS-01"));
+    assert!(!scrubbed.contains("PLC-LINE3"));
 
     insta::assert_snapshot!("scrubbed_markdown", scrubbed);
 }
@@ -417,4 +427,7 @@ fn invariant_no_real_values_reach_ai_provider() {
     // Combined user message: default task + scrubbed report.
     leak_detector::ensure_clean(&user_message)
         .expect("user message leak — scrubbed payload contains an unscrubbed identifier");
+    // Map-value check: catches hostname leaks the regex check can't see.
+    leak_detector::ensure_no_map_values(&user_message, &map)
+        .expect("user message contains an unscrambled value from the scrub map");
 }

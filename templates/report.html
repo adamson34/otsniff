@@ -154,12 +154,13 @@
 <h2>Asset inventory</h2>
 <table>
   <thead><tr>
-    <th>IP</th><th>Zone</th><th>MAC</th><th>Vendor</th><th>Inferred role</th><th>Protocols</th><th class="num">Packets</th><th class="num">Bytes</th>
+    <th>IP</th><th>Hostname</th><th>Zone</th><th>MAC</th><th>Vendor</th><th>Inferred role</th><th>Protocols</th><th class="num">Packets</th><th class="num">Bytes</th>
   </tr></thead>
   <tbody>
   {% for a in assets %}
     <tr>
       <td><code>{{ a.ip }}</code></td>
+      <td>{% if a.hostname == "—" %}<span class="muted">—</span>{% else %}<code>{{ a.hostname }}</code>{% endif %}</td>
       <td>{% if a.in_ot_zone %}<span class="ot-badge">OT</span>{% else %}IT{% endif %}</td>
       <td><code>{{ a.mac }}</code></td>
       <td>{{ a.vendor }}</td>

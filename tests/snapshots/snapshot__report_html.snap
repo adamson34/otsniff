@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 221
 expression: html
 ---
 <!doctype html>
@@ -308,12 +309,13 @@ expression: html
 <h2>Asset inventory</h2>
 <table>
   <thead><tr>
-    <th>IP</th><th>Zone</th><th>MAC</th><th>Vendor</th><th>Inferred role</th><th>Protocols</th><th class="num">Packets</th><th class="num">Bytes</th>
+    <th>IP</th><th>Hostname</th><th>Zone</th><th>MAC</th><th>Vendor</th><th>Inferred role</th><th>Protocols</th><th class="num">Packets</th><th class="num">Bytes</th>
   </tr></thead>
   <tbody>
   
     <tr>
       <td><code>10.10.0.5</code></td>
+      <td><code>ENG-WS-01</code></td>
       <td><span class="ot-badge">OT</span></td>
       <td><code>AA:BB:CC:DD:EE:01</code></td>
       <td>—</td>
@@ -325,6 +327,7 @@ expression: html
   
     <tr>
       <td><code>10.10.0.20</code></td>
+      <td><code>PLC-LINE3</code></td>
       <td><span class="ot-badge">OT</span></td>
       <td><code>00:1B:1B:11:22:33</code></td>
       <td>Siemens</td>
@@ -336,6 +339,7 @@ expression: html
   
     <tr>
       <td><code>8.8.8.8</code></td>
+      <td><span class="muted">—</span></td>
       <td>IT</td>
       <td><code>AA:BB:CC:DD:EE:99</code></td>
       <td>—</td>

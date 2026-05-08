@@ -297,8 +297,15 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
 
     // 3. FAIL-CLOSED LEAK CHECK. This is the kill switch — if any
     //    real-looking identifier survived the scrub, abort here before
-    //    invoking the provider.
+    //    invoking the provider. Two layers:
+    //      a) Regex check: catches IP/MAC patterns even if the scrub
+    //         layer never knew about the value (defense in depth).
+    //      b) Map-value check: catches anything in the scrub map that
+    //         didn't get substituted. This is what enforces the
+    //         hostname privacy contract — hostnames have no clean
+    //         regex shape, so the map-value check is the only signal.
     leak_detector::ensure_clean(&scrubbed_md)?;
+    leak_detector::ensure_no_map_values(&scrubbed_md, &map)?;
 
     // 4. Assemble the system prompt with the capture-source qualifier and
     //    compose the user message. Both are leak-checked.
@@ -306,6 +313,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     leak_detector::ensure_clean(&system_prompt)?;
     let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);
     leak_detector::ensure_clean(&user_message)?; // belt-and-braces
+    leak_detector::ensure_no_map_values(&user_message, &map)?;
 
     if args.verbose {
         eprintln!(

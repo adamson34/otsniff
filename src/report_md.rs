@@ -118,19 +118,23 @@ pub fn render_markdown(
     writeln!(out).unwrap();
     writeln!(
         out,
-        "| IP | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |"
+        "| IP | Hostname | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |"
     )
     .unwrap();
     writeln!(
         out,
-        "|----|------|-----|--------|---------------|-----------|---------|-------|"
+        "|----|----------|------|-----|--------|---------------|-----------|---------|-------|"
     )
     .unwrap();
     for a in inventory {
         writeln!(
             out,
-            "| `{}` | {} | `{}` | {} | {} | {} | {} | {} |",
+            "| `{}` | {} | {} | `{}` | {} | {} | {} | {} | {} |",
             a.ip,
+            a.hostname
+                .as_ref()
+                .map(|s| format!("`{s}`"))
+                .unwrap_or_else(|| "—".to_string()),
             if a.in_ot_zone { "OT" } else { "IT" },
             a.mac.clone().unwrap_or_else(|| "—".to_string()),
             a.vendor.clone().unwrap_or_else(|| "—".to_string()),

@@ -47,6 +47,7 @@ struct FindingView {
 
 struct AssetView {
     ip: String,
+    hostname: String,
     mac: String,
     vendor: String,
     role: String,
@@ -117,6 +118,7 @@ pub fn render_html(
         .iter()
         .map(|a| AssetView {
             ip: a.ip.to_string(),
+            hostname: a.hostname.clone().unwrap_or_else(|| "—".to_string()),
             mac: a.mac.clone().unwrap_or_else(|| "—".to_string()),
             vendor: a.vendor.clone().unwrap_or_else(|| "—".to_string()),
             role: a.role.label().to_string(),

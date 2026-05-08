@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 284
 expression: map
 ---
 {
@@ -14,5 +15,9 @@ expression: map
     "mac_001": "AA:BB:CC:DD:EE:99",
     "mac_002": "AA:BB:CC:DD:EE:01",
     "mac_003": "00:1B:1B:11:22:33"
+  },
+  "names": {
+    "name_001": "ENG-WS-01",
+    "name_002": "PLC-LINE3"
   }
 }

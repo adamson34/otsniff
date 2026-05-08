@@ -34,15 +34,30 @@ pub struct ScrubMap {
     pub ips: BTreeMap<String, String>,
     /// pseudonym → real MAC (colon-separated upper hex).
     pub macs: BTreeMap<String, String>,
+    /// pseudonym → real hostname (e.g., name_001 → "LINE-3-PLC").
+    /// Names that identify critical assets fall under NERC CIP-011 BCSI;
+    /// see ADR-0006 for why this class is part of the privacy contract.
+    #[serde(default)]
+    pub names: BTreeMap<String, String>,
 }
 
 impl ScrubMap {
     pub fn len(&self) -> usize {
-        self.ips.len() + self.macs.len()
+        self.ips.len() + self.macs.len() + self.names.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.ips.is_empty() && self.macs.is_empty()
+        self.ips.is_empty() && self.macs.is_empty() && self.names.is_empty()
+    }
+
+    /// Iterate every real value in the map. Used by the leak detector to
+    /// verify that the post-scrub payload doesn't contain any of them.
+    pub fn real_values(&self) -> impl Iterator<Item = &str> {
+        self.ips
+            .values()
+            .chain(self.macs.values())
+            .chain(self.names.values())
+            .map(|s| s.as_str())
     }
 
     /// Build the inverse map (real → pseudonym) for forward scrubbing.
@@ -52,6 +67,9 @@ impl ScrubMap {
             out.insert(v.clone(), k.clone());
         }
         for (k, v) in &self.macs {
+            out.insert(v.clone(), k.clone());
+        }
+        for (k, v) in &self.names {
             out.insert(v.clone(), k.clone());
         }
         out
@@ -99,11 +117,29 @@ pub fn build_map_at(obs: &Observations, now: DateTime<Utc>) -> ScrubMap {
         macs.insert(pseudo, oui::format_mac(mac));
     }
 
+    // Hostnames: assigned in alphabetical order of the real name. Empty
+    // strings are dropped defensively even though the DHCP parser
+    // already rejects them.
+    let mut sorted_names: Vec<String> = obs
+        .hostnames
+        .values()
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .collect();
+    sorted_names.sort();
+    sorted_names.dedup();
+    let mut names: BTreeMap<String, String> = BTreeMap::new();
+    for (idx, name) in sorted_names.iter().enumerate() {
+        let pseudo = format!("name_{:03}", idx + 1);
+        names.insert(pseudo, name.clone());
+    }
+
     ScrubMap {
         version: 1,
         created_at: now,
         ips,
         macs,
+        names,
     }
 }
 
@@ -142,7 +178,12 @@ pub fn unscrub_text(text: &str, map: &ScrubMap) -> (String, usize, Vec<String>) 
 
     let result = token_re.replace_all(text, |caps: &regex::Captures| {
         let token = &caps[0];
-        if let Some(real) = map.ips.get(token).or_else(|| map.macs.get(token)) {
+        if let Some(real) = map
+            .ips
+            .get(token)
+            .or_else(|| map.macs.get(token))
+            .or_else(|| map.names.get(token))
+        {
             replaced += 1;
             real.clone()
         } else {
@@ -156,9 +197,9 @@ pub fn unscrub_text(text: &str, map: &ScrubMap) -> (String, usize, Vec<String>) 
 }
 
 fn pseudonym_regex() -> Regex {
-    // host_NNN, mac_NNN — pseudonym vocabulary lives here. Add new prefixes
-    // as we add new identifier classes (unit_NN, name_NNN, etc.).
-    Regex::new(r"\b(?:host|mac)_[0-9a-f]+\b").expect("valid regex")
+    // host_NNN, mac_NNN, name_NNN — pseudonym vocabulary lives here. Add
+    // new prefixes as we add new identifier classes (unit_NN, etc.).
+    Regex::new(r"\b(?:host|mac|name)_[0-9a-f]+\b").expect("valid regex")
 }
 
 #[cfg(test)]
@@ -265,5 +306,32 @@ mod tests {
         assert_eq!(unmapped, vec!["host_999"]);
         assert!(out.contains("10.10.0.5"));
         assert!(out.contains("host_999"));
+    }
+
+    #[test]
+    fn hostnames_get_scrubbed_to_name_pseudonyms() {
+        let mut obs = fixture();
+        obs.hostnames
+            .insert(ip("10.10.0.5"), "ACME-LINE3-PLC".to_string());
+        obs.hostnames
+            .insert(ip("10.10.0.20"), "HMI-EAST".to_string());
+        let map = build_map(&obs);
+
+        // Sorted alphabetically: ACME-LINE3-PLC < HMI-EAST.
+        assert_eq!(map.names["name_001"], "ACME-LINE3-PLC");
+        assert_eq!(map.names["name_002"], "HMI-EAST");
+
+        let raw = "Asset ACME-LINE3-PLC at 10.10.0.5 spoke to HMI-EAST.";
+        let scrubbed = scrub_text(raw, &map);
+        assert!(!scrubbed.contains("ACME-LINE3-PLC"));
+        assert!(!scrubbed.contains("HMI-EAST"));
+        assert!(scrubbed.contains("name_001"));
+        assert!(scrubbed.contains("name_002"));
+
+        let (back, replaced, unmapped) = unscrub_text(&scrubbed, &map);
+        assert_eq!(back, raw);
+        // 3 pseudonyms in the scrubbed text: name_001, host_001, name_002.
+        assert_eq!(replaced, 3);
+        assert!(unmapped.is_empty());
     }
 }

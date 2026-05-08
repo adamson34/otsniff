@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{enip, modbus, s7comm};
+use crate::parse::{dhcp, enip, modbus, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,6 +140,10 @@ pub struct Observations {
     /// count. legacy_version is the on-the-wire u16 (0x0301 = TLS 1.0,
     /// 0x0302 = TLS 1.1, 0x0303 = TLS 1.2 / 1.3).
     pub tls_client_hellos: HashMap<(IpAddr, IpAddr, u16, u16), u64>,
+    /// IP → hostname, populated from passive sources (DHCP option 12 today;
+    /// mDNS / NetBIOS planned). Last-write-wins if multiple sources name
+    /// the same IP, but in practice DHCP is the only source for now.
+    pub hostnames: BTreeMap<IpAddr, String>,
     pub first_ts: Option<DateTime<Utc>>,
     pub last_ts: Option<DateTime<Utc>>,
     pub total_packets: u64,
@@ -422,6 +426,17 @@ impl Observer {
     }
 
     fn observe_udp(&mut self, pkt: &Packet) {
+        // DHCP host-name extraction (UDP/67 server, UDP/68 client).
+        // The hostname identifies the asset to a human reader and is
+        // potentially BCSI under NERC CIP-011 — we both extract it
+        // (for inventory) and run it through the scrub layer.
+        if pkt.dst_port == 67 || pkt.dst_port == 68 || pkt.src_port == 67 || pkt.src_port == 68 {
+            if let Some(info) = dhcp::parse(&pkt.payload) {
+                let ip = IpAddr::V4(info.ip);
+                self.obs.hostnames.insert(ip, info.hostname);
+            }
+        }
+
         // SNMP v1/v2c (plaintext community string).
         // The first byte of an SNMP message is BER tag 0x30 (SEQUENCE),
         // followed by a length, then INTEGER tag 0x02 0x01 <version> where
