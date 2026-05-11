@@ -102,24 +102,36 @@ INSTA_UPDATE=always cargo test     # accept all on first creation
 ## Subcommands
 
 ```
-otsniff report <PCAP> [-o report.html] [--ot-subnet ...] [--json X]
-otsniff scrub <PCAP> -o report.md --map map.json [--ot-subnet ...]
+otsniff analyze <PCAP> -o report.html [--ai] [--audit-log X] [--md X] [--json X] [--map X] [--ot-subnet ...] [--source-type ...] [--model M]
+otsniff scrub   <PCAP> -o report.md --map map.json [--ot-subnet ...] [--source-type ...]
 otsniff unscrub --map map.json [INPUT_FILE] [-o OUTPUT] [--strict]
-otsniff analyze <PCAP> [-o report.md] [--map map.json] [--model M]
+otsniff rules   [--format md|json]
 ```
 
-`report` produces an HTML report. `scrub` produces an LLM-safe markdown
-report plus a local pseudonym map. `unscrub` reverses pseudonyms in any
-text using the saved map. `analyze` closes the loop: scrub → leak-check
-→ invoke local `claude` CLI → unscrub the response → append to a
-markdown report.
+`analyze` is the primary subcommand. Without flags it produces an HTML
+report (rules-based findings + inventory + comms-matrix). With `--ai`
+it additionally runs scrub → leak-check → invoke local `claude` CLI →
+unscrub → embed Claude's response as an "AI analysis" section in the
+rendered HTML. When `--ai` is set, the privacy audit log is written
+automatically alongside the report (default path: `report.audit.json`).
+
+`scrub` / `unscrub` are advanced subcommands for users who want to
+drive their own AI (Claude.ai web UI, ChatGPT, local Ollama, etc.) —
+manual two-step counterpart to `analyze --ai`.
+
+`rules` prints the detection catalog (same content as `docs/RULES.md`).
 
 **The privacy invariant is enforced by code, not convention.** See ADR-0007.
 `src/ai/leak_detector.rs` sits between scrub and any AI provider call and
-fails closed if it detects un-scrubbed IPv4/IPv6/MAC patterns. Any change
-that adds a code path bypassing scrub must also pass the leak detector
-or the invariant test (`tests/snapshot.rs::invariant_no_real_values_reach_ai_provider`)
-will block the commit.
+fails closed via two checks: a regex scan for IPv4/IPv6/MAC patterns and
+a map-value check that catches anything in the scrub map (notably
+hostnames, which have no clean regex shape). The AI's markdown response
+is rendered through `src/ai/html_render.rs::render_safe`, which strips
+raw HTML events so a Claude response containing `<script>` can't XSS
+the rendered report. Any change that adds a code path bypassing scrub
+must also pass the leak detector or the invariant test
+(`tests/snapshot.rs::invariant_no_real_values_reach_ai_provider`) will
+block the commit.
 
 ## Key Decisions
 

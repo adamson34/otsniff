@@ -43,9 +43,14 @@ use crate::scrub::{build_map, scrub_text, unscrub_text, ScrubMap};
 
 /// One-shot OT-aware PCAP triage.
 ///
-/// Three modes: `report` produces an HTML report (the v0.1 behavior),
-/// `scrub` produces an AI-safe markdown report plus a pseudonym map,
-/// `unscrub` reverses pseudonyms in any text using a saved map.
+/// Primary command: `analyze` reads a PCAP and writes an HTML report.
+/// Pass `--ai` to also append a Claude-generated section (privacy-
+/// preserving — the AI never sees real IPs/MACs/hostnames, and a
+/// chain-of-custody audit log is written alongside).
+///
+/// Advanced commands: `scrub` / `unscrub` give a two-step manual
+/// workflow for users who want to drive their own AI (Claude.ai web
+/// UI, ChatGPT, local Ollama). `rules` prints the detection catalog.
 #[derive(Parser, Debug)]
 #[command(name = "otsniff", version, about, long_about = None)]
 pub struct Cli {
@@ -55,47 +60,27 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Render an HTML report from a PCAP/PCAPNG.
-    Report(ReportArgs),
-    /// Render a markdown report with all sensitive identifiers replaced by
-    /// stable pseudonyms. Also writes a map file you can later unscrub with.
-    Scrub(ScrubArgs),
-    /// Replace pseudonyms in a text file (e.g. an LLM's response) with their
-    /// real values, using a previously saved map.
-    Unscrub(UnscrubArgs),
-    /// Analyze a PCAP with Claude. Internally: scrub → leak-check → invoke
-    /// the local Claude Code CLI → unscrub the response → append to the
-    /// markdown report. The AI never sees real IPs or MACs.
+    /// Read a PCAP and write an HTML report. With `--ai`, also append a
+    /// Claude-generated analysis section (scrub → leak-check → invoke
+    /// the local Claude Code CLI → unscrub → embed). The AI never sees
+    /// real IPs, MACs, or hostnames; a chain-of-custody audit log is
+    /// written automatically when `--ai` is on.
     Analyze(AnalyzeArgs),
+    /// Render a markdown report with all sensitive identifiers replaced
+    /// by stable pseudonyms. Also writes a map file you can later
+    /// unscrub with. Advanced: use this if you want to paste into a
+    /// different AI (Claude.ai web, ChatGPT, local Ollama). Most users
+    /// should use `analyze --ai` instead.
+    Scrub(ScrubArgs),
+    /// Replace pseudonyms in a text file (e.g. an LLM's response) with
+    /// their real values, using a previously saved map. Advanced —
+    /// counterpart to `scrub`.
+    Unscrub(UnscrubArgs),
     /// Print the detection rule catalog. Lists every finding the tool
     /// can produce, with the plain-English trigger description and
     /// references. Use this to review what the tool flags without
     /// reading Rust source.
     Rules(RulesArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct ReportArgs {
-    /// Path to input PCAP/PCAPNG.
-    pub input: PathBuf,
-    /// Output HTML report path.
-    #[arg(short = 'o', long = "output", default_value = "report.html")]
-    pub output: PathBuf,
-    /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
-    #[arg(long = "ot-subnet", value_name = "CIDR")]
-    pub ot_subnets: Vec<IpNet>,
-    /// Declare the capture provenance: `span`, `host-side`, or `tap`.
-    /// When set, this overrides the heuristic in the report; the
-    /// heuristic still runs as a guard and warns on stderr if it
-    /// disagrees.
-    #[arg(long = "source-type", value_name = "TYPE", value_enum)]
-    pub source_type: Option<SourceTypeArg>,
-    /// Also write findings + inventory as JSON to this path.
-    #[arg(long = "json", value_name = "PATH")]
-    pub json: Option<PathBuf>,
-    /// Print parse summary to stderr.
-    #[arg(short = 'v', long = "verbose")]
-    pub verbose: bool,
 }
 
 #[derive(Args, Debug)]
@@ -113,7 +98,7 @@ pub struct ScrubArgs {
     #[arg(long = "ot-subnet", value_name = "CIDR")]
     pub ot_subnets: Vec<IpNet>,
     /// Declare the capture provenance: `span`, `host-side`, or `tap`.
-    /// See `--source-type` on `report`.
+    /// See `--source-type` on `analyze`.
     #[arg(long = "source-type", value_name = "TYPE", value_enum)]
     pub source_type: Option<SourceTypeArg>,
     /// Print parse summary to stderr.
@@ -125,33 +110,51 @@ pub struct ScrubArgs {
 pub struct AnalyzeArgs {
     /// Path to input PCAP/PCAPNG.
     pub input: PathBuf,
-    /// Output markdown report path. The rules-based report is written here,
-    /// then the AI-augmented analysis is appended.
-    #[arg(short = 'o', long = "output", default_value = "report.md")]
+    /// Output HTML report path.
+    #[arg(short = 'o', long = "output", default_value = "report.html")]
     pub output: PathBuf,
-    /// Optional path to write the pseudonym map. If omitted, the map is
-    /// kept in-memory only and not persisted (you can still unscrub the
-    /// run's output because it's done in-process; you just can't unscrub
-    /// later text against this run).
-    #[arg(long = "map", value_name = "PATH")]
-    pub map: Option<PathBuf>,
-    /// Optional path to write the privacy audit log (JSON). Contains
-    /// counts and SHA-256 hashes of the exact bytes sent to the AI
-    /// provider — no real identifiers. Useful as chain-of-custody
-    /// evidence for compliance review.
+    /// Also run the AI analysis pass. Internally: scrub → fail-closed
+    /// leak check → invoke the local Claude Code CLI → unscrub →
+    /// embed as a section in the rendered HTML. The AI never sees
+    /// real IPs, MACs, or hostnames. When this is set, the privacy
+    /// audit log is written automatically alongside the report (see
+    /// `--audit-log`).
+    #[arg(long = "ai")]
+    pub ai: bool,
+    /// Override the privacy audit log path. Only meaningful when
+    /// `--ai` is set; default is to derive a `.audit.json` file
+    /// alongside the report output. The log carries counts and
+    /// SHA-256 hashes — no real identifiers — and serves as
+    /// chain-of-custody evidence for compliance review.
     #[arg(long = "audit-log", value_name = "PATH")]
     pub audit_log: Option<PathBuf>,
+    /// Also write the markdown form of the report to this path.
+    /// Useful if you want the source the AI saw (pre-render).
+    #[arg(long = "md", value_name = "PATH")]
+    pub md: Option<PathBuf>,
+    /// Also write the findings + inventory as JSON to this path.
+    #[arg(long = "json", value_name = "PATH")]
+    pub json: Option<PathBuf>,
+    /// Optional path to write the pseudonym map. Only meaningful when
+    /// `--ai` is set. Lets you unscrub follow-up AI text later
+    /// against the same run. Most users don't need this — the AI
+    /// section in the HTML is already unscrubbed inline.
+    #[arg(long = "map", value_name = "PATH")]
+    pub map: Option<PathBuf>,
     /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
     #[arg(long = "ot-subnet", value_name = "CIDR")]
     pub ot_subnets: Vec<IpNet>,
     /// Declare the capture provenance: `span`, `host-side`, or `tap`.
-    /// See `--source-type` on `report`.
+    /// When set, this overrides the heuristic in the report; the
+    /// heuristic still runs as a guard and warns on stderr if it
+    /// disagrees.
     #[arg(long = "source-type", value_name = "TYPE", value_enum)]
     pub source_type: Option<SourceTypeArg>,
     /// Optional Claude model override, passed through to `claude --model`.
+    /// Only meaningful when `--ai` is set.
     #[arg(long = "model", value_name = "MODEL")]
     pub model: Option<String>,
-    /// Print parse summary + privacy ledger lines to stderr.
+    /// Print parse summary + (with `--ai`) privacy ledger lines to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
 }
@@ -182,10 +185,9 @@ pub struct UnscrubArgs {
 
 pub fn run() -> Result<()> {
     match Cli::parse().command {
-        Command::Report(a) => run_report(a),
+        Command::Analyze(a) => run_analyze(a),
         Command::Scrub(a) => run_scrub(a),
         Command::Unscrub(a) => run_unscrub(a),
-        Command::Analyze(a) => run_analyze(a),
         Command::Rules(a) => run_rules(a),
     }
 }
@@ -239,52 +241,13 @@ fn analyze(
     Ok(obs)
 }
 
-fn run_report(args: ReportArgs) -> Result<()> {
-    let ot_subnets = ot_or_default(&args.ot_subnets);
-    if args.verbose {
-        eprintln!(
-            "otsniff {} — reading {}",
-            crate::VERSION,
-            args.input.display()
-        );
-    }
-    let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
-    let classification = classify_with_guard(&obs, args.source_type);
-    let inventory = crate::inventory::build(&obs);
-    let findings = crate::findings::run_all(&obs, &ot_subnets);
-    let html = render_html(
-        &inventory,
-        &findings,
-        &obs,
-        &args.input.display().to_string(),
-        Utc::now(),
-        Some(&classification),
-    )?;
-    std::fs::write(&args.output, html).map_err(|source| OtError::WriteOutput {
-        path: args.output.clone(),
-        source,
-    })?;
-    if let Some(json_path) = &args.json {
-        let payload = serde_json::json!({
-            "version": crate::VERSION,
-            "input": args.input.display().to_string(),
-            "inventory": inventory,
-            "findings": findings,
-        });
-        std::fs::write(json_path, serde_json::to_string_pretty(&payload)?).map_err(|source| {
-            OtError::WriteOutput {
-                path: json_path.clone(),
-                source,
-            }
-        })?;
-    }
-    eprintln!(
-        "wrote {} ({} findings across {} hosts)",
-        args.output.display(),
-        findings.len(),
-        inventory.len()
-    );
-    Ok(())
+/// Derive the default audit-log path from the report output path:
+/// `plant.html` → `plant.audit.json`. Used when `--ai` is set and
+/// `--audit-log` is not explicitly overridden.
+fn default_audit_log_path(output: &std::path::Path) -> PathBuf {
+    let mut p = output.to_path_buf();
+    p.set_extension("audit.json");
+    p
 }
 
 fn run_scrub(args: ScrubArgs) -> Result<()> {
@@ -351,17 +314,46 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
+    let generated_at = Utc::now();
 
-    // 1. Build the rules-based markdown report (real values, never sent
-    //    to AI).
+    // Always build the rules-based markdown — used both as the AI's
+    // input (when --ai is on) and as the --md sidecar.
     let raw_md = render_markdown(
         &inventory,
         &findings,
         &obs,
-        "<scrubbed>",
-        Utc::now(),
+        &args.input.display().to_string(),
+        generated_at,
         Some(&classification),
     )?;
+
+    // Without --ai, the only outputs are the HTML report + optional
+    // --md / --json sidecars. Short-circuit.
+    if !args.ai {
+        let html = render_html(
+            &inventory,
+            &findings,
+            &obs,
+            &args.input.display().to_string(),
+            generated_at,
+            Some(&classification),
+            None,
+        )?;
+        std::fs::write(&args.output, html).map_err(|source| OtError::WriteOutput {
+            path: args.output.clone(),
+            source,
+        })?;
+        write_optional_sidecars(&args, &raw_md, &inventory, &findings)?;
+        eprintln!(
+            "wrote {} ({} findings across {} hosts)",
+            args.output.display(),
+            findings.len(),
+            inventory.len()
+        );
+        return Ok(());
+    }
+
+    // ---- --ai path: scrub → leak-check → invoke claude → unscrub → embed
 
     // 2. Mint pseudonyms and produce the scrubbed payload that will go
     //    to the AI.
@@ -446,18 +438,51 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         );
     }
 
-    // 6. Write the combined report: rules-based markdown + AI section,
-    //    using the unscrubbed (real-value) versions for the user.
-    let mut combined = raw_md;
-    combined.push('\n');
-    combined.push_str(&unscrubbed_response);
-    combined.push('\n');
-
-    std::fs::write(&args.output, combined).map_err(|source| OtError::WriteOutput {
+    // 6. Render the AI's markdown response to safe HTML and embed in
+    //    the report. pulldown-cmark with raw-HTML events filtered, so
+    //    a Claude response containing `<script>` doesn't XSS whoever
+    //    opens the report.
+    let ai_html = crate::ai::html_render::render_safe(&unscrubbed_response);
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        &args.input.display().to_string(),
+        generated_at,
+        Some(&classification),
+        Some(ai_html),
+    )?;
+    std::fs::write(&args.output, html).map_err(|source| OtError::WriteOutput {
         path: args.output.clone(),
         source,
     })?;
 
+    // 7. Optional sidecars: markdown (combined: rules + AI), JSON,
+    //    pseudonym map.
+    if let Some(md_path) = &args.md {
+        let mut combined = raw_md.clone();
+        combined.push('\n');
+        combined.push_str(&unscrubbed_response);
+        combined.push('\n');
+        std::fs::write(md_path, combined).map_err(|source| OtError::WriteOutput {
+            path: md_path.clone(),
+            source,
+        })?;
+    }
+    if let Some(json_path) = &args.json {
+        let payload = serde_json::json!({
+            "version": crate::VERSION,
+            "input": args.input.display().to_string(),
+            "inventory": inventory,
+            "findings": findings,
+        });
+        std::fs::write(json_path, serde_json::to_string_pretty(&payload)?).map_err(|source| {
+            OtError::WriteOutput {
+                path: json_path.clone(),
+                source,
+            }
+        })?;
+    }
     if let Some(map_path) = &args.map {
         let map_json = serde_json::to_string_pretty(&map)?;
         std::fs::write(map_path, map_json).map_err(|source| OtError::WriteOutput {
@@ -466,82 +491,109 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         })?;
     }
 
-    // 7. Audit log. Only computed (and only causes the input PCAP to be
-    //    re-read for hashing) when --audit-log is set. The log itself
-    //    passes through both leak checks before write — even though it
-    //    only carries counts + hashes, treating it as suspect on write
-    //    means a future field added carelessly can't bypass the
-    //    invariant.
-    if let Some(audit_path) = &args.audit_log {
-        let (size_bytes, sha256) = audit::sha256_file_hex(&args.input)?;
-        let log = AuditLog {
-            schema_version: audit::SCHEMA_VERSION,
-            otsniff_version: crate::VERSION.to_string(),
-            timestamp: Utc::now(),
-            input_pcap: InputDescriptor {
-                path: args.input.display().to_string(),
-                size_bytes,
-                sha256,
-            },
-            scrub: scrub_summary,
-            leak_check,
-            ai_provider: AiInvocationSummary {
-                command: format!(
-                    "claude -p{}",
-                    args.model
-                        .as_deref()
-                        .map(|m| format!(" --model {m}"))
-                        .unwrap_or_default()
-                ),
-                model: model_label,
-                system_prompt_bytes: system_prompt.len(),
-                system_prompt_sha256: audit::sha256_hex(&system_prompt),
-                user_message_bytes: user_message.len(),
-                user_message_sha256: audit::sha256_hex(&user_message),
-                response_bytes: scrubbed_response.len(),
-                response_sha256: audit::sha256_hex(&scrubbed_response),
-                elapsed_seconds: elapsed.as_secs_f64(),
-            },
-            unscrub: UnscrubSummary {
-                pseudonyms_replaced: replaced,
-                pseudonyms_unmapped: unmapped.len(),
-            },
-        };
-        let log_json = serde_json::to_string_pretty(&log)?;
-        // Belt-and-braces: scan the rendered audit log itself for any
-        // real identifier before write. With the current fields this
-        // is impossible — but a future contributor might add a field
-        // without thinking about the invariant. Better to fail-closed
-        // than ship a leaky log.
-        leak_detector::ensure_clean(&log_json)?;
-        leak_detector::ensure_no_map_values(&log_json, &map)?;
-        std::fs::write(audit_path, log_json).map_err(|source| OtError::WriteOutput {
-            path: audit_path.clone(),
-            source,
-        })?;
-        if args.verbose {
-            eprintln!("  wrote audit log → {}", audit_path.display());
-        }
+    // 8. Audit log. Always written when --ai is on; the audit log is
+    //    the privacy contract receipt. Path defaults to a `.audit.json`
+    //    alongside the report output unless `--audit-log` overrides.
+    //    The log itself passes through both leak checks before write
+    //    — even though it only carries counts + hashes, treating it as
+    //    suspect on write means a future field added carelessly can't
+    //    bypass the invariant.
+    let audit_path = args
+        .audit_log
+        .clone()
+        .unwrap_or_else(|| default_audit_log_path(&args.output));
+    let (size_bytes, sha256) = audit::sha256_file_hex(&args.input)?;
+    let log = AuditLog {
+        schema_version: audit::SCHEMA_VERSION,
+        otsniff_version: crate::VERSION.to_string(),
+        timestamp: generated_at,
+        input_pcap: InputDescriptor {
+            path: args.input.display().to_string(),
+            size_bytes,
+            sha256,
+        },
+        scrub: scrub_summary,
+        leak_check,
+        ai_provider: AiInvocationSummary {
+            command: format!(
+                "claude -p{}",
+                args.model
+                    .as_deref()
+                    .map(|m| format!(" --model {m}"))
+                    .unwrap_or_default()
+            ),
+            model: model_label,
+            system_prompt_bytes: system_prompt.len(),
+            system_prompt_sha256: audit::sha256_hex(&system_prompt),
+            user_message_bytes: user_message.len(),
+            user_message_sha256: audit::sha256_hex(&user_message),
+            response_bytes: scrubbed_response.len(),
+            response_sha256: audit::sha256_hex(&scrubbed_response),
+            elapsed_seconds: elapsed.as_secs_f64(),
+        },
+        unscrub: UnscrubSummary {
+            pseudonyms_replaced: replaced,
+            pseudonyms_unmapped: unmapped.len(),
+        },
+    };
+    let log_json = serde_json::to_string_pretty(&log)?;
+    leak_detector::ensure_clean(&log_json)?;
+    leak_detector::ensure_no_map_values(&log_json, &map)?;
+    std::fs::write(&audit_path, log_json).map_err(|source| OtError::WriteOutput {
+        path: audit_path.clone(),
+        source,
+    })?;
+    if args.verbose {
+        eprintln!("  wrote audit log → {}", audit_path.display());
     }
 
+    let unmapped_clause = if unmapped.is_empty() {
+        String::new()
+    } else {
+        format!(", {} unknown left as-is", unmapped.len())
+    };
+    let map_clause = match &args.map {
+        Some(p) => format!(", map saved to {}", p.display()),
+        None => String::new(),
+    };
     eprintln!(
-        "wrote {} ({} pseudonyms unscrubbed{}{}{})",
+        "wrote {} ({} pseudonyms unscrubbed{}{}, audit log → {})",
         args.output.display(),
         replaced,
-        if unmapped.is_empty() {
-            String::new()
-        } else {
-            format!(", {} unknown left as-is", unmapped.len())
-        },
-        match &args.map {
-            Some(p) => format!(", map saved to {}", p.display()),
-            None => String::new(),
-        },
-        match &args.audit_log {
-            Some(p) => format!(", audit log → {}", p.display()),
-            None => String::new(),
-        }
+        unmapped_clause,
+        map_clause,
+        audit_path.display(),
     );
+    Ok(())
+}
+
+/// Shared sidecar writer used by the no-`--ai` short-circuit path.
+fn write_optional_sidecars(
+    args: &AnalyzeArgs,
+    raw_md: &str,
+    inventory: &[crate::inventory::Asset],
+    findings: &[crate::findings::Finding],
+) -> Result<()> {
+    if let Some(md_path) = &args.md {
+        std::fs::write(md_path, raw_md).map_err(|source| OtError::WriteOutput {
+            path: md_path.clone(),
+            source,
+        })?;
+    }
+    if let Some(json_path) = &args.json {
+        let payload = serde_json::json!({
+            "version": crate::VERSION,
+            "input": args.input.display().to_string(),
+            "inventory": inventory,
+            "findings": findings,
+        });
+        std::fs::write(json_path, serde_json::to_string_pretty(&payload)?).map_err(|source| {
+            OtError::WriteOutput {
+                path: json_path.clone(),
+                source,
+            }
+        })?;
+    }
     Ok(())
 }
 

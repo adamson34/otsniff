@@ -3,7 +3,7 @@
 One-shot OT-aware PCAP triage. Feed it a span-port capture, get a self-contained HTML report you can hand to a plant manager, IT director, or on-site engineer.
 
 ```sh
-otsniff report plant-capture.pcap -o report.html
+otsniff analyze plant-capture.pcap -o report.html
 ```
 
 ![otsniff demo](media/demo.gif)
@@ -88,21 +88,27 @@ Requires Rust 1.85+.
 
 ```sh
 # Standard HTML report:
-otsniff report input.pcap -o report.html
+otsniff analyze input.pcap -o report.html
+
+# Plus an AI-generated analysis section (privacy-preserving — see below):
+otsniff analyze input.pcap -o report.html --ai
 
 # Tell the tool the capture provenance (recommended). Without it, a
 # heuristic guesses; with it, the heuristic demotes to a guard and
 # warns on stderr if your declaration disagrees with what the frame
 # distribution looks like.
-otsniff report input.pcap --source-type span -o report.html
-otsniff report input.pcap --source-type host-side -o report.html
-otsniff report input.pcap --source-type tap -o report.html
+otsniff analyze input.pcap --source-type span -o report.html
+otsniff analyze input.pcap --source-type host-side -o report.html
+otsniff analyze input.pcap --source-type tap -o report.html
 
 # Treat extra subnets as OT (in addition to the default RFC1918):
-otsniff report input.pcap --ot-subnet 100.64.0.0/16
+otsniff analyze input.pcap --ot-subnet 100.64.0.0/16
 
-# Also emit findings + inventory as JSON:
-otsniff report input.pcap --json findings.json
+# Also emit findings + inventory as JSON sidecar:
+otsniff analyze input.pcap --json findings.json
+
+# Also emit the markdown form (useful as input to other tooling):
+otsniff analyze input.pcap --md report.md
 ```
 
 ### AI-assisted triage
@@ -114,15 +120,15 @@ For when you want an AI to look at a capture but can't legally send raw plant da
 **Closed-loop, one command** — uses your local Claude Code CLI auth and subscription:
 
 ```sh
-otsniff analyze plant.pcap -o report.md \
+otsniff analyze plant.pcap -o report.html --ai \
   --ot-subnet 10.10.10.0/24 \
   --source-type span \
-  --map plant.map.json \
-  --audit-log plant.audit.json \
   --verbose
 ```
 
-Internally: scrub → fail-closed leak check (regex + map-value) → invoke `claude -p` → unscrub the response → append to `report.md`. The AI never sees real IPs, MACs, or hostnames at any point.
+This is the same `analyze` command as the rules-only run, with `--ai` flipped on. Internally: scrub → fail-closed leak check (regex + map-value) → invoke `claude -p` → unscrub the response → embed as an "AI analysis" section in the rendered HTML. The AI never sees real IPs, MACs, or hostnames at any point.
+
+When `--ai` is on, the **privacy audit log** is written automatically alongside the report — `report.html` → `report.audit.json`. Override the location with `--audit-log <PATH>` if you want it elsewhere.
 
 With `--verbose` the privacy ledger prints inline as it runs:
 
@@ -134,11 +140,11 @@ With `--verbose` the privacy ledger prints inline as it runs:
   unscrubbing... 14 pseudonyms replaced, 0 unmapped
 ```
 
-With `--audit-log PATH`, the same data persists as a JSON chain-of-custody artifact — counts plus SHA-256 hashes of the exact bytes sent to and received from the provider. **No real identifiers in the log.** Useful evidence for a compliance reviewer that the scrub invariant held for a given run.
+The audit log persists this same data as a JSON chain-of-custody artifact — counts plus SHA-256 hashes of the exact bytes sent to and received from the provider. **No real identifiers in the log.** Useful evidence for a compliance reviewer that the scrub invariant held for a given run.
 
-Requires the [Claude Code CLI](https://claude.com/code) installed and authenticated. Optional flags: `--model` (passthrough to `claude --model`), `--map PATH` (persist the pseudonym map for later unscrub of follow-up text), `--ot-subnet` (extra OT CIDRs).
+Requires the [Claude Code CLI](https://claude.com/code) installed and authenticated. Optional flags: `--model` (passthrough to `claude --model`), `--map PATH` (persist the pseudonym map for later unscrub of follow-up AI text — most users don't need this since the AI section in the HTML is already unscrubbed inline), `--ot-subnet` (extra OT CIDRs).
 
-**Manual flow, useful with any AI:**
+**Manual flow, useful with any other AI:**
 
 ```sh
 # 1. Scrub: produces an LLM-safe markdown report + a local map.
@@ -151,6 +157,8 @@ otsniff unscrub --map plant.scrubmap.json ai-response.txt > final.txt
 ```
 
 The map file is the only thing tying pseudonyms to real values — keep it where you'd keep the original PCAP. Without it, scrubbed output is `host_NNN` / `mac_NNN` / `name_NNN` references with no way back to a real network.
+
+> The `scrub` / `unscrub` subcommands exist for the "bring your own AI" use case — Claude.ai web UI, ChatGPT, a local Ollama model, anything that isn't the `claude` CLI. If you're using the `claude` CLI, `analyze --ai` is the one-command path and you don't need to touch these.
 
 ## Scope
 
