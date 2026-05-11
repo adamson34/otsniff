@@ -504,8 +504,15 @@ fn finding_evidence_surfaces_hostnames_when_we_know_them() {
     let obs = build_fixture();
     let inventory = build_inventory(&obs);
     let findings = run_all(&obs, &ot_subnets());
-    let raw_md =
-        render_markdown(&inventory, &findings, &obs, "<unscrubbed>", fixed_ts(), None).unwrap();
+    let raw_md = render_markdown(
+        &inventory,
+        &findings,
+        &obs,
+        "<unscrubbed>",
+        fixed_ts(),
+        None,
+    )
+    .unwrap();
     assert!(
         raw_md.contains("ENG-WS-01 (10.10.0.5)") || raw_md.contains("PLC-LINE3 (10.10.0.20)"),
         "no finding evidence carries a hostname-decorated label — the host_label \
