@@ -14,7 +14,17 @@ tests/fixtures/*.html
 
 # Reports / scratch
 *.report.html
+/report.html
+/report.md
+/findings.json
 out/
+
+# AI-flow artifacts — `*.map.json` is a deanonymization key for any
+# scrubbed AI output. `*.audit.json` is the per-run chain-of-custody
+# log. Neither should be committed.
+*.map.json
+*.audit.json
+*.scrubbed.md
 
 # OS / editor
 .DS_Store
