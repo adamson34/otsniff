@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use chrono::Utc;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use ipnet::IpNet;
 
 use crate::ai::claude_cli::ClaudeCliProvider;
@@ -13,7 +13,28 @@ use crate::audit::{
     self, AiInvocationSummary, AuditLog, InputDescriptor, LeakCheckResult, LeakCheckSummary,
     ScrubSummary, UnscrubSummary,
 };
+use crate::capture_source::DeclaredSource;
 use crate::error::{OtError, Result};
+
+/// CLI form of `DeclaredSource`. Separate enum so we own the clap
+/// `ValueEnum` derive without polluting the core type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum SourceTypeArg {
+    Span,
+    HostSide,
+    Tap,
+}
+
+impl From<SourceTypeArg> for DeclaredSource {
+    fn from(a: SourceTypeArg) -> Self {
+        match a {
+            SourceTypeArg::Span => DeclaredSource::Span,
+            SourceTypeArg::HostSide => DeclaredSource::HostSide,
+            SourceTypeArg::Tap => DeclaredSource::Tap,
+        }
+    }
+}
 use crate::observe::Observer;
 use crate::pcap::iter_packets;
 use crate::report::render_html;
@@ -63,6 +84,12 @@ pub struct ReportArgs {
     /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
     #[arg(long = "ot-subnet", value_name = "CIDR")]
     pub ot_subnets: Vec<IpNet>,
+    /// Declare the capture provenance: `span`, `host-side`, or `tap`.
+    /// When set, this overrides the heuristic in the report; the
+    /// heuristic still runs as a guard and warns on stderr if it
+    /// disagrees.
+    #[arg(long = "source-type", value_name = "TYPE", value_enum)]
+    pub source_type: Option<SourceTypeArg>,
     /// Also write findings + inventory as JSON to this path.
     #[arg(long = "json", value_name = "PATH")]
     pub json: Option<PathBuf>,
@@ -85,6 +112,10 @@ pub struct ScrubArgs {
     /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
     #[arg(long = "ot-subnet", value_name = "CIDR")]
     pub ot_subnets: Vec<IpNet>,
+    /// Declare the capture provenance: `span`, `host-side`, or `tap`.
+    /// See `--source-type` on `report`.
+    #[arg(long = "source-type", value_name = "TYPE", value_enum)]
+    pub source_type: Option<SourceTypeArg>,
     /// Print parse summary to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
@@ -113,6 +144,10 @@ pub struct AnalyzeArgs {
     /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
     #[arg(long = "ot-subnet", value_name = "CIDR")]
     pub ot_subnets: Vec<IpNet>,
+    /// Declare the capture provenance: `span`, `host-side`, or `tap`.
+    /// See `--source-type` on `report`.
+    #[arg(long = "source-type", value_name = "TYPE", value_enum)]
+    pub source_type: Option<SourceTypeArg>,
     /// Optional Claude model override, passed through to `claude --model`.
     #[arg(long = "model", value_name = "MODEL")]
     pub model: Option<String>,
@@ -166,6 +201,21 @@ fn ot_or_default(supplied: &[IpNet]) -> Vec<IpNet> {
     }
 }
 
+/// Run the heuristic classifier, apply any user-declared `--source-type`,
+/// and emit the guard warning to stderr if the two disagree. Used by
+/// every subcommand that classifies a capture (report / scrub / analyze).
+fn classify_with_guard(
+    obs: &crate::observe::Observations,
+    declared: Option<SourceTypeArg>,
+) -> crate::capture_source::Classification {
+    let classification =
+        crate::capture_source::classify(obs).with_declared(declared.map(Into::into));
+    if let Some(warning) = classification.guard_warning() {
+        eprintln!("WARNING: {warning}");
+    }
+    classification
+}
+
 fn analyze(
     input: &std::path::Path,
     ot_subnets: &[IpNet],
@@ -199,7 +249,7 @@ fn run_report(args: ReportArgs) -> Result<()> {
         );
     }
     let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
-    let classification = crate::capture_source::classify(&obs);
+    let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
     let html = render_html(
@@ -247,7 +297,7 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
         );
     }
     let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
-    let classification = crate::capture_source::classify(&obs);
+    let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
 
@@ -298,7 +348,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         );
     }
     let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
-    let classification = crate::capture_source::classify(&obs);
+    let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
 

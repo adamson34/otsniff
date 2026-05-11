@@ -339,6 +339,7 @@ fn classification_report_line_does_not_leak_unscrubbed_values_via_pseudonym_path
         },
         confidence: Confidence::High,
         frames_analyzed: 10_000,
+        declared: None,
     };
     let line = classification.report_line();
     assert!(line.contains(&mac_str));
