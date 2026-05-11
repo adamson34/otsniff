@@ -16,7 +16,7 @@ fn help_flag_succeeds() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("report"))
+        .stdout(predicate::str::contains("analyze"))
         .stdout(predicate::str::contains("scrub"))
         .stdout(predicate::str::contains("unscrub"));
 }
@@ -41,14 +41,15 @@ fn no_subcommand_fails() {
 }
 
 #[test]
-fn report_help_describes_command() {
+fn analyze_help_describes_command() {
     Command::cargo_bin("otsniff")
         .unwrap()
-        .args(["report", "--help"])
+        .args(["analyze", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("HTML report"))
-        .stdout(predicate::str::contains("--ot-subnet"));
+        .stdout(predicate::str::contains("HTML"))
+        .stdout(predicate::str::contains("--ot-subnet"))
+        .stdout(predicate::str::contains("--ai"));
 }
 
 #[test]
@@ -74,12 +75,12 @@ fn unscrub_help_describes_command() {
 }
 
 #[test]
-fn report_nonexistent_input_exits_2() {
+fn analyze_nonexistent_input_exits_2() {
     let tmp = TempDir::new().unwrap();
     let bogus = tmp.path().join("does-not-exist.pcap");
     Command::cargo_bin("otsniff")
         .unwrap()
-        .args(["report"])
+        .args(["analyze"])
         .arg(&bogus)
         .arg("-o")
         .arg(tmp.path().join("out.html"))
@@ -89,13 +90,13 @@ fn report_nonexistent_input_exits_2() {
 }
 
 #[test]
-fn report_malformed_input_exits_2() {
+fn analyze_malformed_input_exits_2() {
     let tmp = TempDir::new().unwrap();
     let bad = tmp.path().join("garbage.pcap");
     std::fs::write(&bad, b"this is not a pcap file at all").unwrap();
     Command::cargo_bin("otsniff")
         .unwrap()
-        .args(["report"])
+        .args(["analyze"])
         .arg(&bad)
         .arg("-o")
         .arg(tmp.path().join("out.html"))
@@ -105,7 +106,7 @@ fn report_malformed_input_exits_2() {
 }
 
 #[test]
-fn report_valid_pcap_produces_html_and_exits_0() {
+fn analyze_valid_pcap_produces_html_and_exits_0() {
     let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
     if !pcap.exists() {
         eprintln!("skipping: tests/fixtures/Modbus.pcap not present");
@@ -115,7 +116,7 @@ fn report_valid_pcap_produces_html_and_exits_0() {
     let out = tmp.path().join("report.html");
     Command::cargo_bin("otsniff")
         .unwrap()
-        .args(["report"])
+        .args(["analyze"])
         .arg(&pcap)
         .arg("-o")
         .arg(&out)
@@ -186,7 +187,8 @@ fn scrub_round_trip_via_pcap() {
 fn unscrub_strict_mode_fails_on_unknown_token() {
     let tmp = TempDir::new().unwrap();
     let map_path = tmp.path().join("empty-map.json");
-    let empty_map = r#"{"version":1,"created_at":"2026-05-07T12:00:00Z","ips":{},"macs":{}}"#;
+    let empty_map =
+        r#"{"version":1,"created_at":"2026-05-07T12:00:00Z","ips":{},"macs":{},"names":{}}"#;
     std::fs::write(&map_path, empty_map).unwrap();
     let input = tmp.path().join("ai.txt");
     std::fs::write(&input, "host_007 is suspicious").unwrap();

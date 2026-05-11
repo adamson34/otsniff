@@ -10,6 +10,7 @@
 //! scrubbed.
 
 pub mod claude_cli;
+pub mod html_render;
 pub mod leak_detector;
 pub mod prompts;
 

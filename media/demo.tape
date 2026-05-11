@@ -61,11 +61,11 @@ Enter
 Show
 
 ## --- 3. Run the rules-based report on a public capture ---------------
-##     Default OT zone is RFC1918 (10/8, 172.16/12, 192.168/16), which
+##     `analyze` is the one verb. Default OT zone is RFC1918, which
 ##     matches the 4SICS demo network and exercises every cross-zone
-##     finding. Use `--ot-subnet <CIDR>` repeatedly on real captures to
-##     pin OT to specific PLC ranges.
-Type "otsniff report demo.pcap -o demo.report.html --json demo.json --verbose"
+##     finding. Pass --ai (not shown here — would require claude auth)
+##     to also embed a Claude-generated analysis section.
+Type "otsniff analyze demo.pcap -o demo.report.html --json demo.json --verbose"
 Sleep 400ms
 Enter
 Sleep 4s

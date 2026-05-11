@@ -21,6 +21,7 @@ ipnet = { version = "2.10", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.11"
 sha2 = "0.10"
+pulldown-cmark = { version = "0.10", default-features = false, features = ["html"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

@@ -219,6 +219,7 @@ fn html_report_snapshot() {
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
         None,
+        None,
     )
     .unwrap();
     insta::assert_snapshot!("report_html", html);
@@ -522,6 +523,44 @@ fn finding_evidence_surfaces_hostnames_when_we_know_them() {
 }
 
 #[test]
+fn ai_section_in_html_strips_script_tags_from_claude_response() {
+    // Sentinel for the unified analyze flow: when Claude's markdown
+    // response contains a `<script>` tag, the rendered HTML must not
+    // carry it through. This is the XSS defense documented in
+    // `ai::html_render::render_safe`.
+    use otsniff::ai::html_render::render_safe;
+
+    let ai_md = "## AI says\n\nSome analysis.\n\n<script>alert('xss')</script>\n\nMore prose.";
+    let ai_html = render_safe(ai_md);
+
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        Some(ai_html),
+    )
+    .unwrap();
+
+    assert!(
+        !html.contains("<script>"),
+        "AI section let a <script> tag through into rendered HTML"
+    );
+    assert!(
+        !html.contains("alert"),
+        "AI section let `alert` body through into rendered HTML"
+    );
+    // The legitimate prose around the script should survive.
+    assert!(html.contains("Some analysis."));
+    assert!(html.contains("More prose."));
+}
+
+#[test]
 fn audit_log_rendered_for_an_analyze_run_carries_no_real_identifiers() {
     // Sentinel for the privacy ledger introduced in feat/analyze-audit-log:
     // even though the AuditLog struct carries only counts and SHA-256
@@ -617,6 +656,7 @@ fn cred_event_note_must_not_reach_any_rendered_output() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
     )
     .unwrap();

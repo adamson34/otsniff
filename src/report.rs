@@ -30,6 +30,13 @@ struct ReportView {
     findings: Vec<FindingView>,
     assets: Vec<AssetView>,
     top_flows: Vec<TopFlow>,
+    /// Pre-rendered HTML for the AI section, if any. Already passed
+    /// through `ai::html_render::render_safe`, so raw HTML events
+    /// in the AI's markdown response (e.g. `<script>`) are stripped
+    /// before embedding here. The template uses `|safe` to skip
+    /// askama escaping — that's intentional and only sound because
+    /// of the prior filtering.
+    ai_section: Option<String>,
 }
 
 struct FindingView {
@@ -77,6 +84,7 @@ pub fn render_html(
     input_label: &str,
     generated_at: DateTime<Utc>,
     capture_source: Option<&Classification>,
+    ai_section: Option<String>,
 ) -> Result<String> {
     let span = match (obs.first_ts, obs.last_ts) {
         (Some(a), Some(b)) => format!("{} → {}", fmt_ts(a), fmt_ts(b)),
@@ -154,6 +162,7 @@ pub fn render_html(
         findings: findings_view,
         assets: assets_view,
         top_flows,
+        ai_section,
     };
     Ok(view.render()?)
 }
