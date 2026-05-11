@@ -2,7 +2,7 @@ use std::net::IpAddr;
 
 use crate::observe::Observations;
 
-use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
 pub const METADATA: RuleMetadata = RuleMetadata {
     id: "compat.smbv1",
@@ -48,7 +48,13 @@ pub fn detect(obs: &Observations) -> Vec<Finding> {
     let evidence: Vec<String> = sorted
         .iter()
         .take(15)
-        .map(|((src, dst, port), n)| format!("{src} -> {dst}:{port} ({n} SMBv1 packet(s))"))
+        .map(|((src, dst, port), n)| {
+            format!(
+                "{} -> {}:{port} ({n} SMBv1 packet(s))",
+                host_label(*src, obs),
+                host_label(*dst, obs),
+            )
+        })
         .collect();
 
     let summary = format!(

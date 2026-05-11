@@ -4,7 +4,7 @@ use ipnet::IpNet;
 
 use crate::observe::Observations;
 
-use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
 pub const METADATA: RuleMetadata = RuleMetadata {
     id: "ot.unexpected_protocols",
@@ -70,8 +70,8 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
             if bucket.len() < 5 {
                 bucket.push(format!(
                     "{} -> {}:{} ({} pkts, {} conns)",
-                    flow.key.src,
-                    flow.key.dst,
+                    host_label(flow.key.src, obs),
+                    host_label(flow.key.dst, obs),
                     flow.key.dst_port,
                     flow.packets,
                     flow.connections()

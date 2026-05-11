@@ -5,7 +5,7 @@ use ipnet::IpNet;
 
 use crate::observe::Observations;
 
-use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
 pub const METADATA: RuleMetadata = RuleMetadata {
     id: "boundary.dns_resolver",
@@ -60,7 +60,13 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     let evidence: Vec<String> = sorted
         .iter()
         .take(15)
-        .map(|((src, dst), n)| format!("{src} -> {dst}:53 (UDP/TCP, {n} packet(s))"))
+        .map(|((src, dst), n)| {
+            format!(
+                "{} -> {}:53 (UDP/TCP, {n} packet(s))",
+                host_label(*src, obs),
+                host_label(*dst, obs),
+            )
+        })
         .collect();
 
     let distinct_clients: std::collections::BTreeSet<IpAddr> =

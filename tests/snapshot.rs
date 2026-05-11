@@ -495,6 +495,25 @@ fn every_finding_id_appears_in_the_rule_catalog() {
 }
 
 #[test]
+fn finding_evidence_surfaces_hostnames_when_we_know_them() {
+    // The fixture has hostnames for 10.10.0.5 (ENG-WS-01) and 10.10.0.20
+    // (PLC-LINE3). At least one finding's evidence must reference a host
+    // by name. If this regresses, the hostname extraction is happening
+    // but the *value* (operators recognizing assets by name) has been
+    // lost in the renderer.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<unscrubbed>", fixed_ts(), None).unwrap();
+    assert!(
+        raw_md.contains("ENG-WS-01 (10.10.0.5)") || raw_md.contains("PLC-LINE3 (10.10.0.20)"),
+        "no finding evidence carries a hostname-decorated label — the host_label \
+         helper is not being applied where we expected"
+    );
+}
+
+#[test]
 fn audit_log_rendered_for_an_analyze_run_carries_no_real_identifiers() {
     // Sentinel for the privacy ledger introduced in feat/analyze-audit-log:
     // even though the AuditLog struct carries only counts and SHA-256
