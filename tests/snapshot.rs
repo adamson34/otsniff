@@ -13,6 +13,7 @@ use ipnet::IpNet;
 
 use otsniff::ai::leak_detector;
 use otsniff::ai::prompts;
+use otsniff::audit;
 use otsniff::capture_source::{classify, CaptureSource, Classification, Confidence};
 use otsniff::findings::run_all;
 use otsniff::findings::{catalog, metadata_for};
@@ -491,6 +492,74 @@ fn every_finding_id_appears_in_the_rule_catalog() {
             f.id
         );
     }
+}
+
+#[test]
+fn audit_log_rendered_for_an_analyze_run_carries_no_real_identifiers() {
+    // Sentinel for the privacy ledger introduced in feat/analyze-audit-log:
+    // even though the AuditLog struct carries only counts and SHA-256
+    // hex digests, a future contributor might add a field that
+    // accidentally includes a real identifier. This test builds a log
+    // populated as the analyze pipeline would, scans it with the
+    // leak detector, and verifies clean.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed_md = scrub_text(&raw_md, &map);
+    let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);
+
+    let log = otsniff::audit::AuditLog {
+        schema_version: audit::SCHEMA_VERSION,
+        otsniff_version: "0.3.0-test".to_string(),
+        timestamp: fixed_ts(),
+        input_pcap: audit::InputDescriptor {
+            path: "tests/fixtures/synthetic.pcap".to_string(),
+            size_bytes: 1024,
+            sha256: audit::sha256_hex("synthetic-pcap-bytes"),
+        },
+        scrub: audit::ScrubSummary {
+            ip_pseudonyms: map.ips.len(),
+            mac_pseudonyms: map.macs.len(),
+            hostname_pseudonyms: map.names.len(),
+        },
+        leak_check: audit::LeakCheckSummary {
+            regex: audit::LeakCheckResult {
+                passed: true,
+                items_checked: 3,
+            },
+            map_value: audit::LeakCheckResult {
+                passed: true,
+                items_checked: map.ips.len() + map.macs.len() + map.names.len(),
+            },
+        },
+        ai_provider: audit::AiInvocationSummary {
+            command: "claude -p".to_string(),
+            model: "default".to_string(),
+            system_prompt_bytes: prompts::SYSTEM_PROMPT.len(),
+            system_prompt_sha256: audit::sha256_hex(prompts::SYSTEM_PROMPT),
+            user_message_bytes: user_message.len(),
+            user_message_sha256: audit::sha256_hex(&user_message),
+            response_bytes: 0,
+            response_sha256: audit::sha256_hex(""),
+            elapsed_seconds: 0.0,
+        },
+        unscrub: audit::UnscrubSummary {
+            pseudonyms_replaced: 0,
+            pseudonyms_unmapped: 0,
+        },
+    };
+    let log_json = serde_json::to_string_pretty(&log).unwrap();
+
+    // Regex check: no IPv4/IPv6/MAC-shaped patterns survived.
+    leak_detector::ensure_clean(&log_json)
+        .expect("audit log JSON contained a regex-detectable identifier leak");
+    // Map-value check: no real value from the scrub map appears verbatim
+    // in the audit log (would catch hostname leaks that the regex misses).
+    leak_detector::ensure_no_map_values(&log_json, &map)
+        .expect("audit log JSON contained a real value from the scrub map");
 }
 
 #[test]
