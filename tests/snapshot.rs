@@ -15,6 +15,7 @@ use otsniff::ai::leak_detector;
 use otsniff::ai::prompts;
 use otsniff::capture_source::{classify, CaptureSource, Classification, Confidence};
 use otsniff::findings::run_all;
+use otsniff::findings::{catalog, metadata_for};
 use otsniff::inventory::build as build_inventory;
 use otsniff::observe::{
     CredEvent, CredKind, EnipEvent, ExternalFlow, FlowKey, FlowObs, HostObs, ModbusEvent,
@@ -22,6 +23,7 @@ use otsniff::observe::{
 };
 use otsniff::report::render_html;
 use otsniff::report_md::render_markdown;
+use otsniff::rule_catalog::{render, CatalogFormat};
 use otsniff::scrub::{build_map_at, scrub_text, unscrub_text};
 
 fn fixed_ts() -> chrono::DateTime<Utc> {
@@ -430,6 +432,65 @@ fn invariant_no_real_values_reach_ai_provider() {
     // Map-value check: catches hostname leaks the regex check can't see.
     leak_detector::ensure_no_map_values(&user_message, &map)
         .expect("user message contains an unscrambled value from the scrub map");
+}
+
+#[test]
+fn rule_catalog_matches_committed_rules_md() {
+    // The committed `docs/RULES.md` is the auto-generated catalog. If
+    // you change rule metadata in the source, regen the file:
+    //
+    //     cargo run -- rules > docs/RULES.md
+    //
+    // If the test fails, the catalog and the committed doc are out of
+    // sync. Regen, review the diff, and commit alongside your changes.
+    let committed = std::fs::read_to_string("docs/RULES.md")
+        .expect("docs/RULES.md must exist — run `cargo run -- rules > docs/RULES.md` to generate");
+    let generated = render(&catalog(), CatalogFormat::Markdown);
+    assert_eq!(
+        committed, generated,
+        "docs/RULES.md is stale. Regen with: cargo run -- rules > docs/RULES.md"
+    );
+}
+
+#[test]
+fn every_rule_has_non_empty_metadata() {
+    // Every rule in the catalog must have all metadata fields populated.
+    // A detector that ships with empty trigger/data_source is undetectable
+    // through `otsniff rules` and the inline trigger line.
+    for r in catalog() {
+        assert!(!r.id.is_empty(), "rule has empty id");
+        assert!(!r.title.is_empty(), "rule {} has empty title", r.id);
+        assert!(!r.trigger.is_empty(), "rule {} has empty trigger", r.id);
+        assert!(
+            !r.data_source.is_empty(),
+            "rule {} has no data_source — what Observations field does it read?",
+            r.id
+        );
+        assert!(
+            r.data_source.iter().all(|s| !s.is_empty()),
+            "rule {} has an empty data_source entry",
+            r.id
+        );
+    }
+}
+
+#[test]
+fn every_finding_id_appears_in_the_rule_catalog() {
+    // Every Finding produced by the fixture must have its id present
+    // in the catalog. Catches typos and orphaned detectors (a finding
+    // that fires but has no metadata entry, so reviewers can't see
+    // what triggers it).
+    let obs = build_fixture();
+    let findings = otsniff::findings::run_all(&obs, &ot_subnets());
+    assert!(!findings.is_empty(), "fixture should produce findings");
+    for f in &findings {
+        assert!(
+            metadata_for(f.id).is_some(),
+            "finding {} fired but has no entry in the rule catalog — \
+             add a RuleMetadata block alongside the detector",
+            f.id
+        );
+    }
 }
 
 #[test]

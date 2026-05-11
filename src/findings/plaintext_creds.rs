@@ -3,7 +3,102 @@ use std::net::IpAddr;
 
 use crate::observe::{CredEvent, CredKind, Observations};
 
-use super::{Finding, Severity};
+use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+
+pub const FTP_METADATA: RuleMetadata = RuleMetadata {
+    id: "creds.ftp",
+    title: "Plaintext FTP authentication observed",
+    severity: Severity::Critical,
+    trigger: "Fires when at least one TCP/21 packet starts with `USER ` \
+              or `PASS ` (case-insensitive). FTP transmits credentials \
+              and data in cleartext; any host on a SPAN-port of the \
+              same VLAN can capture them.",
+    data_source: &["cred_events (kind = FtpAuth)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Cwe,
+            label: "CWE-319 — Cleartext Transmission of Sensitive Information",
+            url: Some("https://cwe.mitre.org/data/definitions/319.html"),
+        },
+        Reference {
+            kind: ReferenceKind::Rfc,
+            label: "RFC 959 — File Transfer Protocol",
+            url: Some("https://datatracker.ietf.org/doc/html/rfc959"),
+        },
+    ],
+};
+
+pub const TELNET_METADATA: RuleMetadata = RuleMetadata {
+    id: "creds.telnet",
+    title: "Telnet session observed (cleartext by definition)",
+    severity: Severity::Critical,
+    trigger: "Fires when any non-empty payload is observed on TCP/23 \
+              (src or dst). Telnet has no encryption — every byte of \
+              the session including the login is in cleartext, so we \
+              don't try to identify the authentication exchange \
+              specifically.",
+    data_source: &["cred_events (kind = TelnetSession)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Cwe,
+            label: "CWE-319 — Cleartext Transmission of Sensitive Information",
+            url: Some("https://cwe.mitre.org/data/definitions/319.html"),
+        },
+        Reference {
+            kind: ReferenceKind::Rfc,
+            label: "RFC 854 — Telnet Protocol Specification",
+            url: Some("https://datatracker.ietf.org/doc/html/rfc854"),
+        },
+    ],
+};
+
+pub const HTTP_BASIC_METADATA: RuleMetadata = RuleMetadata {
+    id: "creds.http_basic",
+    title: "HTTP Basic authentication over plaintext HTTP",
+    severity: Severity::Critical,
+    trigger: "Fires when a packet on TCP/80 or TCP/8080 contains the \
+              substring `Authorization: Basic `. HTTP Basic encodes the \
+              username:password with base64 (not encryption); over \
+              cleartext HTTP it is trivially decoded by anyone reading \
+              the wire.",
+    data_source: &["cred_events (kind = HttpBasic)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Cwe,
+            label: "CWE-319 — Cleartext Transmission of Sensitive Information",
+            url: Some("https://cwe.mitre.org/data/definitions/319.html"),
+        },
+        Reference {
+            kind: ReferenceKind::Rfc,
+            label: "RFC 7617 — The 'Basic' HTTP Authentication Scheme",
+            url: Some("https://datatracker.ietf.org/doc/html/rfc7617"),
+        },
+    ],
+};
+
+pub const SNMP_METADATA: RuleMetadata = RuleMetadata {
+    id: "creds.snmp",
+    title: "SNMPv1 / SNMPv2c traffic (plaintext community strings)",
+    severity: Severity::Critical,
+    trigger: "Fires when a UDP/161 or UDP/162 packet looks like an SNMP \
+              message — BER SEQUENCE tag (0x30) at offset 0, followed \
+              by an INTEGER (0x02 0x01) version tag with value 0 (v1) \
+              or 1 (v2c). The community string in v1/v2c is the only \
+              auth credential and passes in the clear.",
+    data_source: &["cred_events (kind = Snmpv1v2c)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Cwe,
+            label: "CWE-319 — Cleartext Transmission of Sensitive Information",
+            url: Some("https://cwe.mitre.org/data/definitions/319.html"),
+        },
+        Reference {
+            kind: ReferenceKind::Rfc,
+            label: "RFC 3411 — Architecture for SNMPv3 (the secure replacement)",
+            url: Some("https://datatracker.ietf.org/doc/html/rfc3411"),
+        },
+    ],
+};
 
 /// Detect plaintext-credentials traffic. Produces one `Finding` per
 /// `CredKind` (Telnet, FTP, HTTP-Basic, SNMPv1/v2c), regardless of how

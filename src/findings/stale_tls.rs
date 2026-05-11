@@ -3,7 +3,35 @@ use std::net::IpAddr;
 
 use crate::observe::Observations;
 
-use super::{Finding, Severity};
+use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+
+pub const METADATA: RuleMetadata = RuleMetadata {
+    id: "compat.stale_tls",
+    title: "Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1)",
+    severity: Severity::Medium,
+    trigger: "Fires when a TLS ClientHello on TCP/443 or TCP/8443 \
+              carries a `legacy_version` field of 0x0300 (SSL 3.0), \
+              0x0301 (TLS 1.0), or 0x0302 (TLS 1.1). Detection runs on \
+              the TLS record + handshake layout (content_type 0x16, \
+              handshake type 0x01) — no full TLS state machine. These \
+              versions are deprecated and blocked by default in modern \
+              Windows / browsers; their presence indicates legacy \
+              clients (older Java, embedded devices) or legacy \
+              services.",
+    data_source: &["tls_client_hellos"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Rfc,
+            label: "RFC 8996 — Deprecating TLS 1.0 and TLS 1.1",
+            url: Some("https://datatracker.ietf.org/doc/html/rfc8996"),
+        },
+        Reference {
+            kind: ReferenceKind::Cwe,
+            label: "CWE-326 — Inadequate Encryption Strength",
+            url: Some("https://cwe.mitre.org/data/definitions/326.html"),
+        },
+    ],
+};
 
 /// Versions we consider stale: SSL 3.0, TLS 1.0, TLS 1.1.
 /// 0x0303 (TLS 1.2) and 0x0304 (TLS 1.3) pass.

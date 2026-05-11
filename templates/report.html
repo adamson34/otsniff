@@ -137,6 +137,12 @@
 {% endfor %}</pre>
     </details>
     {% endif %}
+    {% if !f.trigger.is_empty() %}
+    <details>
+      <summary>Detection criteria</summary>
+      <div style="padding:0.3rem 0;">{{ f.trigger }}</div>
+    </details>
+    {% endif %}
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> {{ f.recommendation }}</div>
     {% if !f.playbook.is_empty() %}
     <details open>

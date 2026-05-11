@@ -5,7 +5,97 @@ use ipnet::IpNet;
 
 use crate::observe::Observations;
 
-use super::{Finding, Severity};
+use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+
+pub const MODBUS_METADATA: RuleMetadata = RuleMetadata {
+    id: "ics.modbus_writes",
+    title: "Modbus engineering-class commands on the wire",
+    severity: Severity::High,
+    trigger: "Fires when one or more Modbus/TCP requests have a function \
+              code that writes or changes device state. Function-code \
+              level only — no payload deep-parse. The engineering class \
+              includes: 0x05 (Write Single Coil), 0x06 (Write Single \
+              Register), 0x0F (Write Multiple Coils), 0x10 (Write \
+              Multiple Registers), 0x16 (Mask Write Register), 0x17 \
+              (Read/Write Multiple Registers), 0x08 (Diagnostics — \
+              includes Restart Communication), 0x15 (Write File \
+              Record), and FC 8 sub-function 1 (Force Listen Only Mode). \
+              Modbus has no authentication; any host reaching tcp/502 \
+              can issue these.",
+    data_source: &["modbus_events (where engineering_class = true)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0836 — Modify Parameter",
+            url: Some("https://attack.mitre.org/techniques/T0836/"),
+        },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0855 — Unauthorized Command Message",
+            url: Some("https://attack.mitre.org/techniques/T0855/"),
+        },
+        Reference {
+            kind: ReferenceKind::Spec,
+            label: "Modbus Application Protocol Specification v1.1b3",
+            url: None,
+        },
+    ],
+};
+
+pub const ENIP_METADATA: RuleMetadata = RuleMetadata {
+    id: "ics.cip_engineering",
+    title: "EtherNet/IP engineering-class CIP services",
+    severity: Severity::High,
+    trigger: "Fires when an EtherNet/IP encapsulation request contains a \
+              CIP service we classify as engineering — Stop, Reset, \
+              Apply Attributes, Forward Close to a controller-class \
+              object. Function-code level only; we don't reconstruct \
+              CIP path semantics. Like Modbus, ENIP/CIP has no native \
+              authentication.",
+    data_source: &["enip_events (where engineering_class = true)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0858 — Change Operating Mode",
+            url: Some("https://attack.mitre.org/techniques/T0858/"),
+        },
+        Reference {
+            kind: ReferenceKind::Spec,
+            label: "ODVA CIP Vol. 1 (Common Industrial Protocol)",
+            url: None,
+        },
+    ],
+};
+
+pub const S7_METADATA: RuleMetadata = RuleMetadata {
+    id: "ics.s7_engineering",
+    title: "S7Comm engineering-class commands on the wire",
+    severity: Severity::High,
+    trigger: "Fires when S7Comm (Siemens S7-300/400/1200/1500 over \
+              tcp/102) traffic contains a function code we classify as \
+              engineering — PLC stop / start, block download / upload, \
+              password operations. S7Comm has no native authentication; \
+              S7-1500 adds Secure Communication only when explicitly \
+              enabled.",
+    data_source: &["s7_events (where engineering_class = true)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0858 — Change Operating Mode",
+            url: Some("https://attack.mitre.org/techniques/T0858/"),
+        },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0843 — Program Download",
+            url: Some("https://attack.mitre.org/techniques/T0843/"),
+        },
+        Reference {
+            kind: ReferenceKind::Vendor,
+            label: "Siemens — S7 Communication overview (industrial security)",
+            url: None,
+        },
+    ],
+};
 
 pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     let mut out = Vec::new();

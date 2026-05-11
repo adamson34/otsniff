@@ -1,6 +1,32 @@
 use crate::observe::Observations;
 
-use super::{Finding, Severity};
+use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+
+pub const METADATA: RuleMetadata = RuleMetadata {
+    id: "egress.ot_to_internet",
+    title: "Internet-bound traffic from OT subnets",
+    severity: Severity::Critical,
+    trigger: "Fires when at least one packet has been seen with a source \
+              IP inside a configured `--ot-subnet` and a destination IP \
+              that is public (not RFC1918, not link-local, not loopback, \
+              not multicast, not broadcast, and not in a documented \
+              IPv6 ULA range). Aggregates by the (src, dst, dst_port, \
+              proto) tuple; one finding fires regardless of how many \
+              flows match.",
+    data_source: &["external_flows"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0883 — Internet Accessible Device",
+            url: Some("https://attack.mitre.org/techniques/T0883/"),
+        },
+        Reference {
+            kind: ReferenceKind::Spec,
+            label: "ISA/IEC 62443-3-3 SR-5.1 — Network segmentation",
+            url: None,
+        },
+    ],
+};
 
 pub fn detect(obs: &Observations) -> Vec<Finding> {
     if obs.external_flows.is_empty() {

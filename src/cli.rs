@@ -42,6 +42,11 @@ pub enum Command {
     /// the local Claude Code CLI → unscrub the response → append to the
     /// markdown report. The AI never sees real IPs or MACs.
     Analyze(AnalyzeArgs),
+    /// Print the detection rule catalog. Lists every finding the tool
+    /// can produce, with the plain-English trigger description and
+    /// references. Use this to review what the tool flags without
+    /// reading Rust source.
+    Rules(RulesArgs),
 }
 
 #[derive(Args, Debug)]
@@ -107,6 +112,13 @@ pub struct AnalyzeArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct RulesArgs {
+    /// Output format. Default: markdown.
+    #[arg(long = "format", value_name = "FORMAT", default_value = "md")]
+    pub format: String,
+}
+
+#[derive(Args, Debug)]
 pub struct UnscrubArgs {
     /// Path to the map produced by `scrub`.
     #[arg(long = "map", value_name = "PATH")]
@@ -129,6 +141,7 @@ pub fn run() -> Result<()> {
         Command::Scrub(a) => run_scrub(a),
         Command::Unscrub(a) => run_unscrub(a),
         Command::Analyze(a) => run_analyze(a),
+        Command::Rules(a) => run_rules(a),
     }
 }
 
@@ -429,5 +442,26 @@ fn run_unscrub(args: UnscrubArgs) -> Result<()> {
                 })?;
         }
     }
+    Ok(())
+}
+
+fn run_rules(args: RulesArgs) -> Result<()> {
+    let format = match args.format.as_str() {
+        "md" | "markdown" => crate::rule_catalog::CatalogFormat::Markdown,
+        "json" => crate::rule_catalog::CatalogFormat::Json,
+        other => {
+            return Err(OtError::Parse(format!(
+                "unknown rules format '{other}'; expected 'md' or 'json'"
+            )))
+        }
+    };
+    let catalog = crate::findings::catalog();
+    let rendered = crate::rule_catalog::render(&catalog, format);
+    std::io::stdout()
+        .write_all(rendered.as_bytes())
+        .map_err(|source| OtError::WriteOutput {
+            path: "<stdout>".into(),
+            source,
+        })?;
     Ok(())
 }

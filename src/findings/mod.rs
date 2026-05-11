@@ -52,6 +52,95 @@ pub struct Finding {
     pub playbook: Vec<String>,
 }
 
+/// Static description of a detection rule. Lives next to the detector
+/// code so it can't drift. Exposed via `findings::catalog()`, the
+/// `otsniff rules` subcommand, the auto-generated `docs/RULES.md`, and
+/// the per-finding "Detection criteria" line in rendered reports.
+///
+/// A reviewer should be able to read `trigger` and predict the firing
+/// behavior without reading Rust.
+#[derive(Debug, Clone, Serialize)]
+pub struct RuleMetadata {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub severity: Severity,
+    /// One-paragraph plain-English description of what causes the rule
+    /// to fire. Names the protocol, the structural signal, and any
+    /// filtering by zone or threshold.
+    pub trigger: &'static str,
+    /// Fields on `Observations` that the rule reads. Helps reviewers
+    /// understand the input surface and the scrub stance for each
+    /// rule.
+    pub data_source: &'static [&'static str],
+    /// External references: protocol RFCs, MITRE ICS ATT&CK techniques,
+    /// CWE entries, vendor advisories.
+    pub references: &'static [Reference],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Reference {
+    pub kind: ReferenceKind,
+    pub label: &'static str,
+    pub url: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ReferenceKind {
+    /// MITRE ATT&CK for ICS technique (T08xx series)
+    MitreIcsAttack,
+    /// IETF RFC
+    Rfc,
+    /// CWE category
+    Cwe,
+    /// CVE entry
+    Cve,
+    /// Protocol or industry specification (Modbus, IEC, NIST SP, etc.)
+    Spec,
+    /// Vendor advisory or documentation
+    Vendor,
+}
+
+impl ReferenceKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::MitreIcsAttack => "MITRE ATT&CK for ICS",
+            Self::Rfc => "RFC",
+            Self::Cwe => "CWE",
+            Self::Cve => "CVE",
+            Self::Spec => "Spec",
+            Self::Vendor => "Vendor",
+        }
+    }
+}
+
+/// Every rule the tool can fire, in stable order. Source of truth for
+/// `otsniff rules`, `docs/RULES.md`, and the inline trigger line in
+/// rendered reports.
+pub fn catalog() -> Vec<RuleMetadata> {
+    vec![
+        plaintext_creds::FTP_METADATA,
+        plaintext_creds::TELNET_METADATA,
+        plaintext_creds::HTTP_BASIC_METADATA,
+        plaintext_creds::SNMP_METADATA,
+        engineering_commands::MODBUS_METADATA,
+        engineering_commands::ENIP_METADATA,
+        engineering_commands::S7_METADATA,
+        smbv1::METADATA,
+        stale_tls::METADATA,
+        internet_egress::METADATA,
+        dns_resolver::METADATA,
+        unexpected_protocols::METADATA,
+    ]
+}
+
+/// Look up a rule's metadata by finding id. Returns `None` if no rule
+/// in the catalog has that id (typically: a detector typo). The HTML /
+/// markdown renderers use this to emit the "Detection criteria" line
+/// under each fired finding.
+pub fn metadata_for(id: &str) -> Option<RuleMetadata> {
+    catalog().into_iter().find(|m| m.id == id)
+}
+
 pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     let mut out = Vec::new();
     out.extend(plaintext_creds::detect(obs));

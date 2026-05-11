@@ -10,6 +10,7 @@ pub mod parse;
 pub mod pcap;
 pub mod report;
 pub mod report_md;
+pub mod rule_catalog;
 pub mod scrub;
 
 pub use error::{OtError, Result};
