@@ -31,3 +31,9 @@ out/
 .idea/
 .vscode/
 media/*.pcap
+
+# vsdd-factory worktree — checked out from the factory-artifacts orphan
+# branch, separate history from main/develop. Don't track from this side.
+.factory/
+.factory-project/
+.worktrees/
