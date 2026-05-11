@@ -13,28 +13,26 @@ picked up.
 
 ## Released
 
-- **v0.2.1** (tagged on `main`, current) — patch release adding
-  `install.sh` curl-pipe-sh installer + repo URL fix. No binary changes
-  vs. v0.2.0.
-- **v0.2.0** — first substantive release after v0.1.0. Scrub/unscrub,
-  `analyze` subcommand (Claude Code CLI integration), capture-source
-  detector, logical flow grouping, S7Comm parser, plaintext-cred
-  finding dedup.
+- **v0.3.1** (current) — patch release: fix `Cargo.toml` repository URL,
+  cover AI-flow artifacts in `.gitignore` (`*.map.json`, `*.audit.json`,
+  `*.scrubbed.md`). No code change.
+- **v0.3.0** — major release. CLI consolidation: `analyze` is the
+  primary verb, `--ai` is the opt-in for the AI section, audit log
+  auto-writes alongside. New detections (SMBv1, stale TLS, DNS
+  resolver). Hostname extraction with NERC-CIP-aware scrub. Rule
+  catalog with `otsniff rules` and `docs/RULES.md`. Privacy-ledger
+  audit log. `--source-type` flag with heuristic-as-guard. Investigation
+  playbooks per finding. Demo GIF + CIP-011 audit. Breaking: `report`
+  subcommand removed (use `analyze`).
+- **v0.2.1** — patch release adding `install.sh` curl-pipe-sh
+  installer + repo URL fix. No binary changes vs. v0.2.0.
+- **v0.2.0** — Scrub/unscrub for AI-assisted triage, `analyze`
+  subcommand (Claude Code CLI integration), capture-source detector,
+  logical flow grouping, S7Comm parser, plaintext-cred finding dedup.
 - **v0.1.0** — initial release. Pure-Rust PCAP triage, Modbus +
   EtherNet/IP, four findings, HTML + JSON output.
 
 See [GitHub releases](https://github.com/adamson34/otsniff/releases).
-
-## On `develop` (unreleased, will land in the next stable cut)
-
-- Scrub/unscrub for AI-assisted triage (ADR-0006)
-- `analyze` subcommand — closed-loop scrub → Claude Code CLI → unscrub (ADR-0007)
-- Capture-source heuristic detector + AI prompt qualifier
-- Logical flow grouping (drops src_port from the flow key, tracks unique connections)
-- S7Comm parser + new sub-finding under engineering-commands
-
-When ready to ship, cut a release PR `develop → main`. Likely version: `0.2.0`
-(or `0.3.0` if accumulated scope pushes us there). No tag pressure.
 
 ---
 
@@ -54,7 +52,7 @@ the difference between "neat tool" and "have to have." Pair P0-7 first
 rule coverage). The other P0 items remain valuable but can sequence
 behind these two.
 
-### P0-1: Finding dedup / rollup (S)
+### P0-1: Finding dedup / rollup (S) — ✅ shipped (v0.2)
 
 The 4SICS-22 output had 12 duplicate Telnet findings — one per destination
 host. Same shape for FTP, HTTP-Basic, SNMPv1. Roll them up into one finding
@@ -70,7 +68,7 @@ Evidence: 192.168.x.y, 192.168.x.z, ... (12 hosts)
 **Why:** every busy capture today produces noise that drowns the real signal.
 Single change to `findings/plaintext_creds.rs`. **Touches:** 1 file. **Deps:** none.
 
-### P0-2: New rule-based findings (M)
+### P0-2: New rule-based findings (M) — ✅ shipped (#27, v0.3)
 
 Three findings that fire on data we already parse:
 
@@ -88,7 +86,7 @@ miss today. Compounds the value-per-capture without expanding the protocol
 surface. **Touches:** new modules under `findings/`, possibly new flow-label
 recognizers in `observe.rs::classify_flow`. **Deps:** none.
 
-### P0-3: Hostname / NetBIOS extraction + NERC-CIP-aware scrub (M) — ✅ shipped (DHCP only; mDNS / NetBIOS deferred)
+### P0-3: Hostname / NetBIOS extraction + NERC-CIP-aware scrub (M) — ✅ shipped (#28, v0.3) — DHCP only; mDNS / NetBIOS deferred
 
 Inventory becomes much more useful with hostnames. "PLC-LINE3" beats
 "10.10.10.10" for an exec reading the report. Sources: DHCP option 12,
@@ -109,7 +107,7 @@ invariant honest as we extract more identifier types. **Touches:**
 `inventory.rs` (display), `ai/leak_detector.rs` (extend regex). Updates
 ADR-0006 to name CIP-011 as the framing reference. **Deps:** none.
 
-### P0-4: NERC CIP / IEC 62443 scrub audit (M) — ✅ shipped
+### P0-4: NERC CIP / IEC 62443 scrub audit (M) — ✅ shipped (#29, v0.3)
 
 The audit lives at `docs/audits/scrub-audit-cip011.md`. Systematic
 walk of every field on `Observations` and every rendered surface
@@ -155,7 +153,7 @@ accumulates leak vectors as we add more extractors.
 
 **Deps:** none, landed right after P0-3.
 
-### P0-5: Source-type flag (CLI-recommended, heuristic as guard) (S)
+### P0-5: Source-type flag (CLI-recommended, heuristic as guard) (S) — ✅ shipped (#33, v0.3)
 
 `otsniff <subcommand> --source-type span|host-side|tap` becomes the
 recommended way to declare capture provenance. The heuristic detector
@@ -194,7 +192,7 @@ shipped with ~50 entries.
 "works for any plant we'd realistically see." Trivial to ship, no ongoing
 maintenance burden. **Touches:** `oui.rs` only. **Deps:** none.
 
-### P0-7: Investigation playbooks per finding (M)
+### P0-7: Investigation playbooks per finding (M) — ✅ shipped (#26, v0.3)
 
 Every Finding gains a structured playbook field — concrete next-action
 steps tied to the actual evidence in that finding, not generic advice.
@@ -395,16 +393,120 @@ the non-deterministic LLM testing pattern.
 
 **Deps:** none.
 
-### P1-5: Tagged release of the develop accumulation (S)
+### P1-5: Tagged release of the develop accumulation (S) — ✅ recurring
 
-Release PR `develop → main`, decide on version (probably 0.2.0), follow the
-`/release` slash command. Then the four merged features (scrub, analyze,
-capture-source, flow-grouping, S7Comm) ship as a coherent release.
-
-**Status:** Done in v0.2.0 + v0.2.1. Kept in roadmap as a recurring
-discipline — the `release/v0.X.Y` branch + `develop → main` PR + tag
-flow runs after every meaningful develop accumulation. See
+**Status:** Done through v0.3.1 (current). Kept in roadmap as a
+recurring discipline — the `release/v0.X.Y` branch + `develop → main`
+PR + tag flow runs after every meaningful develop accumulation. See
 `.claude/commands/release.md` for the current playbook.
+
+---
+
+## Shipped in v0.3 without prior roadmap entries
+
+These landed during the v0.3 cycle without a P0/P1 slot but are worth
+documenting so the trajectory is recoverable from this file alone.
+
+### Rule catalog — ✅ shipped (#30)
+
+Every detector now carries a `RuleMetadata` block (id, plain-English
+trigger, data sources, MITRE/CWE/RFC/vendor references). Surfaces:
+
+- `otsniff rules [--format md|json]` — print the catalog without a PCAP
+- [`docs/RULES.md`](RULES.md) — auto-generated, kept in sync by a test
+  that fails the build if it drifts
+- "Detection criteria" line inline in HTML and markdown reports under
+  each fired finding
+
+Sentinel tests ensure every detector has metadata and every fired
+finding id appears in the catalog.
+
+### Privacy-ledger audit log — ✅ shipped (#31)
+
+When `--ai` is on, a JSON chain-of-custody artifact writes alongside
+the report (default path: `<report-stem>.audit.json`). Contains scrub
+counts, leak-check verdicts, SHA-256 hashes of the exact bytes sent to
+and received from the AI — no real identifiers. Override path with
+`--audit-log <PATH>`.
+
+### Hostnames in finding evidence — ✅ shipped (#32)
+
+Evidence lines render `LINE-3-PLC (10.10.10.10)` instead of bare IPs
+when DHCP told us a hostname. Degrades cleanly to just the IP on
+captures without DHCP. Threaded through every detector via a shared
+`host_label(ip, obs)` helper.
+
+### CLI unification — ✅ shipped (#35, breaking change)
+
+The `report` subcommand was folded into `analyze`. `analyze` is now
+the primary verb: rules-based HTML by default, `--ai` is the opt-in
+for the AI section. Audit log auto-writes when `--ai` is on.
+`scrub` / `unscrub` remain as advanced subcommands for users driving
+their own AI (Claude.ai web, ChatGPT, local Ollama).
+
+Migration: `report` → `analyze`; old `analyze` (AI-only) → `analyze --ai`.
+
+---
+
+## Near-term rule additions (proposed)
+
+Five to seven rules that fit the existing detector shapes and would
+fire on common real captures. Each is ~80 LoC of detector + observer
+state. Listed roughly in firing-frequency order on the public test
+corpus.
+
+### `creds.ldap_simple_bind` (S)
+
+LDAP `BindRequest` with `SimpleAuthentication` over plaintext LDAP
+(TCP/389, no STARTTLS). Fires on real captures more often than
+expected — small IT shops still ship default Windows AD without TLS.
+**Touches:** `observe.rs` LDAP recognizer, new `findings/ldap_creds.rs`.
+
+### `compat.ntlmv1` (S)
+
+NTLMv1 authentication. Dictionary-attackable. Observable from the
+NTLMSSP NEGOTIATE message's flags field. **Touches:** SMB / HTTP path
+recognizers in `observe.rs`, new `findings/ntlmv1.rs`.
+
+### `compat.weak_tls_cipher` (S)
+
+TLS ClientHello listing RC4, DES, 3DES, or NULL cipher suites.
+Parallel to `compat.stale_tls`, narrower angle. **Touches:**
+`observe.rs::observe_tcp` (extend ClientHello parsing to capture
+cipher list), new `findings/weak_tls_cipher.rs`.
+
+### `creds.rdp_no_nla` (S)
+
+RDP connection negotiated without Network Level Authentication.
+Visible in the X.224 / TPKT connection-confirm packet's RDP_NEG
+flags. **Touches:** `observe.rs` RDP recognizer, new
+`findings/rdp_legacy.rs`.
+
+### `boundary.ntp_external` (S)
+
+OT host syncing time to a public NTP server. Parallel to
+`boundary.dns_resolver` — same cross-zone filter shape on UDP/123.
+**Touches:** new `findings/ntp_external.rs`.
+
+### `recon.port_scan` (M)
+
+Same source IP talking to many distinct destinations on the same
+port within the capture window. Implementable as a detector over
+existing `Observations::flows`, no new observer state needed.
+Threshold: ≥ 5 distinct destinations to start; tunable later.
+**Touches:** new `findings/recon_scan.rs`.
+
+### `ics.modbus_unit_id_sweep` (M)
+
+Same Modbus client iterating across many unit IDs. Classic Modbus
+discovery / fuzzing pattern. **Touches:** `observe.rs` to track unit
+ID per (src, dst) pair on modbus events, new
+`findings/modbus_recon.rs`.
+
+**Sequence:** the four `S` rules first (they're independent and
+cheap). `recon.port_scan` next because it adds a new finding family
+(recon). `ics.modbus_unit_id_sweep` last because it requires
+observer-state changes.
 
 ---
 
