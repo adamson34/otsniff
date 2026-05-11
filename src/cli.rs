@@ -9,6 +9,10 @@ use crate::ai::claude_cli::ClaudeCliProvider;
 use crate::ai::leak_detector;
 use crate::ai::prompts;
 use crate::ai::AiProvider;
+use crate::audit::{
+    self, AiInvocationSummary, AuditLog, InputDescriptor, LeakCheckResult, LeakCheckSummary,
+    ScrubSummary, UnscrubSummary,
+};
 use crate::error::{OtError, Result};
 use crate::observe::Observer;
 use crate::pcap::iter_packets;
@@ -100,13 +104,19 @@ pub struct AnalyzeArgs {
     /// later text against this run).
     #[arg(long = "map", value_name = "PATH")]
     pub map: Option<PathBuf>,
+    /// Optional path to write the privacy audit log (JSON). Contains
+    /// counts and SHA-256 hashes of the exact bytes sent to the AI
+    /// provider — no real identifiers. Useful as chain-of-custody
+    /// evidence for compliance review.
+    #[arg(long = "audit-log", value_name = "PATH")]
+    pub audit_log: Option<PathBuf>,
     /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
     #[arg(long = "ot-subnet", value_name = "CIDR")]
     pub ot_subnets: Vec<IpNet>,
     /// Optional Claude model override, passed through to `claude --model`.
     #[arg(long = "model", value_name = "MODEL")]
     pub model: Option<String>,
-    /// Print parse summary to stderr.
+    /// Print parse summary + privacy ledger lines to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
 }
@@ -307,6 +317,19 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     //    to the AI.
     let map = build_map(&obs);
     let scrubbed_md = scrub_text(&raw_md, &map);
+    let scrub_summary = ScrubSummary {
+        ip_pseudonyms: map.ips.len(),
+        mac_pseudonyms: map.macs.len(),
+        hostname_pseudonyms: map.names.len(),
+    };
+    if args.verbose {
+        eprintln!(
+            "  scrubbing... {} ip pseudonyms, {} mac pseudonyms, {} hostname pseudonyms",
+            scrub_summary.ip_pseudonyms,
+            scrub_summary.mac_pseudonyms,
+            scrub_summary.hostname_pseudonyms,
+        );
+    }
 
     // 3. FAIL-CLOSED LEAK CHECK. This is the kill switch — if any
     //    real-looking identifier survived the scrub, abort here before
@@ -319,6 +342,25 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     //         regex shape, so the map-value check is the only signal.
     leak_detector::ensure_clean(&scrubbed_md)?;
     leak_detector::ensure_no_map_values(&scrubbed_md, &map)?;
+    // We didn't actually fail closed if we reached this point. Record
+    // the verdict for the audit log.
+    let leak_check = LeakCheckSummary {
+        regex: LeakCheckResult {
+            passed: true,
+            items_checked: 3, // ipv4, ipv6, mac patterns
+        },
+        map_value: LeakCheckResult {
+            passed: true,
+            items_checked: scrub_summary.total(),
+        },
+    };
+    if args.verbose {
+        eprintln!("  leak check (regex): pass — 0 ipv4/ipv6/mac-shaped patterns found",);
+        eprintln!(
+            "  leak check (map-value): pass — {} real values verified absent",
+            leak_check.map_value.items_checked
+        );
+    }
 
     // 4. Assemble the system prompt with the capture-source qualifier and
     //    compose the user message. Both are leak-checked.
@@ -328,17 +370,31 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     leak_detector::ensure_clean(&user_message)?; // belt-and-braces
     leak_detector::ensure_no_map_values(&user_message, &map)?;
 
+    let model_label = args.model.clone().unwrap_or_else(|| "default".to_string());
     if args.verbose {
-        eprintln!(
-            "  invoking claude (model: {})...",
-            args.model.as_deref().unwrap_or("default")
-        );
+        eprintln!("  invoking claude (model: {})...", model_label);
     }
     let provider = ClaudeCliProvider::new(args.model.clone());
+    let invoke_start = std::time::Instant::now();
     let scrubbed_response = provider.analyze(&system_prompt, &user_message)?;
+    let elapsed = invoke_start.elapsed();
+    if args.verbose {
+        eprintln!(
+            "    done in {:.1}s, {} bytes response",
+            elapsed.as_secs_f64(),
+            scrubbed_response.len(),
+        );
+    }
 
     // 5. Unscrub the AI response on this side of the boundary.
     let (unscrubbed_response, replaced, unmapped) = unscrub_text(&scrubbed_response, &map);
+    if args.verbose {
+        eprintln!(
+            "  unscrubbing... {} pseudonyms replaced, {} unmapped",
+            replaced,
+            unmapped.len(),
+        );
+    }
 
     // 6. Write the combined report: rules-based markdown + AI section,
     //    using the unscrubbed (real-value) versions for the user.
@@ -360,8 +416,66 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         })?;
     }
 
+    // 7. Audit log. Only computed (and only causes the input PCAP to be
+    //    re-read for hashing) when --audit-log is set. The log itself
+    //    passes through both leak checks before write — even though it
+    //    only carries counts + hashes, treating it as suspect on write
+    //    means a future field added carelessly can't bypass the
+    //    invariant.
+    if let Some(audit_path) = &args.audit_log {
+        let (size_bytes, sha256) = audit::sha256_file_hex(&args.input)?;
+        let log = AuditLog {
+            schema_version: audit::SCHEMA_VERSION,
+            otsniff_version: crate::VERSION.to_string(),
+            timestamp: Utc::now(),
+            input_pcap: InputDescriptor {
+                path: args.input.display().to_string(),
+                size_bytes,
+                sha256,
+            },
+            scrub: scrub_summary,
+            leak_check,
+            ai_provider: AiInvocationSummary {
+                command: format!(
+                    "claude -p{}",
+                    args.model
+                        .as_deref()
+                        .map(|m| format!(" --model {m}"))
+                        .unwrap_or_default()
+                ),
+                model: model_label,
+                system_prompt_bytes: system_prompt.len(),
+                system_prompt_sha256: audit::sha256_hex(&system_prompt),
+                user_message_bytes: user_message.len(),
+                user_message_sha256: audit::sha256_hex(&user_message),
+                response_bytes: scrubbed_response.len(),
+                response_sha256: audit::sha256_hex(&scrubbed_response),
+                elapsed_seconds: elapsed.as_secs_f64(),
+            },
+            unscrub: UnscrubSummary {
+                pseudonyms_replaced: replaced,
+                pseudonyms_unmapped: unmapped.len(),
+            },
+        };
+        let log_json = serde_json::to_string_pretty(&log)?;
+        // Belt-and-braces: scan the rendered audit log itself for any
+        // real identifier before write. With the current fields this
+        // is impossible — but a future contributor might add a field
+        // without thinking about the invariant. Better to fail-closed
+        // than ship a leaky log.
+        leak_detector::ensure_clean(&log_json)?;
+        leak_detector::ensure_no_map_values(&log_json, &map)?;
+        std::fs::write(audit_path, log_json).map_err(|source| OtError::WriteOutput {
+            path: audit_path.clone(),
+            source,
+        })?;
+        if args.verbose {
+            eprintln!("  wrote audit log → {}", audit_path.display());
+        }
+    }
+
     eprintln!(
-        "wrote {} ({} pseudonyms unscrubbed{}{})",
+        "wrote {} ({} pseudonyms unscrubbed{}{}{})",
         args.output.display(),
         replaced,
         if unmapped.is_empty() {
@@ -371,6 +485,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         },
         match &args.map {
             Some(p) => format!(", map saved to {}", p.display()),
+            None => String::new(),
+        },
+        match &args.audit_log {
+            Some(p) => format!(", audit log → {}", p.display()),
             None => String::new(),
         }
     );
