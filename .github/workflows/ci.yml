@@ -39,18 +39,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-features
 
-  # macOS runners cost 10× the Linux billing multiplier on private repos.
-  # On every-PR runs that adds up fast and we have no macOS-specific code
-  # paths today. Run macOS only on push to develop/main so it gates merges
-  # to the long-lived branches without paying per PR.
-  #
-  # If we flip the repo public (Actions become unlimited) or add macOS-
-  # specific code paths, change this back to running on pull_request as
-  # well, or fold both back into a matrix.
+  # macOS runs on every PR and every push. The 10× billing multiplier
+  # only applies to private repos; public repos get unlimited Actions
+  # minutes on the free tier, so we restore full coverage. otsniff is
+  # pure Rust and we ship macOS binaries, so PR signal on macOS is
+  # worth having even if functional divergence between Linux and macOS
+  # is rare for this codebase.
   test-macos:
     name: Test (macos-latest)
     runs-on: macos-latest
-    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
