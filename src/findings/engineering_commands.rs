@@ -5,7 +5,7 @@ use ipnet::IpNet;
 
 use crate::observe::Observations;
 
-use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
 pub const MODBUS_METADATA: RuleMetadata = RuleMetadata {
     id: "ics.modbus_writes",
@@ -129,7 +129,14 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         let evidence: Vec<String> = by_pair
             .iter()
             .take(15)
-            .map(|((src, dst), fcs)| format!("{src} -> {dst} : {}", fcs.to_vec().join(", ")))
+            .map(|((src, dst), fcs)| {
+                format!(
+                    "{} -> {} : {}",
+                    host_label(*src, obs),
+                    host_label(*dst, obs),
+                    fcs.to_vec().join(", ")
+                )
+            })
             .collect();
 
         let unknown_origin = modbus_eng
@@ -202,7 +209,14 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         let evidence: Vec<String> = by_pair
             .iter()
             .take(15)
-            .map(|((src, dst), svcs)| format!("{src} -> {dst} : {}", svcs.join(", ")))
+            .map(|((src, dst), svcs)| {
+                format!(
+                    "{} -> {} : {}",
+                    host_label(*src, obs),
+                    host_label(*dst, obs),
+                    svcs.join(", ")
+                )
+            })
             .collect();
 
         let sources_str = pair_sources_str(&by_pair);
@@ -259,7 +273,14 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         let evidence: Vec<String> = by_pair
             .iter()
             .take(15)
-            .map(|((src, dst), fcs)| format!("{src} -> {dst} : {}", fcs.to_vec().join(", ")))
+            .map(|((src, dst), fcs)| {
+                format!(
+                    "{} -> {} : {}",
+                    host_label(*src, obs),
+                    host_label(*dst, obs),
+                    fcs.to_vec().join(", ")
+                )
+            })
             .collect();
 
         let unknown_origin = s7_eng

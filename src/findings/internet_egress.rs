@@ -1,6 +1,6 @@
 use crate::observe::Observations;
 
-use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
 pub const METADATA: RuleMetadata = RuleMetadata {
     id: "egress.ot_to_internet",
@@ -44,8 +44,8 @@ pub fn detect(obs: &Observations) -> Vec<Finding> {
         .map(|f| {
             format!(
                 "{} -> {}:{} ({}, {} pkts, {} bytes)",
-                f.src,
-                f.dst,
+                host_label(f.src, obs),
+                host_label(f.dst, obs),
                 f.dst_port,
                 proto_label(f.proto),
                 f.packets,

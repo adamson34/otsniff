@@ -1,13 +1,13 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 233
+assertion_line: 236
 expression: payload
 ---
 {
   "findings": [
     {
       "evidence": [
-        "10.10.0.20:23 (1 packet(s))"
+        "PLC-LINE3 (10.10.0.20):23 (1 packet(s))"
       ],
       "id": "creds.telnet",
       "playbook": [
@@ -23,7 +23,7 @@ expression: payload
     },
     {
       "evidence": [
-        "10.10.0.5 -> 8.8.8.8:80 (tcp, 5 pkts, 600 bytes)"
+        "ENG-WS-01 (10.10.0.5) -> 8.8.8.8:80 (tcp, 5 pkts, 600 bytes)"
       ],
       "id": "egress.ot_to_internet",
       "playbook": [
@@ -39,7 +39,7 @@ expression: payload
     },
     {
       "evidence": [
-        "10.10.0.5 -> 10.10.0.20:445 (12 SMBv1 packet(s))"
+        "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20):445 (12 SMBv1 packet(s))"
       ],
       "id": "compat.smbv1",
       "playbook": [
@@ -56,7 +56,7 @@ expression: payload
     },
     {
       "evidence": [
-        "10.10.0.5 -> 10.10.0.20 : SendRRData / Stop"
+        "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20) : SendRRData / Stop"
       ],
       "id": "ics.cip_engineering",
       "playbook": [
@@ -73,7 +73,7 @@ expression: payload
     },
     {
       "evidence": [
-        "10.10.0.5 -> 10.10.0.20 : fc=0x05 (Write Single Coil)"
+        "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20) : fc=0x05 (Write Single Coil)"
       ],
       "id": "ics.modbus_writes",
       "playbook": [
@@ -90,7 +90,7 @@ expression: payload
     },
     {
       "evidence": [
-        "10.10.0.5 -> 10.10.0.20 : fc=0x1A (Request download)"
+        "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20) : fc=0x1A (Request download)"
       ],
       "id": "ics.s7_engineering",
       "playbook": [
@@ -107,7 +107,7 @@ expression: payload
     },
     {
       "evidence": [
-        "10.10.0.5 -> 8.8.8.8:53 (UDP/TCP, 100 packet(s))"
+        "ENG-WS-01 (10.10.0.5) -> 8.8.8.8:53 (UDP/TCP, 100 packet(s))"
       ],
       "id": "boundary.dns_resolver",
       "playbook": [
@@ -124,7 +124,7 @@ expression: payload
     },
     {
       "evidence": [
-        "10.10.0.5 -> 10.10.0.20:443 : TLS 1.0 (4 hello(s))"
+        "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20):443 : TLS 1.0 (4 hello(s))"
       ],
       "id": "compat.stale_tls",
       "playbook": [

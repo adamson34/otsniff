@@ -3,7 +3,7 @@ use std::net::IpAddr;
 
 use crate::observe::Observations;
 
-use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
 pub const METADATA: RuleMetadata = RuleMetadata {
     id: "compat.stale_tls",
@@ -77,7 +77,9 @@ pub fn detect(obs: &Observations) -> Vec<Finding> {
         .take(15)
         .map(|((src, dst, port, ver), n)| {
             format!(
-                "{src} -> {dst}:{port} : {} ({n} hello(s))",
+                "{} -> {}:{port} : {} ({n} hello(s))",
+                host_label(*src, obs),
+                host_label(*dst, obs),
                 version_label(*ver)
             )
         })

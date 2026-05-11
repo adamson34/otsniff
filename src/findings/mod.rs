@@ -12,10 +12,28 @@ mod smbv1;
 mod stale_tls;
 mod unexpected_protocols;
 
+use std::net::IpAddr;
+
 use ipnet::IpNet;
 use serde::Serialize;
 
 use crate::observe::Observations;
+
+/// Render a host as "HOSTNAME (1.2.3.4)" when we have a hostname for
+/// it (DHCP option 12 today), otherwise just the IP. The IP stays in
+/// the string regardless so it's still copy-pasteable. After scrubbing,
+/// this becomes `name_001 (host_001)`, which the unscrub round-trip
+/// recovers verbatim.
+///
+/// Used by every detector when constructing evidence and summary
+/// strings — so on captures that include DHCP, the report names the
+/// asset the way the operator recognizes it.
+pub fn host_label(ip: IpAddr, obs: &Observations) -> String {
+    match obs.hostnames.get(&ip) {
+        Some(name) => format!("{name} ({ip})"),
+        None => ip.to_string(),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum Severity {

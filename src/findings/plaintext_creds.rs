@@ -3,7 +3,7 @@ use std::net::IpAddr;
 
 use crate::observe::{CredEvent, CredKind, Observations};
 
-use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
 pub const FTP_METADATA: RuleMetadata = RuleMetadata {
     id: "creds.ftp",
@@ -117,11 +117,11 @@ pub fn detect(obs: &Observations) -> Vec<Finding> {
 
     by_kind
         .into_iter()
-        .map(|(kind, events)| build_finding(kind, &events))
+        .map(|(kind, events)| build_finding(kind, &events, obs))
         .collect()
 }
 
-fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
+fn build_finding(kind: CredKind, events: &[&CredEvent], obs: &Observations) -> Finding {
     // Aggregate per (dst, port) — one evidence line per destination,
     // sorted by packet count descending so the noisiest hosts are
     // listed first.
@@ -138,7 +138,7 @@ fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
     let evidence: Vec<String> = sorted_dsts
         .iter()
         .take(15)
-        .map(|((dst, port), n)| format!("{dst}:{port} ({n} packet(s))"))
+        .map(|((dst, port), n)| format!("{}:{port} ({n} packet(s))", host_label(*dst, obs)))
         .collect();
 
     let (id, title, recommendation) = match kind {

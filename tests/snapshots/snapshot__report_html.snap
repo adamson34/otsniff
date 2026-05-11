@@ -1,6 +1,6 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 223
+assertion_line: 224
 expression: html
 ---
 <!doctype html>
@@ -134,7 +134,7 @@ expression: html
     
     <details>
       <summary>Evidence (1 sample)</summary>
-      <pre class="evidence">10.10.0.20:23 (1 packet(s))
+      <pre class="evidence">PLC-LINE3 (10.10.0.20):23 (1 packet(s))
 </pre>
     </details>
     
@@ -162,7 +162,7 @@ expression: html
     
     <details>
       <summary>Evidence (1 sample)</summary>
-      <pre class="evidence">10.10.0.5 -&gt; 8.8.8.8:80 (tcp, 5 pkts, 600 bytes)
+      <pre class="evidence">ENG-WS-01 (10.10.0.5) -&gt; 8.8.8.8:80 (tcp, 5 pkts, 600 bytes)
 </pre>
     </details>
     
@@ -190,7 +190,7 @@ expression: html
     
     <details>
       <summary>Evidence (1 sample)</summary>
-      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20:445 (12 SMBv1 packet(s))
+      <pre class="evidence">ENG-WS-01 (10.10.0.5) -&gt; PLC-LINE3 (10.10.0.20):445 (12 SMBv1 packet(s))
 </pre>
     </details>
     
@@ -218,7 +218,7 @@ expression: html
     
     <details>
       <summary>Evidence (1 sample)</summary>
-      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20 : SendRRData / Stop
+      <pre class="evidence">ENG-WS-01 (10.10.0.5) -&gt; PLC-LINE3 (10.10.0.20) : SendRRData / Stop
 </pre>
     </details>
     
@@ -246,7 +246,7 @@ expression: html
     
     <details>
       <summary>Evidence (1 sample)</summary>
-      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20 : fc=0x05 (Write Single Coil)
+      <pre class="evidence">ENG-WS-01 (10.10.0.5) -&gt; PLC-LINE3 (10.10.0.20) : fc=0x05 (Write Single Coil)
 </pre>
     </details>
     
@@ -274,7 +274,7 @@ expression: html
     
     <details>
       <summary>Evidence (1 sample)</summary>
-      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20 : fc=0x1A (Request download)
+      <pre class="evidence">ENG-WS-01 (10.10.0.5) -&gt; PLC-LINE3 (10.10.0.20) : fc=0x1A (Request download)
 </pre>
     </details>
     
@@ -302,7 +302,7 @@ expression: html
     
     <details>
       <summary>Evidence (1 sample)</summary>
-      <pre class="evidence">10.10.0.5 -&gt; 8.8.8.8:53 (UDP/TCP, 100 packet(s))
+      <pre class="evidence">ENG-WS-01 (10.10.0.5) -&gt; 8.8.8.8:53 (UDP/TCP, 100 packet(s))
 </pre>
     </details>
     
@@ -330,7 +330,7 @@ expression: html
     
     <details>
       <summary>Evidence (1 sample)</summary>
-      <pre class="evidence">10.10.0.5 -&gt; 10.10.0.20:443 : TLS 1.0 (4 hello(s))
+      <pre class="evidence">ENG-WS-01 (10.10.0.5) -&gt; PLC-LINE3 (10.10.0.20):443 : TLS 1.0 (4 hello(s))
 </pre>
     </details>
     
