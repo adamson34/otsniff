@@ -3,7 +3,102 @@ use std::net::IpAddr;
 
 use crate::observe::{CredEvent, CredKind, Observations};
 
-use super::{Finding, Severity};
+use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+
+pub const FTP_METADATA: RuleMetadata = RuleMetadata {
+    id: "creds.ftp",
+    title: "Plaintext FTP authentication observed",
+    severity: Severity::Critical,
+    trigger: "Fires when at least one TCP/21 packet starts with `USER ` \
+              or `PASS ` (case-insensitive). FTP transmits credentials \
+              and data in cleartext; any host on a SPAN-port of the \
+              same VLAN can capture them.",
+    data_source: &["cred_events (kind = FtpAuth)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Cwe,
+            label: "CWE-319 — Cleartext Transmission of Sensitive Information",
+            url: Some("https://cwe.mitre.org/data/definitions/319.html"),
+        },
+        Reference {
+            kind: ReferenceKind::Rfc,
+            label: "RFC 959 — File Transfer Protocol",
+            url: Some("https://datatracker.ietf.org/doc/html/rfc959"),
+        },
+    ],
+};
+
+pub const TELNET_METADATA: RuleMetadata = RuleMetadata {
+    id: "creds.telnet",
+    title: "Telnet session observed (cleartext by definition)",
+    severity: Severity::Critical,
+    trigger: "Fires when any non-empty payload is observed on TCP/23 \
+              (src or dst). Telnet has no encryption — every byte of \
+              the session including the login is in cleartext, so we \
+              don't try to identify the authentication exchange \
+              specifically.",
+    data_source: &["cred_events (kind = TelnetSession)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Cwe,
+            label: "CWE-319 — Cleartext Transmission of Sensitive Information",
+            url: Some("https://cwe.mitre.org/data/definitions/319.html"),
+        },
+        Reference {
+            kind: ReferenceKind::Rfc,
+            label: "RFC 854 — Telnet Protocol Specification",
+            url: Some("https://datatracker.ietf.org/doc/html/rfc854"),
+        },
+    ],
+};
+
+pub const HTTP_BASIC_METADATA: RuleMetadata = RuleMetadata {
+    id: "creds.http_basic",
+    title: "HTTP Basic authentication over plaintext HTTP",
+    severity: Severity::Critical,
+    trigger: "Fires when a packet on TCP/80 or TCP/8080 contains the \
+              substring `Authorization: Basic `. HTTP Basic encodes the \
+              username:password with base64 (not encryption); over \
+              cleartext HTTP it is trivially decoded by anyone reading \
+              the wire.",
+    data_source: &["cred_events (kind = HttpBasic)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Cwe,
+            label: "CWE-319 — Cleartext Transmission of Sensitive Information",
+            url: Some("https://cwe.mitre.org/data/definitions/319.html"),
+        },
+        Reference {
+            kind: ReferenceKind::Rfc,
+            label: "RFC 7617 — The 'Basic' HTTP Authentication Scheme",
+            url: Some("https://datatracker.ietf.org/doc/html/rfc7617"),
+        },
+    ],
+};
+
+pub const SNMP_METADATA: RuleMetadata = RuleMetadata {
+    id: "creds.snmp",
+    title: "SNMPv1 / SNMPv2c traffic (plaintext community strings)",
+    severity: Severity::Critical,
+    trigger: "Fires when a UDP/161 or UDP/162 packet looks like an SNMP \
+              message — BER SEQUENCE tag (0x30) at offset 0, followed \
+              by an INTEGER (0x02 0x01) version tag with value 0 (v1) \
+              or 1 (v2c). The community string in v1/v2c is the only \
+              auth credential and passes in the clear.",
+    data_source: &["cred_events (kind = Snmpv1v2c)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Cwe,
+            label: "CWE-319 — Cleartext Transmission of Sensitive Information",
+            url: Some("https://cwe.mitre.org/data/definitions/319.html"),
+        },
+        Reference {
+            kind: ReferenceKind::Rfc,
+            label: "RFC 3411 — Architecture for SNMPv3 (the secure replacement)",
+            url: Some("https://datatracker.ietf.org/doc/html/rfc3411"),
+        },
+    ],
+};
 
 /// Detect plaintext-credentials traffic. Produces one `Finding` per
 /// `CredKind` (Telnet, FTP, HTTP-Basic, SNMPv1/v2c), regardless of how
@@ -22,11 +117,11 @@ pub fn detect(obs: &Observations) -> Vec<Finding> {
 
     by_kind
         .into_iter()
-        .map(|(kind, events)| build_finding(kind, &events))
+        .map(|(kind, events)| build_finding(kind, &events, obs))
         .collect()
 }
 
-fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
+fn build_finding(kind: CredKind, events: &[&CredEvent], obs: &Observations) -> Finding {
     // Aggregate per (dst, port) — one evidence line per destination,
     // sorted by packet count descending so the noisiest hosts are
     // listed first.
@@ -43,7 +138,7 @@ fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
     let evidence: Vec<String> = sorted_dsts
         .iter()
         .take(15)
-        .map(|((dst, port), n)| format!("{dst}:{port} ({n} packet(s))"))
+        .map(|((dst, port), n)| format!("{}:{port} ({n} packet(s))", host_label(*dst, obs)))
         .collect();
 
     let (id, title, recommendation) = match kind {
@@ -76,6 +171,45 @@ fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
         host_count
     );
 
+    let dst_list = format_dst_list(&sorted_dsts);
+    let secure_alt = match kind {
+        CredKind::FtpAuth => "SFTP / FTPS",
+        CredKind::TelnetSession => "SSH",
+        CredKind::HttpBasic => "HTTPS (TLS)",
+        CredKind::Snmpv1v2c => "SNMPv3 with auth+priv",
+    };
+    let kind_phrase = kind_label(kind);
+    let mut playbook = vec![
+        format!(
+            "Treat any password used during the {kind_phrase} sessions to {dst_list} as exposed. \
+             Plan a rotation with the on-shift engineer for those devices and any account whose \
+             credentials may be reused (a Telnet password on a switch is often the same engineer \
+             account used elsewhere)."
+        ),
+        format!(
+            "Migrate the listed devices to {secure_alt} where they support it. The asset \
+             inventory shows which hosts also speak the secure equivalent — use that as the \
+             starting list."
+        ),
+        format!(
+            "For devices without a secure alternative (older Moxa serial servers, legacy HMIs, \
+             managed switches that only support {kind_phrase}), place behind a jump host on a \
+             hardened management VLAN. Document the exception with a revocation date."
+        ),
+        format!(
+            "Record the credentials-exposed window in the change log so future investigations \
+             know which sessions to consider compromised. Capture window: see report header."
+        ),
+    ];
+    if matches!(kind, CredKind::Snmpv1v2c) {
+        playbook.insert(
+            1,
+            "Rotate the community strings — they pass in the clear and any host on a span port \
+             of the same VLAN can read them."
+                .to_string(),
+        );
+    }
+
     Finding {
         id,
         severity: Severity::Critical,
@@ -83,7 +217,30 @@ fn build_finding(kind: CredKind, events: &[&CredEvent]) -> Finding {
         summary,
         evidence,
         recommendation,
+        playbook,
     }
+}
+
+fn format_dst_list(sorted_dsts: &[((IpAddr, u16), u64)]) -> String {
+    if sorted_dsts.is_empty() {
+        return "the listed hosts".to_string();
+    }
+    if sorted_dsts.len() == 1 {
+        return format!("`{}:{}`", sorted_dsts[0].0 .0, sorted_dsts[0].0 .1);
+    }
+    if sorted_dsts.len() <= 3 {
+        let parts: Vec<String> = sorted_dsts
+            .iter()
+            .map(|((ip, port), _)| format!("`{ip}:{port}`"))
+            .collect();
+        return parts.join(", ");
+    }
+    format!(
+        "`{}:{}` and {} other host(s)",
+        sorted_dsts[0].0 .0,
+        sorted_dsts[0].0 .1,
+        sorted_dsts.len() - 1
+    )
 }
 
 fn kind_label(k: CredKind) -> &'static str {

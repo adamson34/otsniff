@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{enip, modbus, s7comm};
+use crate::parse::{dhcp, enip, modbus, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -102,6 +102,14 @@ pub struct CredEvent {
     pub dst: IpAddr,
     pub dst_port: u16,
     pub kind: CredKind,
+    /// Internal-only diagnostic captured from the wire. May contain
+    /// CIP-011 High-BCSI bytes (literal `USER` lines, b64-encoded
+    /// HTTP Basic credentials). MUST NOT reach any rendered output
+    /// without first being routed through a scrub class — see
+    /// `docs/audits/scrub-audit-cip011.md` Finding #1. The
+    /// `#[serde(skip)]` keeps it out of any JSON path even if a
+    /// future feature accidentally serializes the parent struct.
+    #[serde(skip)]
     pub note: String,
 }
 
@@ -132,6 +140,18 @@ pub struct Observations {
     pub s7_events: Vec<S7Event>,
     pub cred_events: Vec<CredEvent>,
     pub external_flows: HashMap<String, ExternalFlow>,
+    /// Map of (src, dst, dst_port) → SMBv1 packet count. Bounded by
+    /// distinct host pairs, not raw packet count, so a busy SMB
+    /// network doesn't blow this up.
+    pub smbv1_packets: HashMap<(IpAddr, IpAddr, u16), u64>,
+    /// Map of (src, dst, dst_port, legacy_version) → TLS ClientHello
+    /// count. legacy_version is the on-the-wire u16 (0x0301 = TLS 1.0,
+    /// 0x0302 = TLS 1.1, 0x0303 = TLS 1.2 / 1.3).
+    pub tls_client_hellos: HashMap<(IpAddr, IpAddr, u16, u16), u64>,
+    /// IP → hostname, populated from passive sources (DHCP option 12 today;
+    /// mDNS / NetBIOS planned). Last-write-wins if multiple sources name
+    /// the same IP, but in practice DHCP is the only source for now.
+    pub hostnames: BTreeMap<IpAddr, String>,
     pub first_ts: Option<DateTime<Utc>>,
     pub last_ts: Option<DateTime<Utc>>,
     pub total_packets: u64,
@@ -374,9 +394,57 @@ impl Observer {
                 });
             }
         }
+
+        // SMBv1 detection (tcp/445, legacy tcp/139). Look for the SMB1
+        // magic `\xFF SMB` either at offset 0 (raw) or offset 4 (after
+        // an NBSS session-message header `\x00\x00 length_hi length_lo`).
+        if pkt.dst_port == 445 || pkt.src_port == 445 || pkt.dst_port == 139 || pkt.src_port == 139
+        {
+            let smb_at = if has_smb1_magic(payload, 0) {
+                Some(0)
+            } else if has_smb1_magic(payload, 4) {
+                Some(4)
+            } else {
+                None
+            };
+            if smb_at.is_some() {
+                let key = (pkt.src_ip, pkt.dst_ip, pkt.dst_port);
+                *self.obs.smbv1_packets.entry(key).or_insert(0) += 1;
+            }
+        }
+
+        // TLS ClientHello on tcp/443 / tcp/8443. Extract the
+        // legacy_version from the handshake layer for stale-version
+        // detection. Record-layer offsets:
+        //   [0]    content_type (0x16 = handshake)
+        //   [1..3] legacy_record_version
+        //   [3..5] length
+        //   [5]    handshake msg_type (0x01 = ClientHello)
+        //   [6..9] handshake length (3 bytes)
+        //   [9..11] legacy_version  ← what we care about
+        if (pkt.dst_port == 443 || pkt.dst_port == 8443)
+            && payload.len() >= 11
+            && payload[0] == 0x16
+            && payload[5] == 0x01
+        {
+            let legacy_version = u16::from_be_bytes([payload[9], payload[10]]);
+            let key = (pkt.src_ip, pkt.dst_ip, pkt.dst_port, legacy_version);
+            *self.obs.tls_client_hellos.entry(key).or_insert(0) += 1;
+        }
     }
 
     fn observe_udp(&mut self, pkt: &Packet) {
+        // DHCP host-name extraction (UDP/67 server, UDP/68 client).
+        // The hostname identifies the asset to a human reader and is
+        // potentially BCSI under NERC CIP-011 — we both extract it
+        // (for inventory) and run it through the scrub layer.
+        if pkt.dst_port == 67 || pkt.dst_port == 68 || pkt.src_port == 67 || pkt.src_port == 68 {
+            if let Some(info) = dhcp::parse(&pkt.payload) {
+                let ip = IpAddr::V4(info.ip);
+                self.obs.hostnames.insert(ip, info.hostname);
+            }
+        }
+
         // SNMP v1/v2c (plaintext community string).
         // The first byte of an SNMP message is BER tag 0x30 (SEQUENCE),
         // followed by a length, then INTEGER tag 0x02 0x01 <version> where
@@ -407,6 +475,15 @@ impl Observer {
             }
         }
     }
+}
+
+/// Check for the SMB1 magic bytes (`\xFF SMB`) at a given offset.
+fn has_smb1_magic(payload: &[u8], offset: usize) -> bool {
+    payload.len() >= offset + 4
+        && payload[offset] == 0xFF
+        && payload[offset + 1] == 0x53
+        && payload[offset + 2] == 0x4D
+        && payload[offset + 3] == 0x42
 }
 
 fn is_broadcast_or_multicast(mac: &[u8; 6]) -> bool {
@@ -515,4 +592,38 @@ fn first_line(payload: &[u8], max: usize) -> String {
 fn extract_line(payload: &[u8], start: usize, max: usize) -> String {
     let slice = &payload[start..];
     first_line(slice, max)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smb1_magic_at_offset_0() {
+        let payload = [0xFF, 0x53, 0x4D, 0x42, 0x72, 0x00];
+        assert!(has_smb1_magic(&payload, 0));
+        assert!(!has_smb1_magic(&payload, 4));
+    }
+
+    #[test]
+    fn smb1_magic_at_offset_4_after_nbss() {
+        // NBSS session message header (4 bytes) + SMB1 magic
+        let payload = [0x00, 0x00, 0x00, 0x40, 0xFF, 0x53, 0x4D, 0x42];
+        assert!(has_smb1_magic(&payload, 4));
+        assert!(!has_smb1_magic(&payload, 0));
+    }
+
+    #[test]
+    fn smb2_or_smb3_does_not_match() {
+        // SMB2/3 magic is `\xFE SMB`
+        let payload = [0xFE, 0x53, 0x4D, 0x42, 0x40];
+        assert!(!has_smb1_magic(&payload, 0));
+    }
+
+    #[test]
+    fn short_payload_does_not_match() {
+        assert!(!has_smb1_magic(&[0xFF, 0x53, 0x4D], 0));
+        assert!(!has_smb1_magic(&[], 0));
+        assert!(!has_smb1_magic(&[0xFF, 0x53, 0x4D, 0x42], 4));
+    }
 }

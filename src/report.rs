@@ -30,6 +30,13 @@ struct ReportView {
     findings: Vec<FindingView>,
     assets: Vec<AssetView>,
     top_flows: Vec<TopFlow>,
+    /// Pre-rendered HTML for the AI section, if any. Already passed
+    /// through `ai::html_render::render_safe`, so raw HTML events
+    /// in the AI's markdown response (e.g. `<script>`) are stripped
+    /// before embedding here. The template uses `|safe` to skip
+    /// askama escaping — that's intentional and only sound because
+    /// of the prior filtering.
+    ai_section: Option<String>,
 }
 
 struct FindingView {
@@ -41,10 +48,17 @@ struct FindingView {
     evidence: Vec<String>,
     evidence_count: usize,
     recommendation: String,
+    playbook: Vec<String>,
+    playbook_count: usize,
+    /// Plain-English trigger from the rule catalog. Empty string if the
+    /// finding id isn't in the catalog (shouldn't happen — guarded by
+    /// `every_finding_id_appears_in_the_rule_catalog`).
+    trigger: String,
 }
 
 struct AssetView {
     ip: String,
+    hostname: String,
     mac: String,
     vendor: String,
     role: String,
@@ -70,6 +84,7 @@ pub fn render_html(
     input_label: &str,
     generated_at: DateTime<Utc>,
     capture_source: Option<&Classification>,
+    ai_section: Option<String>,
 ) -> Result<String> {
     let span = match (obs.first_ts, obs.last_ts) {
         (Some(a), Some(b)) => format!("{} → {}", fmt_ts(a), fmt_ts(b)),
@@ -106,6 +121,11 @@ pub fn render_html(
             evidence_count: f.evidence.len(),
             evidence: f.evidence.clone(),
             recommendation: f.recommendation.to_string(),
+            playbook_count: f.playbook.len(),
+            playbook: f.playbook.clone(),
+            trigger: crate::findings::metadata_for(f.id)
+                .map(|m| m.trigger.to_string())
+                .unwrap_or_default(),
         })
         .collect();
 
@@ -113,6 +133,7 @@ pub fn render_html(
         .iter()
         .map(|a| AssetView {
             ip: a.ip.to_string(),
+            hostname: a.hostname.clone().unwrap_or_else(|| "—".to_string()),
             mac: a.mac.clone().unwrap_or_else(|| "—".to_string()),
             vendor: a.vendor.clone().unwrap_or_else(|| "—".to_string()),
             role: a.role.label().to_string(),
@@ -141,6 +162,7 @@ pub fn render_html(
         findings: findings_view,
         assets: assets_view,
         top_flows,
+        ai_section,
     };
     Ok(view.render()?)
 }

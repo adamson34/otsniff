@@ -12,6 +12,7 @@
 use regex::Regex;
 
 use crate::error::{OtError, Result};
+use crate::scrub::ScrubMap;
 
 #[derive(Debug, Clone)]
 pub struct Leak {
@@ -84,6 +85,30 @@ pub fn ensure_clean(text: &str) -> Result<()> {
     Ok(())
 }
 
+/// Verify that none of the real values in the scrub map appear verbatim in
+/// `text`. This is the primary defense for hostnames — they don't have a
+/// clean regex shape (anything from `host42` to `LINE-3-PLC` is valid), so
+/// we can't reliably regex-match them. Instead, we know exactly which real
+/// hostnames the run observed and check post-scrub text against that list.
+///
+/// For IPs and MACs this duplicates the regex check, which is fine —
+/// defense in depth, and the runtime cost is bounded by map size.
+pub fn ensure_no_map_values(text: &str, map: &ScrubMap) -> Result<()> {
+    for real in map.real_values() {
+        if real.is_empty() {
+            continue;
+        }
+        if text.contains(real) {
+            return Err(OtError::Parse(format!(
+                "scrub leak: refusing to send unscrambled identifier '{real}' to AI provider. \
+                 This is a bug — the value was in the scrub map but wasn't substituted in the \
+                 rendered report. Please report with the input PCAP if possible."
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn ipv4_regex() -> Regex {
     // Conservative: dotted-quad with each octet 0-255 isn't strictly
     // necessary; we want to catch anything dotted-quad-shaped. The only
@@ -145,5 +170,31 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("scrub leak"));
         assert!(msg.contains("10.0.0.5"));
+    }
+
+    #[test]
+    fn ensure_no_map_values_catches_hostname_leak_that_regex_misses() {
+        use chrono::Utc;
+        use std::collections::BTreeMap;
+
+        // A hostname like "LINE-3-PLC" does not match the IPv4/IPv6/MAC
+        // regexes — only the map-value check would catch it leaking.
+        let mut names = BTreeMap::new();
+        names.insert("name_001".to_string(), "LINE-3-PLC".to_string());
+        let map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: BTreeMap::new(),
+            macs: BTreeMap::new(),
+            names,
+        };
+
+        let leaky = "Engineer connected to LINE-3-PLC and started a download.";
+        assert!(scan(leaky).is_none(), "regex check should miss hostname");
+        let err = ensure_no_map_values(leaky, &map).unwrap_err();
+        assert!(err.to_string().contains("LINE-3-PLC"));
+
+        let clean = "Engineer connected to name_001 and started a download.";
+        assert!(ensure_no_map_values(clean, &map).is_ok());
     }
 }

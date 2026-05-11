@@ -13,10 +13,17 @@ picked up.
 
 ## Released
 
-- **v0.1.0** (tagged on `main`) — initial release. Pure-Rust PCAP triage,
-  Modbus + EtherNet/IP, four findings (plaintext credentials, internet egress
-  from OT, ICS engineering commands, unexpected protocols on OT VLANs),
-  HTML + JSON output. See [GitHub releases](https://github.com/adamson34/otsniff/releases).
+- **v0.2.1** (tagged on `main`, current) — patch release adding
+  `install.sh` curl-pipe-sh installer + repo URL fix. No binary changes
+  vs. v0.2.0.
+- **v0.2.0** — first substantive release after v0.1.0. Scrub/unscrub,
+  `analyze` subcommand (Claude Code CLI integration), capture-source
+  detector, logical flow grouping, S7Comm parser, plaintext-cred
+  finding dedup.
+- **v0.1.0** — initial release. Pure-Rust PCAP triage, Modbus +
+  EtherNet/IP, four findings, HTML + JSON output.
+
+See [GitHub releases](https://github.com/adamson34/otsniff/releases).
 
 ## On `develop` (unreleased, will land in the next stable cut)
 
@@ -81,7 +88,7 @@ miss today. Compounds the value-per-capture without expanding the protocol
 surface. **Touches:** new modules under `findings/`, possibly new flow-label
 recognizers in `observe.rs::classify_flow`. **Deps:** none.
 
-### P0-3: Hostname / NetBIOS extraction + NERC-CIP-aware scrub (M)
+### P0-3: Hostname / NetBIOS extraction + NERC-CIP-aware scrub (M) — ✅ shipped (DHCP only; mDNS / NetBIOS deferred)
 
 Inventory becomes much more useful with hostnames. "PLC-LINE3" beats
 "10.10.10.10" for an exec reading the report. Sources: DHCP option 12,
@@ -102,42 +109,51 @@ invariant honest as we extract more identifier types. **Touches:**
 `inventory.rs` (display), `ai/leak_detector.rs` (extend regex). Updates
 ADR-0006 to name CIP-011 as the framing reference. **Deps:** none.
 
-### P0-4: NERC CIP / IEC 62443 scrub audit (M)
+### P0-4: NERC CIP / IEC 62443 scrub audit (M) — ✅ shipped
 
-Systematic review of every field otsniff extracts or renders against
-BCSI categories under NERC CIP-011 and analogous IEC 62443 / TSA
-pipeline / NIS2 frameworks. Anything that could uniquely identify a
-BES Cyber System or expose its operating characteristics goes into the
-scrub map.
+The audit lives at `docs/audits/scrub-audit-cip011.md`. Systematic
+walk of every field on `Observations` and every rendered surface
+(HTML, markdown, JSON, AI-bound payload), classified against CIP-011
+BCSI categories.
 
-Items to audit (incomplete; the audit is the work):
+What landed:
 
-- **Usernames** extracted from FTP USER, Telnet logins, HTTP Basic
-  (b64-decoded). Operational account names like `ENGINEER1` or
-  `OPERATOR-NIGHT` are BCSI. New pseudonym class: `user_NNN`.
-- **Serial numbers** if we add EtherNet/IP Identity / BACnet Device
-  Object decoding in the future. Pseudonym class: `serial_NNN`.
-- **Firmware / vendor model strings** if extracted from protocol fields
-  (ENIP Identity reply, Modbus device ID via fc=0x2B, S7Comm CPU info).
-  These pinpoint specific firmware vulnerabilities — high BCSI value.
-  Pseudonym class: `model_NNN`.
-- **Modbus tag / S7 DB names** if we ever decode them. PLC tag naming
-  conventions reveal operational logic. We don't extract these today
-  but the rule should be: any new payload-aware finding has to declare
-  what it scrubs before landing.
+- **Audit document.** Full field-by-field table (~30 rows) with
+  current scrub stance, BCSI classification, and notes.
+- **Process contract.** `docs/specs/scrub-stance-template.md` — every
+  new feature spec must answer the four questions before landing.
+- **Code lockdown.** `CredEvent.note` (the only High-BCSI field
+  currently reachable via `Serialize`) marked `#[serde(skip)]` plus
+  a sentinel test (`cred_event_note_must_not_reach_any_rendered_output`)
+  that injects a canary username and asserts it doesn't reach HTML,
+  markdown, scrubbed markdown, or JSON. Today it's in-memory only;
+  the lockdown ensures it stays that way regardless of what future
+  features do.
+- **ADR-0006 amendment** linking to the audit and the template.
+
+Items the audit identified as future work (not blockers, declared
+when the relevant feature lands):
+
+- `user_NNN` class — only when a feature actually surfaces extracted
+  usernames (none today). The audit explicitly declines to add it
+  preemptively.
+- `serial_NNN` / `model_NNN` — same shape; needed only when ENIP
+  Identity / BACnet Device Object / S7 CPU-info extraction lands.
+- `tag_NNN` — needed only if we ever decode Modbus / S7 / OPC UA tag
+  names, which we don't today.
+
+Network-topology shape leakage and timestamp preservation were both
+evaluated and accepted as documented trade-offs (see Findings #2 and
+#4 in the audit). Vendor-name preservation is justified as Low-BCSI
+(Finding #3).
 
 **Why:** the scrub layer is the project's load-bearing privacy claim.
-Doing this audit now — and making it a repeatable process for new
-features — is what lets us say "designed to align with BCSI handling"
-honestly. Without it, the AI feature accumulates leak vectors as we
-add more extractors.
+Doing this audit now — and making the scrub-stance template a
+required section in every new spec — is what lets us say "designed
+to align with BCSI handling" honestly. Without it, the AI feature
+accumulates leak vectors as we add more extractors.
 
-**Touches:** `scrub.rs` (new pseudonym classes), `ai/leak_detector.rs`
-(new patterns), `ai/prompts.rs` (system prompt extends to mention new
-pseudonym vocabulary), ADR-0006 (regulatory framing), per-feature
-specs (each declares its scrub stance).
-
-**Deps:** none, but ideally lands together with or right after P0-3.
+**Deps:** none, landed right after P0-3.
 
 ### P0-5: Source-type flag (CLI-recommended, heuristic as guard) (S)
 
@@ -365,9 +381,10 @@ Release PR `develop → main`, decide on version (probably 0.2.0), follow the
 `/release` slash command. Then the four merged features (scrub, analyze,
 capture-source, flow-grouping, S7Comm) ship as a coherent release.
 
-**Why:** main is at v0.1.0 today, develop is 10+ commits ahead. The longer
-this gap grows, the less useful main is. **Open question:** version number
-and changelog framing.
+**Status:** Done in v0.2.0 + v0.2.1. Kept in roadmap as a recurring
+discipline — the `release/v0.X.Y` branch + `develop → main` PR + tag
+flow runs after every meaningful develop accumulation. See
+`.claude/commands/release.md` for the current playbook.
 
 ---
 

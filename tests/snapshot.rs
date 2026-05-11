@@ -13,8 +13,10 @@ use ipnet::IpNet;
 
 use otsniff::ai::leak_detector;
 use otsniff::ai::prompts;
+use otsniff::audit;
 use otsniff::capture_source::{classify, CaptureSource, Classification, Confidence};
 use otsniff::findings::run_all;
+use otsniff::findings::{catalog, metadata_for};
 use otsniff::inventory::build as build_inventory;
 use otsniff::observe::{
     CredEvent, CredKind, EnipEvent, ExternalFlow, FlowKey, FlowObs, HostObs, ModbusEvent,
@@ -22,6 +24,7 @@ use otsniff::observe::{
 };
 use otsniff::report::render_html;
 use otsniff::report_md::render_markdown;
+use otsniff::rule_catalog::{render, CatalogFormat};
 use otsniff::scrub::{build_map_at, scrub_text, unscrub_text};
 
 fn fixed_ts() -> chrono::DateTime<Utc> {
@@ -111,6 +114,23 @@ fn build_fixture() -> Observations {
     };
     flows.insert("b".to_string(), egress_flow);
 
+    // DNS to a non-OT resolver — exercises boundary.dns_resolver finding
+    let dns_flow = FlowObs {
+        key: FlowKey {
+            src: ip("10.10.0.5"),
+            dst: ip("8.8.8.8"),
+            dst_port: 53,
+            proto: 17,
+        },
+        packets: 100,
+        bytes: 8_000,
+        first_seen: fixed_ts(),
+        last_seen: fixed_ts(),
+        label: Some("dns".to_string()),
+        unique_src_ports: HashSet::from([55300]),
+    };
+    flows.insert("dns".to_string(), dns_flow);
+
     let mut external_flows = HashMap::new();
     external_flows.insert(
         "ext-1".to_string(),
@@ -168,6 +188,22 @@ fn build_fixture() -> Observations {
         total_bytes: 48_600,
         mac_frame_counts: std::collections::BTreeMap::new(),
         broadcast_frames: 0,
+        smbv1_packets: {
+            let mut m = HashMap::new();
+            m.insert((ip("10.10.0.5"), ip("10.10.0.20"), 445), 12);
+            m
+        },
+        tls_client_hellos: {
+            let mut m = HashMap::new();
+            m.insert((ip("10.10.0.5"), ip("10.10.0.20"), 443, 0x0301), 4);
+            m
+        },
+        hostnames: {
+            let mut m = std::collections::BTreeMap::new();
+            m.insert(ip("10.10.0.5"), "ENG-WS-01".to_string());
+            m.insert(ip("10.10.0.20"), "PLC-LINE3".to_string());
+            m
+        },
     }
 }
 
@@ -182,6 +218,7 @@ fn html_report_snapshot() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
     )
     .unwrap();
@@ -217,6 +254,10 @@ fn scrubbed_markdown_snapshot_does_not_leak_real_values() {
     // 8.8.8.8 is observed in the fixture (external_flows), so it gets a
     // pseudonym; verify it's gone too.
     assert!(!scrubbed.contains("8.8.8.8"));
+    // Hostnames are NERC CIP-011 BCSI; the privacy contract requires that
+    // they're scrubbed before reaching any AI provider.
+    assert!(!scrubbed.contains("ENG-WS-01"));
+    assert!(!scrubbed.contains("PLC-LINE3"));
 
     insta::assert_snapshot!("scrubbed_markdown", scrubbed);
 }
@@ -299,6 +340,7 @@ fn classification_report_line_does_not_leak_unscrubbed_values_via_pseudonym_path
         },
         confidence: Confidence::High,
         frames_analyzed: 10_000,
+        declared: None,
     };
     let line = classification.report_line();
     assert!(line.contains(&mac_str));
@@ -335,6 +377,29 @@ fn classification_report_line_does_not_leak_unscrubbed_values_via_pseudonym_path
 }
 
 #[test]
+fn every_finding_has_a_non_empty_playbook() {
+    // P0-7 contract: each detector must populate a playbook with concrete
+    // steps. If a detector ships without one, the rules-based report
+    // value-add regresses to "static recommendation only" and the whole
+    // point of the feature is lost. Catch the regression here.
+    let obs = build_fixture();
+    let findings = run_all(&obs, &ot_subnets());
+    assert!(!findings.is_empty(), "fixture should produce findings");
+    for f in &findings {
+        assert!(
+            !f.playbook.is_empty(),
+            "finding {} has no playbook — every detector must populate one",
+            f.id
+        );
+        assert!(
+            f.playbook.iter().all(|s| !s.is_empty()),
+            "finding {} has an empty playbook step",
+            f.id
+        );
+    }
+}
+
+#[test]
 fn prompts_contain_no_real_identifiers() {
     // Catches the most common authoring mistake: writing an example IP or
     // MAC into the prompt template. Every analyze run uses these strings,
@@ -367,4 +432,260 @@ fn invariant_no_real_values_reach_ai_provider() {
     // Combined user message: default task + scrubbed report.
     leak_detector::ensure_clean(&user_message)
         .expect("user message leak — scrubbed payload contains an unscrubbed identifier");
+    // Map-value check: catches hostname leaks the regex check can't see.
+    leak_detector::ensure_no_map_values(&user_message, &map)
+        .expect("user message contains an unscrambled value from the scrub map");
+}
+
+#[test]
+fn rule_catalog_matches_committed_rules_md() {
+    // The committed `docs/RULES.md` is the auto-generated catalog. If
+    // you change rule metadata in the source, regen the file:
+    //
+    //     cargo run -- rules > docs/RULES.md
+    //
+    // If the test fails, the catalog and the committed doc are out of
+    // sync. Regen, review the diff, and commit alongside your changes.
+    let committed = std::fs::read_to_string("docs/RULES.md")
+        .expect("docs/RULES.md must exist — run `cargo run -- rules > docs/RULES.md` to generate");
+    let generated = render(&catalog(), CatalogFormat::Markdown);
+    assert_eq!(
+        committed, generated,
+        "docs/RULES.md is stale. Regen with: cargo run -- rules > docs/RULES.md"
+    );
+}
+
+#[test]
+fn every_rule_has_non_empty_metadata() {
+    // Every rule in the catalog must have all metadata fields populated.
+    // A detector that ships with empty trigger/data_source is undetectable
+    // through `otsniff rules` and the inline trigger line.
+    for r in catalog() {
+        assert!(!r.id.is_empty(), "rule has empty id");
+        assert!(!r.title.is_empty(), "rule {} has empty title", r.id);
+        assert!(!r.trigger.is_empty(), "rule {} has empty trigger", r.id);
+        assert!(
+            !r.data_source.is_empty(),
+            "rule {} has no data_source — what Observations field does it read?",
+            r.id
+        );
+        assert!(
+            r.data_source.iter().all(|s| !s.is_empty()),
+            "rule {} has an empty data_source entry",
+            r.id
+        );
+    }
+}
+
+#[test]
+fn every_finding_id_appears_in_the_rule_catalog() {
+    // Every Finding produced by the fixture must have its id present
+    // in the catalog. Catches typos and orphaned detectors (a finding
+    // that fires but has no metadata entry, so reviewers can't see
+    // what triggers it).
+    let obs = build_fixture();
+    let findings = otsniff::findings::run_all(&obs, &ot_subnets());
+    assert!(!findings.is_empty(), "fixture should produce findings");
+    for f in &findings {
+        assert!(
+            metadata_for(f.id).is_some(),
+            "finding {} fired but has no entry in the rule catalog — \
+             add a RuleMetadata block alongside the detector",
+            f.id
+        );
+    }
+}
+
+#[test]
+fn finding_evidence_surfaces_hostnames_when_we_know_them() {
+    // The fixture has hostnames for 10.10.0.5 (ENG-WS-01) and 10.10.0.20
+    // (PLC-LINE3). At least one finding's evidence must reference a host
+    // by name. If this regresses, the hostname extraction is happening
+    // but the *value* (operators recognizing assets by name) has been
+    // lost in the renderer.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md = render_markdown(
+        &inventory,
+        &findings,
+        &obs,
+        "<unscrubbed>",
+        fixed_ts(),
+        None,
+    )
+    .unwrap();
+    assert!(
+        raw_md.contains("ENG-WS-01 (10.10.0.5)") || raw_md.contains("PLC-LINE3 (10.10.0.20)"),
+        "no finding evidence carries a hostname-decorated label — the host_label \
+         helper is not being applied where we expected"
+    );
+}
+
+#[test]
+fn ai_section_in_html_strips_script_tags_from_claude_response() {
+    // Sentinel for the unified analyze flow: when Claude's markdown
+    // response contains a `<script>` tag, the rendered HTML must not
+    // carry it through. This is the XSS defense documented in
+    // `ai::html_render::render_safe`.
+    use otsniff::ai::html_render::render_safe;
+
+    let ai_md = "## AI says\n\nSome analysis.\n\n<script>alert('xss')</script>\n\nMore prose.";
+    let ai_html = render_safe(ai_md);
+
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        Some(ai_html),
+    )
+    .unwrap();
+
+    assert!(
+        !html.contains("<script>"),
+        "AI section let a <script> tag through into rendered HTML"
+    );
+    assert!(
+        !html.contains("alert"),
+        "AI section let `alert` body through into rendered HTML"
+    );
+    // The legitimate prose around the script should survive.
+    assert!(html.contains("Some analysis."));
+    assert!(html.contains("More prose."));
+}
+
+#[test]
+fn audit_log_rendered_for_an_analyze_run_carries_no_real_identifiers() {
+    // Sentinel for the privacy ledger introduced in feat/analyze-audit-log:
+    // even though the AuditLog struct carries only counts and SHA-256
+    // hex digests, a future contributor might add a field that
+    // accidentally includes a real identifier. This test builds a log
+    // populated as the analyze pipeline would, scans it with the
+    // leak detector, and verifies clean.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed_md = scrub_text(&raw_md, &map);
+    let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);
+
+    let log = otsniff::audit::AuditLog {
+        schema_version: audit::SCHEMA_VERSION,
+        otsniff_version: "0.3.0-test".to_string(),
+        timestamp: fixed_ts(),
+        input_pcap: audit::InputDescriptor {
+            path: "tests/fixtures/synthetic.pcap".to_string(),
+            size_bytes: 1024,
+            sha256: audit::sha256_hex("synthetic-pcap-bytes"),
+        },
+        scrub: audit::ScrubSummary {
+            ip_pseudonyms: map.ips.len(),
+            mac_pseudonyms: map.macs.len(),
+            hostname_pseudonyms: map.names.len(),
+        },
+        leak_check: audit::LeakCheckSummary {
+            regex: audit::LeakCheckResult {
+                passed: true,
+                items_checked: 3,
+            },
+            map_value: audit::LeakCheckResult {
+                passed: true,
+                items_checked: map.ips.len() + map.macs.len() + map.names.len(),
+            },
+        },
+        ai_provider: audit::AiInvocationSummary {
+            command: "claude -p".to_string(),
+            model: "default".to_string(),
+            system_prompt_bytes: prompts::SYSTEM_PROMPT.len(),
+            system_prompt_sha256: audit::sha256_hex(prompts::SYSTEM_PROMPT),
+            user_message_bytes: user_message.len(),
+            user_message_sha256: audit::sha256_hex(&user_message),
+            response_bytes: 0,
+            response_sha256: audit::sha256_hex(""),
+            elapsed_seconds: 0.0,
+        },
+        unscrub: audit::UnscrubSummary {
+            pseudonyms_replaced: 0,
+            pseudonyms_unmapped: 0,
+        },
+    };
+    let log_json = serde_json::to_string_pretty(&log).unwrap();
+
+    // Regex check: no IPv4/IPv6/MAC-shaped patterns survived.
+    leak_detector::ensure_clean(&log_json)
+        .expect("audit log JSON contained a regex-detectable identifier leak");
+    // Map-value check: no real value from the scrub map appears verbatim
+    // in the audit log (would catch hostname leaks that the regex misses).
+    leak_detector::ensure_no_map_values(&log_json, &map)
+        .expect("audit log JSON contained a real value from the scrub map");
+}
+
+#[test]
+fn cred_event_note_must_not_reach_any_rendered_output() {
+    // CIP-011 audit Finding #1: CredEvent.note can hold High-BCSI bytes
+    // (literal `USER ENGINEER1` lines, b64'd HTTP Basic auth headers).
+    // Today it is in-memory only — but a future detector could regress
+    // by including `note` in finding evidence. This sentinel injects a
+    // recognizable username into a synthetic `note` and asserts it
+    // appears nowhere in the rendered HTML, the rendered markdown, or
+    // the scrubbed markdown.
+    let mut obs = build_fixture();
+    let canary = "CANARY-USER-DO-NOT-LEAK";
+    obs.cred_events.push(CredEvent {
+        ts: fixed_ts(),
+        src: ip("10.10.0.5"),
+        dst: ip("10.10.0.20"),
+        dst_port: 21,
+        kind: CredKind::FtpAuth,
+        note: format!("USER {canary}"),
+    });
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(
+        !html.contains(canary),
+        "CredEvent.note bytes leaked into HTML output — this is a CIP-011 \
+         BCSI regression. See docs/audits/scrub-audit-cip011.md Finding #1."
+    );
+
+    let md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    assert!(
+        !md.contains(canary),
+        "CredEvent.note bytes leaked into markdown output — this is a CIP-011 \
+         BCSI regression. See docs/audits/scrub-audit-cip011.md Finding #1."
+    );
+
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed = scrub_text(&md, &map);
+    assert!(
+        !scrubbed.contains(canary),
+        "CredEvent.note bytes leaked into the AI-bound scrubbed payload."
+    );
+
+    // Also verify the field is excluded from any JSON serialization of
+    // the observations themselves — this is what `#[serde(skip)]`
+    // gives us.
+    let cred_json = serde_json::to_string(obs.cred_events.last().unwrap()).unwrap();
+    assert!(
+        !cred_json.contains(canary),
+        "CredEvent serialized with the `note` field — `#[serde(skip)]` is missing."
+    );
 }

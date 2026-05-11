@@ -1,7 +1,9 @@
 # ADR-0006: Scrub / unscrub for AI-assisted triage
 
 ## Status
-Accepted (v0.2)
+Accepted (v0.2). Amended in v0.3 to add the hostname pseudonym class
+and the NERC CIP-011 framing — see "Identifier classes and the NERC
+CIP-011 framing" below.
 
 ## Context
 Asset owners want AI assistance with PCAP triage but can't legally send
@@ -31,6 +33,8 @@ posture / billing.
 **Scrubbed (every observation gets a pseudonym):**
 - IPv4 / IPv6 addresses → `host_001`, `host_002`, ...
 - MAC addresses → `mac_001`, `mac_002`, ...
+- Hostnames (DHCP option 12 today; mDNS / NetBIOS planned) →
+  `name_001`, `name_002`, ...
 
 **Preserved (passes through unchanged):**
 - Vendor names (`Siemens`, `Schneider Electric`, `Schweitzer Engineering`)
@@ -47,10 +51,11 @@ seeing "Siemens PLC" in a chat doesn't fingerprint a specific plant.
 
 ## Pseudonym format
 
-`<class>_<index>` where class ∈ `{host, mac}` and index is decimal,
-zero-padded to 3 digits. The format is regex-safe:
-`\b(?:host|mac)_[0-9a-f]+\b`. New identifier classes (e.g., `unit_NN` for
-Modbus unit IDs in v0.3) extend the prefix vocabulary, not the format.
+`<class>_<index>` where class ∈ `{host, mac, name}` and index is
+decimal, zero-padded to 3 digits. The format is regex-safe:
+`\b(?:host|mac|name)_[0-9a-f]+\b`. New identifier classes (e.g.,
+`unit_NN` for Modbus unit IDs) extend the prefix vocabulary, not the
+format.
 
 Pseudonym assignment is **deterministic** — sorted by real value at map
 build time. The same PCAP always produces the same map, so re-runs and
@@ -97,6 +102,77 @@ the LLM didn't make anything up.
   any prompt; structured output is a v0.3 hardening if/when we see
   enough usage to justify it.
 
+## Audit and process
+
+The systematic audit of the currently-shipped extraction and rendering
+surface against NERC CIP-011 / IEC 62443 lives at
+`docs/audits/scrub-audit-cip011.md`. Every new feature spec must
+declare its scrub stance using the template at
+`docs/specs/scrub-stance-template.md` — answering: what does it
+extract, what does it render, what's the BCSI classification, what's
+the scrub stance. PRs that add extractors or rendered fields without
+that section will be requested to add it.
+
+The audit is re-run when a new event type is added to `Observations`,
+when a new pseudonym class is added, when a new output surface is
+added, or when one of the referenced regulatory frameworks is
+materially updated.
+
+## Identifier classes and the NERC CIP-011 framing
+
+The pseudonym vocabulary is **extensible by design**, but adding a new
+identifier class is an ADR-grade decision because it changes the
+privacy contract. Each addition must justify:
+
+1. **What the class identifies** — what real-world thing the
+   pseudonym stands in for (host, MAC, hostname, vendor, etc.).
+2. **Why scrubbing it matters** — the threat model the class
+   addresses. If the answer is "no operator would care if this leaked
+   to the AI," the class probably shouldn't exist.
+3. **How the leak detector enforces the contract** — most classes
+   have a clean regex shape (IPv4 dotted-quad, MAC colon-hex);
+   hostnames don't, so they're enforced by the map-value check.
+
+**NERC CIP-011 (BES Cyber System Information).** Hostnames in
+critical-infrastructure environments often fall under CIP-011 BCSI
+because they identify the *function* and *location* of an asset. A
+hostname like `ACME-SUB-LINE3-PLC` reveals that the asset is a PLC,
+that it's at a specific substation/line, and that it belongs to a
+named operator. Names like that are clearly more sensitive than the
+private RFC 1918 IP they happen to use. Extracting hostnames *into*
+the report without scrubbing them out of the AI payload would
+*worsen* the compliance posture of the AI flow — which is why the
+hostname scrub support is non-negotiable, not optional.
+
+The same framing applies to future classes:
+- **Vendor product strings / firmware versions** that name a specific
+  fielded device (vs. generic vendor labels like "Siemens" — those
+  stay preserved): would need a class.
+- **Tag names from process protocols** (OPC UA browse names, etc.):
+  almost always BCSI-equivalent, would need a class.
+- **Engineering project / station names** appearing in S7Comm or
+  ENIP-CIP traffic: same.
+
+Each of these gets its own ADR amendment when implemented.
+
+## Leak detector responsibilities
+
+The leak detector that sits between the scrub layer and any AI call
+runs **two checks**:
+
+1. **Regex check** (`ensure_clean`) — IPv4, IPv6, and MAC patterns.
+   Defense in depth: catches identifiers the scrub layer never knew
+   about (a bug-class case where extraction was incomplete).
+2. **Map-value check** (`ensure_no_map_values`) — verifies that no
+   real value in the scrub map appears verbatim in the post-scrub
+   text. This is the **primary** enforcement for hostname-class
+   leaks, because hostnames don't have a clean regex shape (anything
+   from `host42` to `LINE-3-PLC` is a valid hostname), so we can't
+   regex-match them. We *can* check that the specific real values we
+   observed don't appear in the payload we're about to send.
+
+Both checks fail closed.
+
 ## Consequences
 
 - New CLI: `scrub` and `unscrub` subcommands. The default no-subcommand
@@ -106,5 +182,6 @@ the LLM didn't make anything up.
   map JSON shape; round-trip property is asserted (`unscrub(scrub(x)) == x`).
 - New dependency: `regex` (pulled in by `unscrub_text` for token matching).
 - Pseudonym vocabulary becomes part of the public contract — adding new
-  classes (`unit_NN`, `name_NNN`, etc.) is fine, but renaming or removing
-  is a breaking change.
+  classes (`unit_NN`, etc.) is fine, but renaming or removing is a
+  breaking change. Currently shipped: `host_NNN`, `mac_NNN`,
+  `name_NNN`.

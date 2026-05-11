@@ -4,7 +4,34 @@ use ipnet::IpNet;
 
 use crate::observe::Observations;
 
-use super::{Finding, Severity};
+use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+
+pub const METADATA: RuleMetadata = RuleMetadata {
+    id: "ot.unexpected_protocols",
+    title: "Non-OT protocols observed touching OT subnets",
+    severity: Severity::Medium,
+    trigger: "Fires when a flow on a host inside a configured \
+              `--ot-subnet` carries a protocol label from the no-fly \
+              list — currently anydesk, bittorrent, irc, openvpn, \
+              rtmp, sip, smtp. Labels come from the port-based flow \
+              classifier in `observe.rs::classify_flow`, so the false \
+              positive is a service that happens to use a no-fly port \
+              for an unrelated reason. Findings tag every offending \
+              protocol independently.",
+    data_source: &["flows (label matches no-fly list)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0883 — Internet Accessible Device",
+            url: Some("https://attack.mitre.org/techniques/T0883/"),
+        },
+        Reference {
+            kind: ReferenceKind::Spec,
+            label: "ISA/IEC 62443-3-3 SR-5.1 — Network segmentation",
+            url: None,
+        },
+    ],
+};
 
 /// Protocols that have no legitimate place on a plant control network.
 /// Hitting any of these from an OT-zone host is a posture finding.
@@ -43,8 +70,8 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
             if bucket.len() < 5 {
                 bucket.push(format!(
                     "{} -> {}:{} ({} pkts, {} conns)",
-                    flow.key.src,
-                    flow.key.dst,
+                    host_label(flow.key.src, obs),
+                    host_label(flow.key.dst, obs),
                     flow.key.dst_port,
                     flow.packets,
                     flow.connections()
@@ -64,6 +91,56 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
 
     let evidence: Vec<String> = hits.values().flat_map(|v| v.iter().cloned()).collect();
 
+    let has_remote_access = counts
+        .keys()
+        .any(|k| matches!(*k, "openvpn" | "teamviewer" | "anydesk"));
+    let has_p2p_or_consumer = counts
+        .keys()
+        .any(|k| matches!(*k, "bittorrent" | "irc" | "sip" | "rtmp"));
+    let has_email_or_messaging = counts.keys().any(|k| matches!(*k, "smtp" | "apns" | "gcm"));
+
+    let mut playbook = vec![format!(
+        "Identify the device(s) using each unexpected protocol. The evidence list shows \
+             source → destination per flow. Walk each source IP to a physical switch port (use \
+             `show mac address-table` and the asset inventory's MAC for that host).",
+    )];
+    if has_remote_access {
+        playbook.push(
+            "Remote-access tools (TeamViewer / AnyDesk / OpenVPN) on OT are usually vendor \
+             support paths someone left running. Either (a) document the exception with named \
+             contractor and revocation date and add to the firewall allow-list, or (b) remove. \
+             Do NOT block at the switch until the device is identified — vendor remote-access \
+             paths are sometimes load-bearing for plant operations and yanking them mid-shift \
+             can cause an availability event."
+                .to_string(),
+        );
+    }
+    if has_p2p_or_consumer {
+        playbook.push(
+            "Peer-to-peer / consumer protocols (BitTorrent, IRC, SIP, streaming) on a plant \
+             VLAN almost always mean a contractor laptop, an employee personal device, or a \
+             compromised host. Isolate the source on a quarantine VLAN, image for forensics \
+             if there's any sign of compromise, replace the device."
+                .to_string(),
+        );
+    }
+    if has_email_or_messaging {
+        playbook.push(
+            "Email / push-notification protocols (SMTP, APNs, GCM) on OT either mean (a) a \
+             misplaced IT asset on the wrong VLAN — fix the port assignment — or (b) an \
+             intentionally on-OT host that shouldn't be sending mail / phoning home. Either \
+             way the path needs to close."
+                .to_string(),
+        );
+    }
+    playbook.push(
+        "After the immediate response, audit the switch port-security policy on this VLAN. A \
+         controlled OT VLAN should have static MAC bindings or 802.1X. Random devices \
+         appearing with internet-bound traffic means port hygiene is its own finding worth \
+         tracking."
+            .to_string(),
+    );
+
     vec![Finding {
         id: "ot.unexpected_protocols",
         severity: Severity::Medium,
@@ -75,5 +152,6 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         ),
         evidence,
         recommendation: "Trace each source to a physical port. Block at the access switch and document an exception process for any tool (e.g. remote-access software) that legitimately needs to cross the IT/OT boundary.",
+        playbook,
     }]
 }

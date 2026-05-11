@@ -98,8 +98,20 @@ pub fn render_markdown(
                 writeln!(out, "```").unwrap();
                 writeln!(out).unwrap();
             }
+            if let Some(meta) = crate::findings::metadata_for(f.id) {
+                writeln!(out, "**Detection criteria.** {}", meta.trigger).unwrap();
+                writeln!(out).unwrap();
+            }
             writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
             writeln!(out).unwrap();
+            if !f.playbook.is_empty() {
+                writeln!(out, "**Investigation playbook:**").unwrap();
+                writeln!(out).unwrap();
+                for (i, step) in f.playbook.iter().enumerate() {
+                    writeln!(out, "{}. {}", i + 1, step).unwrap();
+                }
+                writeln!(out).unwrap();
+            }
             writeln!(out, "_id: `{}`_", f.id).unwrap();
             writeln!(out).unwrap();
         }
@@ -110,19 +122,23 @@ pub fn render_markdown(
     writeln!(out).unwrap();
     writeln!(
         out,
-        "| IP | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |"
+        "| IP | Hostname | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |"
     )
     .unwrap();
     writeln!(
         out,
-        "|----|------|-----|--------|---------------|-----------|---------|-------|"
+        "|----|----------|------|-----|--------|---------------|-----------|---------|-------|"
     )
     .unwrap();
     for a in inventory {
         writeln!(
             out,
-            "| `{}` | {} | `{}` | {} | {} | {} | {} | {} |",
+            "| `{}` | {} | {} | `{}` | {} | {} | {} | {} | {} |",
             a.ip,
+            a.hostname
+                .as_ref()
+                .map(|s| format!("`{s}`"))
+                .unwrap_or_else(|| "—".to_string()),
             if a.in_ot_zone { "OT" } else { "IT" },
             a.mac.clone().unwrap_or_else(|| "—".to_string()),
             a.vendor.clone().unwrap_or_else(|| "—".to_string()),

@@ -14,6 +14,7 @@ use crate::oui;
 #[derive(Debug, Clone, Serialize)]
 pub struct Asset {
     pub ip: IpAddr,
+    pub hostname: Option<String>,
     pub mac: Option<String>,
     pub vendor: Option<String>,
     pub role: Role,
@@ -58,14 +59,16 @@ pub fn build(obs: &Observations) -> Vec<Asset> {
     assets
 }
 
-fn host_to_asset(host: &HostObs, _obs: &Observations) -> Asset {
+fn host_to_asset(host: &HostObs, obs: &Observations) -> Asset {
     let mac = host.macs.first().copied();
     let vendor = mac.and_then(|m| oui::lookup(&m).map(str::to_string));
     let role = infer_role(host, vendor.as_deref());
     let mut protocols: Vec<String> = host.protocols.iter().cloned().collect();
     protocols.sort();
+    let hostname = obs.hostnames.get(&host.ip).cloned();
     Asset {
         ip: host.ip,
+        hostname,
         mac: mac.map(|m| oui::format_mac(&m)),
         vendor,
         role,

@@ -1,11 +1,11 @@
 [package]
 name = "otsniff"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.85"
 description = "One-shot OT-aware PCAP triage. Feed it a span-port capture, get an exec-readable HTML report."
 license = "Apache-2.0"
-repository = "https://github.com/adamson34/otsniff"
+repository = "https://github.com/example/otsniff"
 keywords = ["ics", "ot", "scada", "modbus", "security"]
 categories = ["command-line-utilities", "network-programming"]
 
@@ -20,6 +20,8 @@ thiserror = "2"
 ipnet = { version = "2.10", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.11"
+sha2 = "0.10"
+pulldown-cmark = { version = "0.10", default-features = false, features = ["html"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
