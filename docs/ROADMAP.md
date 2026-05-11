@@ -312,11 +312,31 @@ quality. Worth verifying that one exists publicly before starting.
 
 ### P1-2: Better progress feedback (S)
 
-`-v` mode currently emits one line at end-of-parse. For multi-GB captures the
-user sees nothing for minutes. Periodic progress (every N packets, or every
-10 MB read) would close that.
+Two related UX gaps in `-v` mode:
 
-**Why:** quality of life on big captures. Cheap. **Touches:** `cli.rs`,
+1. **Parse loop is silent.** Currently emits one line at end-of-parse.
+   For multi-GB captures the user sees nothing for minutes. Periodic
+   progress (every N packets, or every 10 MB read) would close that.
+
+2. **Claude invocation is silent.** With `--ai`, after printing
+   "invoking claude (model: X)..." the user waits 10–60s with no
+   output until Claude returns. The user can't tell if it's stuck.
+   Lightweight fix: spawn the subprocess on a background thread and
+   print a heartbeat from the main thread every ~3s:
+   ```
+   invoking claude (model: default)...
+     [3s] still working...
+     [7s] still working...
+     done in 11.4s, 4127 bytes response
+   ```
+   ~30 LoC. The streaming-stdout alternative (`claude --output-format
+   stream-json`) is more useful but couples us to a CLI output
+   format and the privacy contract makes mid-stream display awkward
+   (can't unscrub until the response completes, so partial tokens
+   would still be in pseudonym form).
+
+**Why:** quality of life on big captures and on AI invocations. Cheap.
+**Touches:** `cli.rs`,
 `pcap.rs`. **Deps:** none.
 
 ### P1-3: Cross-capture diff (M)
