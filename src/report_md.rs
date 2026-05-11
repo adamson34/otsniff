@@ -98,6 +98,10 @@ pub fn render_markdown(
                 writeln!(out, "```").unwrap();
                 writeln!(out).unwrap();
             }
+            if let Some(meta) = crate::findings::metadata_for(f.id) {
+                writeln!(out, "**Detection criteria.** {}", meta.trigger).unwrap();
+                writeln!(out).unwrap();
+            }
             writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
             writeln!(out).unwrap();
             if !f.playbook.is_empty() {

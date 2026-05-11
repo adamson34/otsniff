@@ -43,6 +43,10 @@ struct FindingView {
     recommendation: String,
     playbook: Vec<String>,
     playbook_count: usize,
+    /// Plain-English trigger from the rule catalog. Empty string if the
+    /// finding id isn't in the catalog (shouldn't happen — guarded by
+    /// `every_finding_id_appears_in_the_rule_catalog`).
+    trigger: String,
 }
 
 struct AssetView {
@@ -111,6 +115,9 @@ pub fn render_html(
             recommendation: f.recommendation.to_string(),
             playbook_count: f.playbook.len(),
             playbook: f.playbook.clone(),
+            trigger: crate::findings::metadata_for(f.id)
+                .map(|m| m.trigger.to_string())
+                .unwrap_or_default(),
         })
         .collect();
 

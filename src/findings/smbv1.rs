@@ -2,7 +2,33 @@ use std::net::IpAddr;
 
 use crate::observe::Observations;
 
-use super::{Finding, Severity};
+use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+
+pub const METADATA: RuleMetadata = RuleMetadata {
+    id: "compat.smbv1",
+    title: "SMBv1 traffic observed",
+    severity: Severity::High,
+    trigger: "Fires when at least one TCP/445 or TCP/139 packet carries \
+              the SMB1 magic bytes (`\\xFF SMB`) at offset 0 (raw SMB) \
+              or offset 4 (after an NBSS session-message header). SMB1 \
+              has been deprecated by Microsoft since 2014 and is \
+              blocked by default in modern Windows; its presence \
+              indicates a legacy client or server. Same protocol \
+              family the EternalBlue / WannaCry exploits abused.",
+    data_source: &["smbv1_packets"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Cve,
+            label: "CVE-2017-0144 — MS17-010 / EternalBlue (SMBv1 RCE)",
+            url: Some("https://nvd.nist.gov/vuln/detail/CVE-2017-0144"),
+        },
+        Reference {
+            kind: ReferenceKind::Vendor,
+            label: "Microsoft — Stop using SMB1",
+            url: Some("https://learn.microsoft.com/en-us/windows-server/storage/file-server/troubleshoot/smbv1-not-installed-by-default-in-windows"),
+        },
+    ],
+};
 
 pub fn detect(obs: &Observations) -> Vec<Finding> {
     if obs.smbv1_packets.is_empty() {

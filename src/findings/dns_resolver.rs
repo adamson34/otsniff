@@ -5,7 +5,33 @@ use ipnet::IpNet;
 
 use crate::observe::Observations;
 
-use super::{Finding, Severity};
+use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+
+pub const METADATA: RuleMetadata = RuleMetadata {
+    id: "boundary.dns_resolver",
+    title: "DNS queries from OT to an out-of-zone resolver",
+    severity: Severity::Medium,
+    trigger: "Fires when at least one flow with `dst_port = 53` has a \
+              source IP inside a configured `--ot-subnet` and a \
+              destination IP that is NOT inside any configured OT \
+              subnet. Cross-zone DNS leaks query patterns to the IT \
+              side and trusts an external resolver's answers; both \
+              the resolution path and the DNS server itself should be \
+              in-zone under change control.",
+    data_source: &["flows (dst_port = 53; src in OT, dst not in OT)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::Spec,
+            label: "ISA/IEC 62443-3-3 SR-5.1 — Network segmentation",
+            url: None,
+        },
+        Reference {
+            kind: ReferenceKind::Spec,
+            label: "Purdue Reference Model — boundary services",
+            url: None,
+        },
+    ],
+};
 
 pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     let in_ot = |ip: &IpAddr| ot_subnets.iter().any(|n| n.contains(ip));

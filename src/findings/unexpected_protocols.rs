@@ -4,7 +4,34 @@ use ipnet::IpNet;
 
 use crate::observe::Observations;
 
-use super::{Finding, Severity};
+use super::{Finding, Reference, ReferenceKind, RuleMetadata, Severity};
+
+pub const METADATA: RuleMetadata = RuleMetadata {
+    id: "ot.unexpected_protocols",
+    title: "Non-OT protocols observed touching OT subnets",
+    severity: Severity::Medium,
+    trigger: "Fires when a flow on a host inside a configured \
+              `--ot-subnet` carries a protocol label from the no-fly \
+              list — currently anydesk, bittorrent, irc, openvpn, \
+              rtmp, sip, smtp. Labels come from the port-based flow \
+              classifier in `observe.rs::classify_flow`, so the false \
+              positive is a service that happens to use a no-fly port \
+              for an unrelated reason. Findings tag every offending \
+              protocol independently.",
+    data_source: &["flows (label matches no-fly list)"],
+    references: &[
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0883 — Internet Accessible Device",
+            url: Some("https://attack.mitre.org/techniques/T0883/"),
+        },
+        Reference {
+            kind: ReferenceKind::Spec,
+            label: "ISA/IEC 62443-3-3 SR-5.1 — Network segmentation",
+            url: None,
+        },
+    ],
+};
 
 /// Protocols that have no legitimate place on a plant control network.
 /// Hitting any of these from an OT-zone host is a posture finding.
