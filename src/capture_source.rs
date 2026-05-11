@@ -42,11 +42,54 @@ pub enum Confidence {
     Low,
 }
 
+/// User-declared capture source from the `--source-type` CLI flag.
+/// When present, this is authoritative for the report's first-line
+/// description and the AI prompt qualifier — the heuristic verdict
+/// is preserved on `Classification::source` for auditability and
+/// powers the guard warning when the two disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DeclaredSource {
+    Span,
+    HostSide,
+    Tap,
+}
+
+impl DeclaredSource {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Span => "span",
+            Self::HostSide => "host-side",
+            Self::Tap => "tap",
+        }
+    }
+
+    /// Whether this declared type matches the kind of the heuristic
+    /// verdict. `Ambiguous` is treated as agreement (the heuristic
+    /// didn't form an opinion, so any declared type is consistent).
+    fn agrees_with(&self, source: &CaptureSource) -> bool {
+        matches!(
+            (self, source),
+            (Self::Span, CaptureSource::Span { .. })
+                | (Self::HostSide, CaptureSource::HostSide { .. })
+                | (Self::Tap, CaptureSource::Tap { .. })
+                | (_, CaptureSource::Ambiguous { .. })
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Classification {
+    /// Heuristic verdict over the observed frame distribution.
+    /// Always present — even when the user passed `--source-type`,
+    /// we keep the heuristic's view for the guard warning.
     pub source: CaptureSource,
     pub confidence: Confidence,
     pub frames_analyzed: u64,
+    /// User-declared source type from `--source-type`, if any. When
+    /// set, drives `report_line()` and `ai_qualifier_tag()`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declared: Option<DeclaredSource>,
 }
 
 const HOST_SIDE_DOMINANCE_THRESHOLD: f32 = 0.95;
@@ -72,6 +115,7 @@ pub fn classify(obs: &Observations) -> Classification {
             },
             confidence: Confidence::Low,
             frames_analyzed: 0,
+            declared: None,
         };
     }
 
@@ -105,6 +149,7 @@ pub fn classify(obs: &Observations) -> Classification {
                 },
                 confidence: confidence_for(total, true),
                 frames_analyzed: total,
+                declared: None,
             };
         }
     }
@@ -125,6 +170,7 @@ pub fn classify(obs: &Observations) -> Classification {
                 },
                 confidence: confidence_for(total, true),
                 frames_analyzed: total,
+                declared: None,
             };
         }
         if pct >= HOST_SIDE_BORDERLINE_THRESHOLD && second_pct < HOST_SIDE_SECOND_MAC_MAX {
@@ -135,6 +181,7 @@ pub fn classify(obs: &Observations) -> Classification {
                 },
                 confidence: Confidence::Medium,
                 frames_analyzed: total,
+                declared: None,
             };
         }
     }
@@ -153,6 +200,7 @@ pub fn classify(obs: &Observations) -> Classification {
             },
             confidence: confidence_for(total, true),
             frames_analyzed: total,
+            declared: None,
         };
     }
 
@@ -175,6 +223,7 @@ pub fn classify(obs: &Observations) -> Classification {
         source: CaptureSource::Ambiguous { reason },
         confidence: confidence_for(total, false),
         frames_analyzed: total,
+        declared: None,
     }
 }
 
@@ -188,6 +237,71 @@ fn confidence_for(frames: u64, clear_pattern: bool) -> Confidence {
 }
 
 impl Classification {
+    /// Attach a user-declared source type. The declared type drives
+    /// `report_line()` and `ai_qualifier_tag()`; the heuristic verdict
+    /// is preserved on `source` so a future audit / `guard_warning()`
+    /// call still has the data.
+    pub fn with_declared(mut self, declared: Option<DeclaredSource>) -> Self {
+        self.declared = declared;
+        self
+    }
+
+    /// If `declared` is set and disagrees with the heuristic, return a
+    /// stderr-ready warning. Otherwise `None`. Callers (currently each
+    /// `run_*` subcommand in `cli.rs`) should emit this before any
+    /// further processing — the warning is the only visible signal
+    /// when the user-declared type conflicts with what the frame
+    /// distribution looks like.
+    pub fn guard_warning(&self) -> Option<String> {
+        let declared = self.declared?;
+        if declared.agrees_with(&self.source) {
+            return None;
+        }
+        let heuristic_tag = match &self.source {
+            CaptureSource::Span { .. } => "span",
+            CaptureSource::HostSide { .. } => "host-side",
+            CaptureSource::Tap { .. } => "tap",
+            CaptureSource::Ambiguous { .. } => "ambiguous",
+        };
+        let detail = match &self.source {
+            CaptureSource::HostSide {
+                dominant_mac,
+                appearance_pct,
+            } => format!(
+                "{:.0}% of frames involve MAC {}",
+                appearance_pct * 100.0,
+                oui::format_mac(dominant_mac),
+            ),
+            CaptureSource::Span {
+                distinct_macs,
+                broadcasts,
+            } => format!(
+                "{distinct_macs} distinct MAC(s), {broadcasts} broadcast/multicast frame(s)"
+            ),
+            CaptureSource::Tap {
+                endpoint_a,
+                endpoint_b,
+                coverage_pct,
+            } => format!(
+                "{:.0}% coverage between MACs {} and {}",
+                coverage_pct * 100.0,
+                oui::format_mac(endpoint_a),
+                oui::format_mac(endpoint_b),
+            ),
+            CaptureSource::Ambiguous { .. } => return None,
+        };
+        Some(format!(
+            "--source-type {} declared, but heuristic suggests {} ({}). \
+             Findings that depend on the declared assumption (gateway inference, \
+             \"no HMI seen\", egress reads) may be misleading. Re-run with \
+             --source-type {} or investigate the capture.",
+            declared.label(),
+            heuristic_tag,
+            detail,
+            heuristic_tag,
+        ))
+    }
+
     /// Human-readable single-line description for the report. Real MAC
     /// addresses pass through here unscrambled — the existing scrub
     /// pipeline replaces them with pseudonyms when this string is sent
@@ -198,6 +312,44 @@ impl Classification {
             Confidence::Medium => "medium",
             Confidence::Low => "low",
         };
+        // If the user passed --source-type, that's authoritative for the
+        // report's first line. The heuristic verdict is still kept on
+        // `source` for the guard warning path.
+        if let Some(declared) = self.declared {
+            let suffix = match &self.source {
+                CaptureSource::HostSide {
+                    dominant_mac,
+                    appearance_pct,
+                } if declared == DeclaredSource::HostSide => format!(
+                    " — {:.1}% of frames involve MAC {}",
+                    appearance_pct * 100.0,
+                    oui::format_mac(dominant_mac),
+                ),
+                CaptureSource::Tap {
+                    endpoint_a,
+                    endpoint_b,
+                    coverage_pct,
+                } if declared == DeclaredSource::Tap => format!(
+                    " — {:.1}% coverage between MACs {} and {}",
+                    coverage_pct * 100.0,
+                    oui::format_mac(endpoint_a),
+                    oui::format_mac(endpoint_b),
+                ),
+                CaptureSource::Span {
+                    distinct_macs,
+                    broadcasts,
+                } if declared == DeclaredSource::Span => format!(
+                    " — {distinct_macs} distinct MAC(s), {broadcasts} broadcast/multicast frame(s)"
+                ),
+                _ => String::new(),
+            };
+            let qualifier = match declared {
+                DeclaredSource::Span => "user-declared SPAN".to_string(),
+                DeclaredSource::HostSide => "user-declared host-side tcpdump. Findings about \"internet egress\" or \"missing HMI\" should be read as \"from this host's vantage point,\" not as a network-level claim.".to_string(),
+                DeclaredSource::Tap => "user-declared TAP on a single link. Topology view is limited to that one cable.".to_string(),
+            };
+            return format!("{qualifier}{suffix}");
+        }
         match &self.source {
             CaptureSource::Span {
                 distinct_macs,
@@ -230,8 +382,12 @@ impl Classification {
     }
 
     /// Short tag used by the AI prompt assembler to decide whether to
-    /// append a qualifier clause.
+    /// append a qualifier clause. User-declared type is authoritative
+    /// when set.
     pub fn ai_qualifier_tag(&self) -> &'static str {
+        if let Some(d) = self.declared {
+            return d.label();
+        }
         match &self.source {
             CaptureSource::Span { .. } => "span",
             CaptureSource::HostSide { .. } => "host-side",
@@ -357,6 +513,67 @@ mod tests {
     }
 
     #[test]
+    fn declared_source_matching_heuristic_produces_no_warning() {
+        // 9,800 / 10,000 frames involve the same MAC → heuristic says
+        // host-side; user declares host-side → no warning.
+        let obs = obs_with(&[(mac(1), 9_800), (mac(2), 100), (mac(3), 100)], 0, 10_000);
+        let c = classify(&obs).with_declared(Some(DeclaredSource::HostSide));
+        assert!(c.guard_warning().is_none());
+    }
+
+    #[test]
+    fn declared_source_disagreeing_with_heuristic_produces_warning() {
+        // SPAN-looking traffic (12 distinct MACs, broadcasts) but user
+        // declared --source-type host-side → warning.
+        let mut counts: Vec<([u8; 6], u64)> = Vec::new();
+        for i in 1..=12 {
+            counts.push((mac(i), 1_000));
+        }
+        let obs = obs_with(&counts, 200, 10_000);
+        let c = classify(&obs).with_declared(Some(DeclaredSource::HostSide));
+        let warning = c.guard_warning().expect("expected a guard warning");
+        assert!(warning.contains("host-side declared"));
+        assert!(warning.contains("span"));
+    }
+
+    #[test]
+    fn declared_source_is_authoritative_for_report_line() {
+        // Heuristic would say SPAN; user declares host-side. report_line
+        // should reflect the user-declared type, not the heuristic.
+        let mut counts: Vec<([u8; 6], u64)> = Vec::new();
+        for i in 1..=12 {
+            counts.push((mac(i), 1_000));
+        }
+        let obs = obs_with(&counts, 200, 10_000);
+        let c = classify(&obs).with_declared(Some(DeclaredSource::HostSide));
+        let line = c.report_line();
+        assert!(line.contains("user-declared host-side"));
+    }
+
+    #[test]
+    fn ai_qualifier_tag_uses_declared_when_set() {
+        let obs = obs_with(&[(mac(1), 9_800), (mac(2), 100)], 0, 10_000);
+        let heuristic_only = classify(&obs);
+        assert_eq!(heuristic_only.ai_qualifier_tag(), "host-side");
+        let with_span = heuristic_only
+            .clone()
+            .with_declared(Some(DeclaredSource::Span));
+        assert_eq!(with_span.ai_qualifier_tag(), "span");
+        let with_tap = heuristic_only.with_declared(Some(DeclaredSource::Tap));
+        assert_eq!(with_tap.ai_qualifier_tag(), "tap");
+    }
+
+    #[test]
+    fn declared_with_ambiguous_heuristic_produces_no_warning() {
+        // Heuristic returns Ambiguous (small capture, no clear pattern).
+        // User declaring any type does not produce a warning — the
+        // heuristic didn't form an opinion to disagree with.
+        let obs = obs_with(&[(mac(1), 50), (mac(2), 50)], 0, 100);
+        let c = classify(&obs).with_declared(Some(DeclaredSource::Span));
+        assert!(c.guard_warning().is_none());
+    }
+
+    #[test]
     fn report_line_does_not_panic_for_any_variant() {
         let cases = vec![
             CaptureSource::Span {
@@ -381,6 +598,7 @@ mod tests {
                 source: src,
                 confidence: Confidence::High,
                 frames_analyzed: 10_000,
+                declared: None,
             };
             let _ = c.report_line();
         }
