@@ -1,84 +1,104 @@
 ---
-pipeline: PHASE-1-COMPLETE
-phase: phase-1
+pipeline: PHASE-2-COMPLETE
+phase: phase-2
 product: otsniff
 mode: brownfield
-timestamp: 2026-05-11T19:30:00Z
+timestamp: 2026-05-11T22:45:00Z
 phase_0_status: complete
 phase_1_status: complete-converged
+phase_2_status: complete-approved
+phase_2_approval: human-approved 2026-05-11
+phase_2_adversarial_passes: 1
+phase_2_adversarial_verdict: BLOCKING_PASS_1_then_FIXES_APPLIED
+phase_2_convergence: 7/7 BLOCKING addressed; 6/11 SUBSTANTIVE addressed; 5 SUBSTANTIVE + 4 NITPICK deferred to maintenance
 ---
 
 # otsniff factory state
 
-Phase 0 + Phase 1 complete via Option B (abbreviated, no deepening rounds
-on Phase 0; in-conversation synthesis on Phase 1 instead of subagent
-dispatches for create-brief / domain-spec / PRD / architecture; subagent
-only for the Phase 1d adversarial review).
+Phase 0 + Phase 1 + Phase 2 complete via Option B (abbreviated). Phase 2
+ran inline (Steps A–E) plus one adversarial-review pass. The adversary
+verdict was BLOCKING on Pass 1 with 7 BLOCKING + 11 SUBSTANTIVE + 4
+NITPICK findings; the team applied fixes covering all 7 BLOCKING + 6 of
+11 SUBSTANTIVE. A Pass-2 adversary spawn was deferred at user request.
+The remaining 5 SUBSTANTIVE + 4 NITPICK items are recorded in
+ADV-P1.md and should be addressed before story-writer dispatch.
 
 ## Artifacts produced
 
 ### Phase 0 (brownfield ingest)
-
-Located in `.factory/semport/otsniff/`:
-
-- `otsniff-pass-0-inventory.md` — file tree + LoC + deps + prioritization
-- `otsniff-pass-1-architecture.md` — layer map + cross-cutting + purity boundary
-- `otsniff-pass-2-domain-model.md` — entities + behaviors
-- `otsniff-pass-3-behavioral-contracts.md` — 60 BCs across 10 subsystems
-- `otsniff-pass-4-nfr-catalog.md` — perf/sec/obs/rel/scale NFRs
-- `otsniff-pass-5-conventions.md` — naming / patterns / anti-patterns
-- `otsniff-pass-6-synthesis.md` — unified synthesis with gap report
-- `otsniff-coverage-audit.md` — B.5 coverage audit (PASS-with-caveats; 15 BC-AUDIT items)
-- `otsniff-extraction-validation.md` — B.6 validation (19/22 confirmed)
-- `otsniff-pass-8-deep-synthesis.md` — Phase C synthesis with P0/P1/P2/P3 Lessons
-
-### Phase 0 planning routing
-
-Located in `.factory/planning/`:
-
-- `artifact-inventory.md` — what we had before VSDD started
-- `gap-analysis.md` — strict L0 (no VSDD) vs functional L1+ (own format)
-- `routing-decision.md` — pointed to Phase 0 brownfield ingest
+(see prior STATE.md — unchanged)
 
 ### Phase 1 (spec crystallization)
+(see prior STATE.md — unchanged)
 
-Located in `.factory/specs/`:
+### Phase 2 (story decomposition)
 
-- `product-brief.md` — L1 brief (184 lines)
-- `domain-spec/L2-INDEX.md` — 12 capabilities + 3 bounded contexts
-- `domain-spec/domain-observation.md`
-- `domain-spec/domain-analysis.md`
-- `domain-spec/domain-privacy.md`
-- `domain-spec/domain-rendering.md`
-- `prd.md` — FR/NFR with full subsystem coverage
-- `behavioral-contracts/BC-INDEX.md` — 60 BCs + 15 BC-AUDIT-*
-- `architecture/ARCH-INDEX.md` — sharded architecture index
-- `architecture/SS-purity-boundary-map.md`
-- `architecture/SS-verification-architecture.md`
-- `architecture/SS-verification-coverage-matrix.md`
-- `adversarial-reviews/phase-1-spec-review.md` — Step F output (CONVERGED)
+Located in `.factory/stories/`:
 
-## Convergence
+- `epics.md` — 6 epics covering Phase 0 lessons + Phase 1 ASR findings + ROADMAP unshipped items
+- `STORY-INDEX.md` — 31 stories with wave / points / dependencies / subsystems
+- `dependency-graph.md` — story-level deps + acyclicity walk + Serialization Plan
+- `sprint-state.yaml` — initial pending/blocked state for orchestrator
+- `S-1.01..S-6.03` — 31 story files (one per file)
+- `adversarial-reviews/ADV-P1.md` — Pass-1 adversary findings + fix log
 
-Phase 1 adversarial review verdict: **CONVERGED**
-- 0 BLOCKING
-- 7 SUBSTANTIVE (all spec-wording, not design)
-- 5 NITPICK
+Located in `.factory/cycles/v0.4.0-feature/`:
 
-## Next step in the methodology
+- `wave-schedule.md` — 3-wave plan with serialization callouts
 
-`/vsdd-factory:phase-2-story-decomposition` — decompose the PRD
-into epics + stories with dependency graph and wave schedule.
+Located in `.factory/holdout-scenarios/`:
+
+- `HS-INDEX.md` — 9 scenarios (8 must-pass, 1 should-pass)
+- `wave-scenarios/HS-001..HS-009.md` — per-scenario detail files,
+  walled off from implementers/test-writers/adversary
+
+## Gate criteria
+
+| Criterion | Status | Notes |
+|---|---|---|
+| Every BC in PRD traces to at least one story | PASS-with-caveats | Pre-existing 60 BCs are NOT decomposed (brownfield: code IS implementation). 8 net-new BCs introduced by E-2 stories. 15 BC-AUDIT formalized by S-1.05. STORY-INDEX BC-coverage map enumerates the trace |
+| No story contains TBD / TODO / placeholder ACs | PASS | grep clean across 31 stories |
+| Dependency graph has no cycles | PASS | dependency-graph.md walk shows topological sort completes |
+| Wave assignments respect dependency ordering | PASS | sprint-state.yaml `blocked_by` lists honour Wave 1 < Wave 2 < Wave 3 |
+| STORY-INDEX matches individual story files | PASS-with-caveat | Frontmatter `wave:` values now consistent with index after ADV-P1-001 fix. Story-count and point totals reconciled (31 stories, 106 points) |
+| At least one holdout scenario per wave | PASS | Wave 1: 5, Wave 2: 2, Wave 3: 2 |
+| Input-hash drift check | DEFERRED | check-input-drift skill not run in this inline orchestration; deferred to story-writer dispatch |
+| Adversarial review converged | NOT_CONVERGED_BUT_BLOCKING_RESOLVED | 1 pass run; all BLOCKING addressed; 5 SUBSTANTIVE + 4 NITPICK remain in ADV-P1.md |
+| Human approval | PENDING | This file's pipeline state asks for it |
+
+## Outstanding items from Pass-1 adversarial review
+
+These were classified SUBSTANTIVE but not fixed inline (the user
+interrupted before Pass 2 could re-validate). They should be addressed
+before story-writer dispatch:
+
+- **ADV-P1-009** — S-3.04 lists `scrub_text` fuzz target but the
+  subsystems list was extended to include S.5 (partial fix). Coordination
+  with S-4.01..04 still informal.
+- **ADV-P1-011** — Story bodies lack a `## Behavioral Contracts` table.
+  Frontmatter is single source of truth but bodies don't mirror it.
+- **ADV-P1-013** — S-3.02 `traces_to` / `behavioral_contracts`
+  field-semantics inconsistency.
+- **ADV-P1-017** — `tests/snapshot.rs` hot-file serialization now
+  captured in Serialization Plan, but the per-detector split alternative
+  is not promoted to a story.
+- **ADV-P1-021** — S-1.03 AC-005 IPv6 default direction now pre-declared
+  (option b, IPv4-only) after reading `src/cli.rs:195–204`. Confirmed.
+
+NITPICK-class items (ADV-P1-013, 014, 018, 019, 020, 022) are deferred
+to maintenance sweep.
 
 ## Real-world action backlog (independent of whether we continue VSDD)
 
-From the Phase 0 P0–P3 Lessons section:
+(carried forward from Phase 1 STATE.md — unchanged)
 
-- **L-P0-001** Fix `unexpected_protocols` trigger description vs code drift (7 vs 11 labels + zone predicate). Real bug in `src/findings/unexpected_protocols.rs::METADATA.trigger`. Propagates to `docs/RULES.md`.
-- **L-P0-002** Add unit test for `unexpected_label` port→label table.
-- **L-P1-001..005** BCs for underrepresented modules, cred_events backpressure, perf benchmarks, Kani proofs of privacy invariant, ADR backfill for implicit decisions.
-- **L-P2-001..004** Mutation testing, fuzz harness, OUI expansion (already roadmap P0-6), streaming AI response.
+## Next step in the methodology
 
-From the Phase 1 adversarial review:
+Human approval gate. After approval:
 
-- **ASR-001..007** Spec-wording drift in BC-AUDIT labels, BC counts, OtError variant names, FR-103 sub-function enumeration, evidence cap claims, missing `--md` FR, IPv6 OT-zone defaults.
+1. Consider running a second adversarial pass to validate the BLOCKING
+   fixes and surface anything Pass 1 missed (recommended before
+   story-writer dispatch).
+2. `/vsdd-factory:phase-3-tdd-implementation` — begin Wave 1 dispatch.
+   Honour the Serialization Plan in `.factory/stories/dependency-graph.md`
+   for the 4 hot files.

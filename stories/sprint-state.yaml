@@ -1,0 +1,179 @@
+# Sprint state — otsniff v0.4.0-feature cycle
+# Produced by phase-2-story-decomposition.
+# This file is mutated by the orchestrator as waves progress. Initial state is "pending" for Wave 1, "blocked" for later waves.
+
+cycle: v0.4.0-feature
+current_wave: 1
+total_waves: 3
+total_stories: 31
+
+stories:
+  # ===== Wave 1 (no dependencies) =====
+  S-1.01:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-1.02:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-1.03:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-1.04:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-1.06:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.02:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.03:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.04:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.05:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.06:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.07:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.08:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.09:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.10:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-2.11:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-3.01:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-3.02:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-4.01:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-4.02:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-4.03:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-5.01:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-5.02:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+  S-6.01:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+
+  # ===== Wave 2 (depends on Wave 1) =====
+  S-1.05:
+    status: blocked
+    wave: 2
+    blocked_by: [S-1.01, S-1.02]
+    branch: null
+    worktree: null
+  S-2.01:
+    status: blocked
+    wave: 2
+    blocked_by: [S-1.04]
+    branch: null
+    worktree: null
+  S-3.03:
+    status: blocked
+    wave: 2
+    blocked_by: [S-3.01]
+    branch: null
+    worktree: null
+  S-3.04:
+    status: blocked
+    wave: 2
+    blocked_by: [S-2.04]
+    branch: null
+    worktree: null
+  S-4.04:
+    status: blocked
+    wave: 2
+    blocked_by: [S-4.01, S-4.02, S-4.03]
+    branch: null
+    worktree: null
+  S-6.02:
+    status: blocked
+    wave: 2
+    blocked_by: [S-6.01]
+    branch: null
+    worktree: null
+
+  # ===== Wave 3 (depends on Wave 1 or 2) =====
+  S-5.03:
+    status: blocked
+    wave: 3
+    blocked_by: [S-2.05, S-2.06, S-2.07]
+    soft_prefers: [S-2.08, S-2.09, S-2.10, S-2.11]
+    branch: null
+    worktree: null
+  S-6.03:
+    status: blocked
+    wave: 3
+    blocked_by: [S-6.02]
+    branch: null
+    worktree: null
