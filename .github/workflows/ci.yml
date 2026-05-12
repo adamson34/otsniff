@@ -68,6 +68,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-features
 
+  no-user-paths:
+    name: No user paths in committed files (POL-12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: scripts/lint-no-user-paths.sh
+
   deny:
     name: cargo-deny (licenses + advisories)
     runs-on: ubuntu-latest
