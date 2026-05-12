@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="media/otsniff-logo.png" alt="otsniff" width="640" />
+</p>
+
 # otsniff
 
 One-shot OT-aware PCAP triage. Feed it a span-port capture, get a self-contained HTML report you can hand to a plant manager, IT director, or on-site engineer.
@@ -27,13 +31,14 @@ Every plant tour with a laptop and a SPAN port produces a PCAP. The existing opt
 | Critical | `egress.ot_to_internet` | Flows from configured OT subnets to public IPs |
 | High     | `ics.modbus_writes` | Modbus engineering: write coil / register / mask write / diagnostic restart / force-listen-only |
 | High     | `ics.cip_engineering` | EtherNet/IP CIP engineering services: Stop, Reset, Apply Attributes, Forward Close to controllers |
-| High     | `ics.s7_engineering` | S7Comm engineering: PLC stop/start, block download/upload, password ops |
+| High     | `ics.s7_engineering` | S7Comm engineering: PLC stop/start, block download/upload |
+| High     | `ics.dnp3_engineering` | DNP3 engineering: Operate / Direct Operate / Cold/Warm Restart / Initialize / Enable-Disable Unsolicited / Save Configuration |
 | High     | `compat.smbv1` | SMBv1 magic on tcp/445 or tcp/139 (EternalBlue / WannaCry protocol family) |
 | Medium   | `compat.stale_tls` | SSL 3.0 / TLS 1.0 / TLS 1.1 ClientHellos |
 | Medium   | `boundary.dns_resolver` | OT host querying DNS to a destination outside the OT zone |
 | Medium   | `ot.unexpected_protocols` | AnyDesk, BitTorrent, IRC, OpenVPN, RTMP, SIP, SMTP on OT VLANs |
 
-Plus an **asset inventory** (IP, hostname when DHCP names it, MAC, OUI vendor, inferred role: PLC / HMI / EWS / historian / IT) and a **comms-matrix** of top flows. The report also surfaces a **capture-source classification** (SPAN / host-side / TAP / ambiguous) — declarable explicitly via `--source-type` and guarded by the heuristic.
+Plus an **asset inventory** (IP, hostname when DHCP names it, MAC, OUI vendor inferred from a ~9,000-entry industrial + IT vendor table, inferred role: PLC / HMI / EWS / historian / IT) and a **comms-matrix** of top flows. The report also surfaces a **capture-source classification** (SPAN / host-side / TAP / ambiguous) — declarable explicitly via `--source-type` and guarded by the heuristic.
 
 Every fired finding carries an **investigation playbook** with concrete next-actions tied to the actual evidence (hosts named, vendor-specific commands like `ipconfig /all` and Schannel registry paths, switch-CLI snippets), plus a **Detection criteria** line that explains in plain English what triggered the rule.
 
@@ -115,7 +120,15 @@ otsniff analyze input.pcap --md report.md
 
 For when you want an AI to look at a capture but can't legally send raw plant data to an external API. `otsniff` replaces every IP, MAC, and DHCP-extracted hostname with stable pseudonyms before any AI sees the report, then unscrubs the AI's response on your machine. Vendor names, role labels, function-code labels, and protocol details pass through — that's the context the AI needs.
 
-**Privacy contract.** The scrub layer is designed to align with **NERC CIP-011 (BES Cyber System Information)** handling principles and analogous frameworks like IEC 62443-3-3 / TSA pipeline directives / NIS2. A fail-closed leak detector sits between the scrub and the AI call: if any unscrubbed identifier survives, the run aborts before invoking the AI. See [`docs/audits/scrub-audit-cip011.md`](docs/audits/scrub-audit-cip011.md) for the field-by-field audit, plus [ADR-0006](docs/adr/0006-scrub-unscrub-pseudonyms.md) and [ADR-0007](docs/adr/0007-ai-via-claude-cli.md). Compliance certification is explicitly **not in scope** — see the [roadmap](docs/ROADMAP.md).
+**Privacy contract.** The scrub layer is designed to align with **NERC CIP-011 (BES Cyber System Information)** handling principles and analogous frameworks like IEC 62443-3-3 / TSA pipeline directives / NIS2. Three airlocks protect the AI invocation:
+
+1. **Scrub layer.** Every IP, MAC, and DHCP hostname is replaced with stable pseudonyms before any AI sees the report.
+2. **Fail-closed leak detector.** Sits between the scrub and the AI call. Regex scan for IPv4/IPv6/MAC shapes plus a substring scan against every value in the scrub map. If any unscrubbed identifier survives, the run aborts before invoking the AI.
+3. **Runtime tool sandbox.** The spawned `claude -p` subprocess is invoked with `--disallowed-tools` for Bash, Read, Write, Edit, WebFetch, WebSearch, Glob, Grep, Task, NotebookEdit — the LLM cannot read the source PCAP or the scrub map file with its own tools while running.
+
+Optional **`--review-scrub`** flag adds a fourth, opt-in airlock: print the scrubbed bytes to stderr and pause for `y/N` confirmation before invoking the AI. Useful when you don't want to trust the automated leak detector alone.
+
+See [`docs/audits/scrub-audit-cip011.md`](docs/audits/scrub-audit-cip011.md) for the field-by-field audit, plus [ADR-0006](docs/adr/0006-scrub-unscrub-pseudonyms.md) and [ADR-0007](docs/adr/0007-ai-via-claude-cli.md) (amended 2026-05-12 to record the tool-sandbox + `--review-scrub` decisions). Compliance certification is explicitly **not in scope** — see the [roadmap](docs/ROADMAP.md).
 
 **Closed-loop, one command** — uses your local Claude Code CLI auth and subscription:
 
@@ -165,11 +178,12 @@ The map file is the only thing tying pseudonyms to real values — keep it where
 **In scope:**
 
 - Offline PCAP / PCAPNG analysis on Ethernet captures
-- Modbus/TCP, EtherNet/IP, and S7Comm protocol awareness
-- 12 rule-based findings (see table above and [`docs/RULES.md`](docs/RULES.md))
-- Asset inventory with DHCP hostname extraction and OUI vendor inference
+- Modbus/TCP, EtherNet/IP, S7Comm, and **DNP3** protocol awareness (function-code level)
+- 13 rule-based findings (see table above and [`docs/RULES.md`](docs/RULES.md))
+- Asset inventory with DHCP hostname extraction and ~9,000-entry OUI vendor inference (IEEE MA-L registry, industrial + IT focus)
 - Capture-source heuristic classification + explicit `--source-type` flag
-- Scrub/unscrub pipeline + closed-loop AI triage via local `claude` CLI
+- Scrub/unscrub pipeline + closed-loop AI triage via local `claude` CLI, with three-airlock privacy contract (scrub bytes, leak detector, runtime tool sandbox)
+- Optional `--review-scrub` opt-in human eyeball before AI invocation
 - Per-run privacy audit log with chain-of-custody hashes
 
 **Not in scope:**
@@ -178,7 +192,7 @@ The map file is the only thing tying pseudonyms to real values — keep it where
 - Detection rules, IDS alerting, dashboards (use Suricata / Zeek for the former)
 - Full protocol decoding (function/service-code-level only)
 - Compliance attestation — the project *aligns with* CIP-011 / IEC 62443 handling principles but does not certify
-- DNP3, OPC-UA, BACnet, IEC-104 — see the [roadmap](docs/ROADMAP.md) for prioritization
+- OPC-UA, BACnet, IEC-104 — see the [roadmap](docs/ROADMAP.md) for prioritization
 
 ## Testing with public PCAPs
 
