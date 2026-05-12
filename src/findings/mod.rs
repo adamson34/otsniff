@@ -5,6 +5,7 @@
 //! the report, sorted by severity.
 
 mod dns_resolver;
+pub mod dnp3_engineering;
 mod engineering_commands;
 mod internet_egress;
 mod plaintext_creds;
@@ -143,6 +144,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         engineering_commands::MODBUS_METADATA,
         engineering_commands::ENIP_METADATA,
         engineering_commands::S7_METADATA,
+        dnp3_engineering::METADATA,
         smbv1::METADATA,
         stale_tls::METADATA,
         internet_egress::METADATA,

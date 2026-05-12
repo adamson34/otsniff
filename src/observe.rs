@@ -96,6 +96,15 @@ pub struct S7Event {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct Dnp3Event {
+    pub ts: DateTime<Utc>,
+    pub src: IpAddr,
+    pub dst: IpAddr,
+    pub function_code: u8,
+    pub engineering_class: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CredEvent {
     pub ts: DateTime<Utc>,
     pub src: IpAddr,
@@ -138,6 +147,7 @@ pub struct Observations {
     pub modbus_events: Vec<ModbusEvent>,
     pub enip_events: Vec<EnipEvent>,
     pub s7_events: Vec<S7Event>,
+    pub dnp3_events: Vec<Dnp3Event>,
     pub cred_events: Vec<CredEvent>,
     pub external_flows: HashMap<String, ExternalFlow>,
     /// Map of (src, dst, dst_port) → SMBv1 packet count. Bounded by
