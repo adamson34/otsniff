@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{dhcp, enip, modbus, s7comm};
+use crate::parse::{dhcp, dnp3, enip, modbus, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,6 +96,15 @@ pub struct S7Event {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct Dnp3Event {
+    pub ts: DateTime<Utc>,
+    pub src: IpAddr,
+    pub dst: IpAddr,
+    pub function_code: u8,
+    pub engineering_class: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CredEvent {
     pub ts: DateTime<Utc>,
     pub src: IpAddr,
@@ -138,6 +147,7 @@ pub struct Observations {
     pub modbus_events: Vec<ModbusEvent>,
     pub enip_events: Vec<EnipEvent>,
     pub s7_events: Vec<S7Event>,
+    pub dnp3_events: Vec<Dnp3Event>,
     pub cred_events: Vec<CredEvent>,
     pub external_flows: HashMap<String, ExternalFlow>,
     /// Map of (src, dst, dst_port) → SMBv1 packet count. Bounded by
@@ -338,6 +348,19 @@ impl Observer {
             }
         }
 
+        // DNP3 (tcp/20000) — see also observe_udp for the UDP/20000 path
+        if pkt.dst_port == dnp3::PORT || pkt.src_port == dnp3::PORT {
+            if let Some(pdu) = dnp3::parse(payload) {
+                self.obs.dnp3_events.push(Dnp3Event {
+                    ts: pkt.ts,
+                    src: pkt.src_ip,
+                    dst: pkt.dst_ip,
+                    function_code: pdu.function_code,
+                    engineering_class: pdu.is_engineering_class(),
+                });
+            }
+        }
+
         // EtherNet/IP
         if pkt.dst_port == enip::PORT || pkt.src_port == enip::PORT {
             if let Some(hdr) = enip::parse_header(payload) {
@@ -442,6 +465,22 @@ impl Observer {
             if let Some(info) = dhcp::parse(&pkt.payload) {
                 let ip = IpAddr::V4(info.ip);
                 self.obs.hostnames.insert(ip, info.hostname);
+            }
+        }
+
+        // DNP3 (udp/20000) — mirrors the tcp/20000 path in observe_tcp.
+        // DNP3 is predominantly TCP in modern deployments but the standard
+        // also defines a UDP transport; some outstations use it for
+        // unsolicited responses and broadcast commands.
+        if pkt.dst_port == dnp3::PORT || pkt.src_port == dnp3::PORT {
+            if let Some(pdu) = dnp3::parse(&pkt.payload) {
+                self.obs.dnp3_events.push(Dnp3Event {
+                    ts: pkt.ts,
+                    src: pkt.src_ip,
+                    dst: pkt.dst_ip,
+                    function_code: pdu.function_code,
+                    engineering_class: pdu.is_engineering_class(),
+                });
             }
         }
 
@@ -597,6 +636,148 @@ fn extract_line(payload: &[u8], start: usize, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{TimeZone, Utc};
+    use std::net::IpAddr;
+
+    fn fixed_ts() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap()
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    /// Construct a minimal DNP3 TCP payload for port 20000.
+    ///
+    /// Layout: sync(2) + length(1) + control(1) + dst_le(2) + src_le(2)
+    ///         + link_crc(2) + transport(1) + app_ctrl(1) + fc(1) + app_crc(2)
+    fn make_dnp3_payload(function_code: u8) -> Vec<u8> {
+        vec![
+            0x05,
+            0x64, // sync
+            0x0A, // length
+            0x44, // control
+            0x01,
+            0x00, // dst LE
+            0x02,
+            0x00, // src LE
+            0x00,
+            0x00, // link CRC placeholder
+            0xC0, // transport: FIN=1 FIR=1 seq=0
+            0xC0, // app control
+            function_code,
+            0x00,
+            0x00, // app CRC placeholder
+        ]
+    }
+
+    /// AC-003 / BC-1.02.005: Observer must recognise DNP3 on tcp/20000
+    /// and append a Dnp3Event with the correct function code.
+    #[test]
+    fn ingest_dnp3_recognizes_function_code() {
+        use crate::pcap::{Packet, Transport};
+
+        let ot_subnet: ipnet::IpNet = "10.10.0.0/16".parse().unwrap();
+        let mut observer = Observer::new(vec![ot_subnet]);
+
+        let pkt = Packet {
+            ts: fixed_ts(),
+            src_mac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01],
+            dst_mac: [0x00, 0x1B, 0x1B, 0x11, 0x22, 0x33],
+            src_ip: ip("10.10.0.5"),
+            dst_ip: ip("10.10.0.20"),
+            transport: Transport::Tcp,
+            src_port: 54321,
+            dst_port: 20000,
+            payload: make_dnp3_payload(4), // Operate
+        };
+
+        observer.observe(&pkt);
+        let obs = observer.finish();
+
+        assert!(
+            !obs.dnp3_events.is_empty(),
+            "observer must append a Dnp3Event when tcp/20000 carries a DNP3 frame"
+        );
+        assert_eq!(
+            obs.dnp3_events[0].function_code, 4,
+            "Dnp3Event must carry the application-layer function code"
+        );
+    }
+
+    /// AC-003: DNP3 traffic on tcp/20000 must produce a flow labelled "dnp3".
+    #[test]
+    fn ingest_dnp3_labels_flow() {
+        use crate::pcap::{Packet, Transport};
+
+        let ot_subnet: ipnet::IpNet = "10.10.0.0/16".parse().unwrap();
+        let mut observer = Observer::new(vec![ot_subnet]);
+
+        let pkt = Packet {
+            ts: fixed_ts(),
+            src_mac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01],
+            dst_mac: [0x00, 0x1B, 0x1B, 0x11, 0x22, 0x33],
+            src_ip: ip("10.10.0.5"),
+            dst_ip: ip("10.10.0.20"),
+            transport: Transport::Tcp,
+            src_port: 54321,
+            dst_port: 20000,
+            payload: make_dnp3_payload(5),
+        };
+
+        observer.observe(&pkt);
+        let obs = observer.finish();
+
+        let dnp3_flow = obs.flows.values().find(|f| f.key.dst_port == 20000);
+        assert!(
+            dnp3_flow.is_some(),
+            "a flow for dst_port 20000 must be recorded"
+        );
+        assert_eq!(
+            dnp3_flow.unwrap().label.as_deref(),
+            Some("dnp3"),
+            "flow label for tcp/20000 must be 'dnp3'"
+        );
+    }
+
+    /// AC-003: Observer must recognise DNP3 on udp/20000 and append a
+    /// Dnp3Event — mirrors ingest_dnp3_recognizes_function_code but uses
+    /// Transport::Udp to verify the observe_udp() path.
+    #[test]
+    fn ingest_dnp3_udp_recognizes_function_code() {
+        use crate::pcap::{Packet, Transport};
+
+        let ot_subnet: ipnet::IpNet = "10.10.0.0/16".parse().unwrap();
+        let mut observer = Observer::new(vec![ot_subnet]);
+
+        let pkt = Packet {
+            ts: fixed_ts(),
+            src_mac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01],
+            dst_mac: [0x00, 0x1B, 0x1B, 0x11, 0x22, 0x33],
+            src_ip: ip("10.10.0.5"),
+            dst_ip: ip("10.10.0.20"),
+            transport: Transport::Udp,
+            src_port: 54322,
+            dst_port: 20000,
+            payload: make_dnp3_payload(13), // Cold Restart over UDP
+        };
+
+        observer.observe(&pkt);
+        let obs = observer.finish();
+
+        assert!(
+            !obs.dnp3_events.is_empty(),
+            "observer must append a Dnp3Event for udp/20000 DNP3 traffic"
+        );
+        assert_eq!(
+            obs.dnp3_events[0].function_code, 13,
+            "Dnp3Event over UDP must carry the application-layer function code"
+        );
+        assert!(
+            obs.dnp3_events[0].engineering_class,
+            "Cold Restart (fc=13) must be classified as engineering-class over UDP"
+        );
+    }
 
     #[test]
     fn smb1_magic_at_offset_0() {

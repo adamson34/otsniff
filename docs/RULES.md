@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**12 rules.**
+**13 rules.**
 
 ## Index
 
@@ -17,6 +17,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`ics.modbus_writes`](#icsmodbus_writes) | high | Modbus engineering-class commands on the wire |
 | [`ics.cip_engineering`](#icscip_engineering) | high | EtherNet/IP engineering-class CIP services |
 | [`ics.s7_engineering`](#icss7_engineering) | high | S7Comm engineering-class commands on the wire |
+| [`ics.dnp3_engineering`](#icsdnp3_engineering) | high | DNP3 engineering-class commands on the wire |
 | [`compat.smbv1`](#compatsmbv1) | high | SMBv1 traffic observed |
 | [`compat.stale_tls`](#compatstale_tls) | medium | Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1) |
 | [`egress.ot_to_internet`](#egressot_to_internet) | critical | Internet-bound traffic from OT subnets |
@@ -122,6 +123,21 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **MITRE ATT&CK for ICS** — T0858 — Change Operating Mode ([link](https://attack.mitre.org/techniques/T0858/))
 - **MITRE ATT&CK for ICS** — T0843 — Program Download ([link](https://attack.mitre.org/techniques/T0843/))
 - **Vendor** — Siemens — S7 Communication overview (industrial security)
+
+## `ics.dnp3_engineering`
+
+**DNP3 engineering-class commands on the wire**
+
+- **Severity:** high
+- **Data source:** `dnp3_events (where engineering_class = true)`
+
+**Trigger.** Fires when a DNP3 master issues engineering-class function codes (Operate (4), Direct Operate (5), Direct Operate No Ack (6), Cold Restart (13), Warm Restart (14), Initialize Data (15), Initialize Application (16), Disable Unsolicited (20), Enable Unsolicited (21), Save Configuration (24)) against a controller. DNP3 has no native authentication in its base specification; any host that can reach a DNP3 outstation on tcp/20000 can send these commands.
+
+**References:**
+
+- **MITRE ATT&CK for ICS** — T0855 — Unauthorized Command Message ([link](https://attack.mitre.org/techniques/T0855/))
+- **MITRE ATT&CK for ICS** — T0836 — Modify Parameter ([link](https://attack.mitre.org/techniques/T0836/))
+- **Spec** — IEEE 1815-2012 — DNP3 Standard
 
 ## `compat.smbv1`
 

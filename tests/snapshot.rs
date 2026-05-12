@@ -19,8 +19,8 @@ use otsniff::findings::run_all;
 use otsniff::findings::{catalog, metadata_for};
 use otsniff::inventory::build as build_inventory;
 use otsniff::observe::{
-    CredEvent, CredKind, EnipEvent, ExternalFlow, FlowKey, FlowObs, HostObs, ModbusEvent,
-    Observations, S7Event,
+    CredEvent, CredKind, Dnp3Event, EnipEvent, ExternalFlow, FlowKey, FlowObs, HostObs,
+    ModbusEvent, Observations, S7Event,
 };
 use otsniff::report::render_html;
 use otsniff::report_md::render_markdown;
@@ -173,6 +173,7 @@ fn build_fixture() -> Observations {
             engineering_class: true,
             read_class: false,
         }],
+        dnp3_events: vec![],
         cred_events: vec![CredEvent {
             ts: fixed_ts(),
             src: ip("10.10.0.5"),
@@ -687,5 +688,187 @@ fn cred_event_note_must_not_reach_any_rendered_output() {
     assert!(
         !cred_json.contains(canary),
         "CredEvent serialized with the `note` field — `#[serde(skip)]` is missing."
+    );
+}
+
+// ---------------------------------------------------------------------------
+// AC-004 / BC-3.03.005 — ics.dnp3_engineering snapshot test
+// ---------------------------------------------------------------------------
+
+/// Build a deterministic Observations fixture that contains only DNP3
+/// engineering events — used to exercise the dnp3_engineering detector
+/// in isolation, mirroring the s7/modbus engineering snapshot pattern.
+fn build_dnp3_fixture() -> Observations {
+    let mut hosts = HashMap::new();
+    // Master (engineering workstation)
+    hosts.insert(
+        ip("10.10.0.5"),
+        HostObs {
+            ip: ip("10.10.0.5"),
+            macs: vec![[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01]],
+            protocols: HashSet::from(["dnp3".to_string()]),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 10,
+            bytes: 1_000,
+            in_ot_zone: true,
+        },
+    );
+    // Outstation A
+    hosts.insert(
+        ip("10.10.0.21"),
+        HostObs {
+            ip: ip("10.10.0.21"),
+            macs: vec![[0x00, 0x1B, 0x1B, 0x11, 0x22, 0x44]],
+            protocols: HashSet::from(["dnp3".to_string()]),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 6,
+            bytes: 600,
+            in_ot_zone: true,
+        },
+    );
+    // Outstation B
+    hosts.insert(
+        ip("10.10.0.22"),
+        HostObs {
+            ip: ip("10.10.0.22"),
+            macs: vec![[0x00, 0x1B, 0x1B, 0x11, 0x22, 0x55]],
+            protocols: HashSet::from(["dnp3".to_string()]),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 4,
+            bytes: 400,
+            in_ot_zone: true,
+        },
+    );
+
+    let mut flows = HashMap::new();
+    flows.insert(
+        "dnp3-a".to_string(),
+        FlowObs {
+            key: FlowKey {
+                src: ip("10.10.0.5"),
+                dst: ip("10.10.0.21"),
+                dst_port: 20000,
+                proto: 6,
+            },
+            packets: 6,
+            bytes: 600,
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            label: Some("dnp3".to_string()),
+            unique_src_ports: HashSet::from([54100]),
+        },
+    );
+    flows.insert(
+        "dnp3-b".to_string(),
+        FlowObs {
+            key: FlowKey {
+                src: ip("10.10.0.5"),
+                dst: ip("10.10.0.22"),
+                dst_port: 20000,
+                proto: 6,
+            },
+            packets: 4,
+            bytes: 400,
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            label: Some("dnp3".to_string()),
+            unique_src_ports: HashSet::from([54101]),
+        },
+    );
+
+    Observations {
+        hosts,
+        flows,
+        dnp3_events: vec![
+            Dnp3Event {
+                ts: fixed_ts(),
+                src: ip("10.10.0.5"),
+                dst: ip("10.10.0.21"),
+                function_code: 4, // Operate
+                engineering_class: true,
+            },
+            Dnp3Event {
+                ts: fixed_ts(),
+                src: ip("10.10.0.5"),
+                dst: ip("10.10.0.21"),
+                function_code: 5, // Direct Operate
+                engineering_class: true,
+            },
+            Dnp3Event {
+                ts: fixed_ts(),
+                src: ip("10.10.0.5"),
+                dst: ip("10.10.0.22"),
+                function_code: 13, // Cold Restart
+                engineering_class: true,
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+/// AC-004 / BC-3.03.005: ics.dnp3_engineering finding fires on a fixture
+/// containing engineering-class DNP3 events from one master to two outstations.
+///
+/// This is the Red Gate test for the detector stub. It will panic on the
+/// `todo!()` inside `dnp3_engineering::detect` until the implementer wires
+/// real logic.
+#[test]
+fn dnp3_engineering_fires_on_operate_calls() {
+    use otsniff::findings::dnp3_engineering;
+
+    let obs = build_dnp3_fixture();
+    let subnets = ot_subnets();
+
+    // Call the detector directly so failures are attributed precisely.
+    let findings = dnp3_engineering::detect(&obs, &subnets);
+
+    assert!(
+        !findings.is_empty(),
+        "ics.dnp3_engineering must fire when dnp3_events contains engineering-class events"
+    );
+
+    let f = &findings[0];
+    assert_eq!(f.id, "ics.dnp3_engineering");
+    // Three engineering events across two (src, dst) pairs
+    assert!(!f.evidence.is_empty(), "finding must carry evidence lines");
+    assert!(
+        !f.playbook.is_empty(),
+        "finding must carry a playbook (every_finding_has_a_non_empty_playbook invariant)"
+    );
+
+    insta::assert_json_snapshot!("dnp3_engineering_finding", findings);
+}
+
+/// AC-004: ics.dnp3_engineering does NOT fire when dnp3_events is empty.
+#[test]
+fn dnp3_engineering_silent_on_empty_events() {
+    use otsniff::findings::dnp3_engineering;
+
+    let obs = Observations::default();
+    let subnets = ot_subnets();
+    let findings = dnp3_engineering::detect(&obs, &subnets);
+
+    assert!(
+        findings.is_empty(),
+        "ics.dnp3_engineering must not fire when there are no DNP3 events (EC-005)"
+    );
+}
+
+/// AC-004: when run through run_all, ics.dnp3_engineering appears in the
+/// output and its id exists in the rule catalog (regression guard for the
+/// every_finding_id_appears_in_the_rule_catalog invariant).
+#[test]
+fn dnp3_engineering_wired_into_run_all() {
+    let obs = build_dnp3_fixture();
+    let subnets = ot_subnets();
+    let findings = run_all(&obs, &subnets);
+
+    let dnp3_finding = findings.iter().find(|f| f.id == "ics.dnp3_engineering");
+    assert!(
+        dnp3_finding.is_some(),
+        "run_all must include ics.dnp3_engineering when dnp3_events are present"
     );
 }

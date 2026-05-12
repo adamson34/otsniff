@@ -4,6 +4,7 @@
 //! zero or more `Finding`s. The CLI runs them all and renders the union into
 //! the report, sorted by severity.
 
+pub mod dnp3_engineering;
 mod dns_resolver;
 mod engineering_commands;
 mod internet_egress;
@@ -143,6 +144,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         engineering_commands::MODBUS_METADATA,
         engineering_commands::ENIP_METADATA,
         engineering_commands::S7_METADATA,
+        dnp3_engineering::METADATA,
         smbv1::METADATA,
         stale_tls::METADATA,
         internet_egress::METADATA,
@@ -164,6 +166,7 @@ pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     out.extend(plaintext_creds::detect(obs));
     out.extend(internet_egress::detect(obs));
     out.extend(engineering_commands::detect(obs, ot_subnets));
+    out.extend(dnp3_engineering::detect(obs, ot_subnets));
     out.extend(unexpected_protocols::detect(obs, ot_subnets));
     out.extend(smbv1::detect(obs));
     out.extend(stale_tls::detect(obs));
