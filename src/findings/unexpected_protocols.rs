@@ -162,8 +162,17 @@ mod tests {
     fn metadata_trigger_lists_all_eleven_labels() {
         let trigger = super::METADATA.trigger;
         for label in [
-            "anydesk", "apns", "bittorrent", "gcm", "irc",
-            "openvpn", "rtmp", "sip", "smtp", "stun", "teamviewer",
+            "anydesk",
+            "apns",
+            "bittorrent",
+            "gcm",
+            "irc",
+            "openvpn",
+            "rtmp",
+            "sip",
+            "smtp",
+            "stun",
+            "teamviewer",
         ] {
             assert!(
                 trigger.contains(label),
