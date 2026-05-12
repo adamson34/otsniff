@@ -154,6 +154,11 @@ pub struct AnalyzeArgs {
     /// Only meaningful when `--ai` is set.
     #[arg(long = "model", value_name = "MODEL")]
     pub model: Option<String>,
+    /// Print the scrubbed prompt to stderr and pause for confirmation
+    /// before invoking claude. Defense-in-depth — the automated leak
+    /// detector still runs; this adds a human eyeball.
+    #[arg(long = "review-scrub")]
+    pub review_scrub: bool,
     /// Print parse summary + (with `--ai`) privacy ledger lines to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
@@ -301,6 +306,32 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
     Ok(())
 }
 
+/// Print the scrubbed bytes to stderr and prompt the user for confirmation.
+/// Returns `Ok(())` if the user answers "y" or "yes"; aborts with an error
+/// for any other answer (including EOF).
+fn review_scrub_gate(scrubbed: &str) -> Result<()> {
+    eprintln!(
+        "--- scrubbed prompt to claude ({} bytes) ---",
+        scrubbed.len()
+    );
+    eprintln!("{scrubbed}");
+    eprintln!("--- end scrubbed prompt ---");
+    eprint!("Send to claude? [y/N]: ");
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|source| OtError::WriteOutput {
+            path: "<stdin:review_scrub>".into(),
+            source,
+        })?;
+    let trimmed = answer.trim().to_ascii_lowercase();
+    if trimmed == "y" || trimmed == "yes" {
+        Ok(())
+    } else {
+        Err(OtError::Parse("aborted by --review-scrub".to_string()))
+    }
+}
+
 fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     let ot_subnets = ot_or_default(&args.ot_subnets);
     if args.verbose {
@@ -411,6 +442,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);
     leak_detector::ensure_clean(&user_message)?; // belt-and-braces
     leak_detector::ensure_no_map_values(&user_message, &map)?;
+
+    if args.review_scrub {
+        review_scrub_gate(&user_message)?;
+    }
 
     let model_label = args.model.clone().unwrap_or_else(|| "default".to_string());
     if args.verbose {

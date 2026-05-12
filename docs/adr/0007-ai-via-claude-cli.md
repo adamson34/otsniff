@@ -93,3 +93,30 @@ assert both: the round-trip property of the scrubber, and the
 - The leak detector becomes a load-bearing test. If it ever needs to
   be relaxed (e.g., a real PCAP produces a false-positive IP-shaped
   string in a payload), that's an ADR-grade change, not a quick fix.
+
+## Amendment — 2026-05-12 (S-5.04)
+
+Original ADR covered the shell-out architecture and the privacy contract
+on prompt bytes. It did not address what tools the spawned `claude -p`
+instance can use at runtime. By default, Claude Code has Bash, Read,
+Write, WebFetch, etc. — which means the LLM could read the source PCAP
+or the scrub map file itself, bypassing the leak detector.
+
+**Decision (amendment):**
+
+1. `ClaudeCliProvider::analyze` always passes
+   `--disallowed-tools "Bash,Read,Write,Edit,WebFetch,WebSearch,Glob,Grep,Task,NotebookEdit"`.
+   Not user-configurable. The leak detector enforces *prompt bytes*;
+   the tool disable enforces *runtime access*. Two airlocks, one
+   contract.
+
+2. New opt-in flag `analyze --review-scrub` prints the scrubbed bytes
+   to stderr and pauses for a `y/N` confirmation before invoking
+   claude. Default off so the fast path is unchanged. Defense for
+   the paranoid operator who doesn't trust the automated leak
+   detector's coverage.
+
+**Status:** Accepted (this amendment is additive to the original ADR;
+nothing in the prior decision is superseded).
+
+**Behavioral contracts introduced:** BC-6.03.002, BC-9.06.001.

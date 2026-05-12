@@ -1,0 +1,22 @@
+AC-001 — --disallowed-tools always passed (BC-6.03.002)
+
+$ rg "DISALLOWED_TOOLS" src/ai/claude_cli.rs
+src/ai/claude_cli.rs:103:pub(crate) const DISALLOWED_TOOLS: &str =
+src/ai/claude_cli.rs:115:    cmd.args(["--disallowed-tools", DISALLOWED_TOOLS]);
+
+Constant value (lines 103-104):
+    pub(crate) const DISALLOWED_TOOLS: &str =
+        "Bash,Read,Write,Edit,WebFetch,WebSearch,Glob,Grep,Task,NotebookEdit";
+
+Effective spawn for `analyze --ai`:
+    claude -p "<system_prompt>" \
+        --disallowed-tools "Bash,Read,Write,Edit,WebFetch,WebSearch,Glob,Grep,Task,NotebookEdit" \
+        [--model M]
+
+The flag is unconditional — build_command() always adds it regardless of
+CLI flags. It is not user-configurable.
+
+Three unit tests verify this (all passing):
+  - test_bc_6_03_002_build_command_includes_disallowed_tools_flag
+  - test_bc_6_03_002_disallowed_tools_lists_all_filesystem_and_network_tools
+  - test_bc_6_03_002_build_command_passes_model_when_provided

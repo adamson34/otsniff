@@ -183,6 +183,97 @@ fn scrub_round_trip_via_pcap() {
     assert!(final_text.contains("host_999")); // unmapped pseudonym left as-is
 }
 
+// ── Group B: S-5.04 --review-scrub gate (BC-9.06.001) ─────────────────────────
+
+/// BC-9.06.001: --review-scrub must be a documented flag in the analyze
+/// subcommand help text.  Fails until the flag is added to AnalyzeArgs.
+#[test]
+fn test_bc_9_06_001_analyze_help_lists_review_scrub_flag() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--review-scrub"));
+}
+
+/// BC-9.06.001: when --review-scrub is set and the user answers "n",
+/// otsniff must write the scrubbed-prompt header to stderr and exit 70.
+///
+/// Uses a minimal synthetic PCAP fixture built inline; if the real
+/// Modbus fixture is present it is used instead (faster).
+///
+/// The test pipes "n\n" to stdin.  Expects:
+///   • exit code 70  (OtError::Parse → EX_SOFTWARE)
+///   • stderr contains the header sentinel "scrubbed prompt to claude"
+///   • stderr does NOT contain the word "AI analysis" (invocation aborted)
+#[test]
+fn test_bc_9_06_001_review_scrub_aborts_on_n() {
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    if !pcap.exists() {
+        eprintln!("skipping test_bc_9_06_001_review_scrub_aborts_on_n: Modbus.pcap not present");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let out = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze", "--ai", "--review-scrub"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .write_stdin("n\n")
+        .assert()
+        .code(70)
+        .stderr(predicate::str::contains("scrubbed prompt to claude"));
+}
+
+/// BC-9.06.001: EOF on stdin (e.g. `< /dev/null`) with --review-scrub must
+/// also abort with exit 70 — EC-003 edge case.
+#[test]
+fn test_bc_9_06_001_review_scrub_aborts_on_eof() {
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    if !pcap.exists() {
+        eprintln!("skipping test_bc_9_06_001_review_scrub_aborts_on_eof: Modbus.pcap not present");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let out = tmp.path().join("report.html");
+    // write_stdin("") simulates empty / closed stdin from the test harness
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze", "--ai", "--review-scrub"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .write_stdin("")
+        .assert()
+        .code(70)
+        .stderr(predicate::str::contains("scrubbed prompt to claude"));
+}
+
+// ── Group C: ADR-0007 amendment (AC-003) ──────────────────────────────────────
+
+/// AC-003: ADR-0007 must be amended to document --disallowed-tools and
+/// cite S-5.04.  Fails until the implementer appends the amendment section.
+#[test]
+fn test_ac_003_adr_0007_documents_disallowed_tools_amendment() {
+    let adr_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/adr/0007-ai-via-claude-cli.md");
+    let adr =
+        std::fs::read_to_string(&adr_path).expect("docs/adr/0007-ai-via-claude-cli.md must exist");
+    assert!(
+        adr.contains("--disallowed-tools") || adr.contains("disallowed_tools"),
+        "ADR-0007 must document the --disallowed-tools amendment; file: {}",
+        adr_path.display()
+    );
+    assert!(
+        adr.contains("S-5.04"),
+        "ADR-0007 must cite S-5.04 in the amendment section; file: {}",
+        adr_path.display()
+    );
+}
+
 #[test]
 fn unscrub_strict_mode_fails_on_unknown_token() {
     let tmp = TempDir::new().unwrap();
