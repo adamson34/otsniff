@@ -1,0 +1,5 @@
+$ ./target/release/otsniff rules > /tmp/regen.md && diff docs/RULES.md /tmp/regen.md && echo "RULES.md is in sync"
+RULES.md is in sync
+
+Exit code: 0
+No diff lines — docs/RULES.md matches `otsniff rules` output verbatim.
