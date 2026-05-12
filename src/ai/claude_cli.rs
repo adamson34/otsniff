@@ -99,3 +99,96 @@ fn which_claude() -> Option<std::path::PathBuf> {
     }
     None
 }
+
+/// STUB for Red Gate — implementer replaces with real logic that adds
+/// `--disallowed-tools` and the full tool list to the returned Command.
+///
+/// This function exists so the unit tests in this module compile and fail
+/// on their assertions (Red Gate state) rather than failing to compile.
+/// The implementer must:
+///   1. Define `pub(crate) const DISALLOWED_TOOLS: &str` listing every
+///      Claude Code tool that can read the filesystem or reach the network.
+///   2. Build and return a `Command` that includes `--disallowed-tools`
+///      and `DISALLOWED_TOOLS` in its args.
+///   3. Wire the returned Command into `analyze()` in place of the current
+///      inline `Command::new("claude")` block.
+pub(crate) fn build_command(_model: Option<&str>, _system_prompt: &str) -> Command {
+    // STUB: returns a bare command with no --disallowed-tools flag.
+    // Tests will fail on the assertion — that is the Red Gate.
+    Command::new("claude")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    /// BC-6.03.002: the spawned command MUST always include --disallowed-tools.
+    #[test]
+    fn test_bc_6_03_002_build_command_includes_disallowed_tools_flag() {
+        let cmd = build_command(None, "system prompt");
+        let args: Vec<&OsStr> = cmd.get_args().collect();
+        let strs: Vec<&str> = args.iter().filter_map(|a| a.to_str()).collect();
+        assert!(
+            strs.iter().any(|s| *s == "--disallowed-tools"),
+            "claude command must always pass --disallowed-tools; got args: {strs:?}"
+        );
+    }
+
+    /// BC-6.03.002: the --disallowed-tools value must enumerate every
+    /// Claude Code tool capable of reading the filesystem or reaching
+    /// the network, as defined in AC-001.
+    #[test]
+    fn test_bc_6_03_002_disallowed_tools_lists_all_filesystem_and_network_tools() {
+        let cmd = build_command(None, "system prompt");
+        let strs: Vec<String> = cmd
+            .get_args()
+            .filter_map(|a| a.to_str().map(String::from))
+            .collect();
+        let pos = strs
+            .iter()
+            .position(|s| s == "--disallowed-tools")
+            .expect("--disallowed-tools flag must be present in command args");
+        let value = strs
+            .get(pos + 1)
+            .expect("--disallowed-tools must be followed by a value argument");
+        for tool in [
+            "Bash",
+            "Read",
+            "Write",
+            "Edit",
+            "WebFetch",
+            "WebSearch",
+            "Glob",
+            "Grep",
+            "Task",
+            "NotebookEdit",
+        ] {
+            assert!(
+                value.contains(tool),
+                "--disallowed-tools value is missing '{tool}'; full value: {value:?}",
+            );
+        }
+    }
+
+    /// BC-6.03.002: model flag is threaded through correctly.
+    /// (Secondary concern — the real Red Gate is the --disallowed-tools tests above.)
+    #[test]
+    fn test_bc_6_03_002_build_command_passes_model_when_provided() {
+        let cmd = build_command(Some("claude-opus-4-5"), "system prompt");
+        let strs: Vec<String> = cmd
+            .get_args()
+            .filter_map(|a| a.to_str().map(String::from))
+            .collect();
+        // --disallowed-tools must still be present even with a model override
+        assert!(
+            strs.iter().any(|s| s == "--disallowed-tools"),
+            "--disallowed-tools must be present even when --model is supplied; args: {strs:?}"
+        );
+        // --model must be present
+        assert!(
+            strs.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-opus-4-5"),
+            "--model claude-opus-4-5 must appear in command args; got: {strs:?}"
+        );
+    }
+}
