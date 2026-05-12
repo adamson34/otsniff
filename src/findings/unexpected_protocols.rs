@@ -10,14 +10,14 @@ pub const METADATA: RuleMetadata = RuleMetadata {
     id: "ot.unexpected_protocols",
     title: "Non-OT protocols observed touching OT subnets",
     severity: Severity::Medium,
-    trigger: "Fires when a flow on a host inside a configured \
+    trigger: "Fires when a flow whose src or dst is inside a configured \
               `--ot-subnet` carries a protocol label from the no-fly \
-              list — currently anydesk, bittorrent, irc, openvpn, \
-              rtmp, sip, smtp. Labels come from the port-based flow \
-              classifier in `observe.rs::classify_flow`, so the false \
-              positive is a service that happens to use a no-fly port \
-              for an unrelated reason. Findings tag every offending \
-              protocol independently.",
+              list — currently anydesk, apns, bittorrent, gcm, irc, \
+              openvpn, rtmp, sip, smtp, stun, teamviewer. Labels come \
+              from the port-based flow classifier in \
+              `observe.rs::classify_flow`, so the false positive is a \
+              service that happens to use a no-fly port for an unrelated \
+              reason. Findings tag every offending protocol independently.",
     data_source: &["flows (label matches no-fly list)"],
     references: &[
         Reference {
@@ -154,4 +154,40 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         recommendation: "Trace each source to a physical port. Block at the access switch and document an exception process for any tool (e.g. remote-access software) that legitimately needs to cross the IT/OT boundary.",
         playbook,
     }]
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn metadata_trigger_lists_all_eleven_labels() {
+        let trigger = super::METADATA.trigger;
+        for label in [
+            "anydesk",
+            "apns",
+            "bittorrent",
+            "gcm",
+            "irc",
+            "openvpn",
+            "rtmp",
+            "sip",
+            "smtp",
+            "stun",
+            "teamviewer",
+        ] {
+            assert!(
+                trigger.contains(label),
+                "METADATA.trigger missing label {label:?} — current text: {trigger:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_trigger_uses_src_or_dst_zone_phrasing() {
+        let trigger = super::METADATA.trigger;
+        let lower = trigger.to_ascii_lowercase();
+        assert!(
+            lower.contains("src or dst") || lower.contains("source or destination"),
+            "METADATA.trigger should say 'src OR dst in OT' but reads: {trigger:?}",
+        );
+    }
 }
