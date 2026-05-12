@@ -1505,3 +1505,120 @@ fn render_html_snapshot_remains_data_stable() {
         );
     }
 }
+
+/// AC-006 / BC-8.01.003: the inline SVG brand mark must use PCB-style 90°
+/// trace geometry — `<polyline>` elements with `stroke-linejoin="round"` —
+/// rather than diagonal `<line>` segments, and must include at least 4
+/// `<circle>` nodes for the four-dot brand mark.
+///
+/// Red Gate: fails on the current template (hero SVG uses `<line>` segments
+/// with diagonal paths; only 3 `<circle>` nodes present).
+#[test]
+fn render_html_logo_uses_pcb_style_traces() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+
+    // Extract the first SVG block for error messages.
+    let svg_block: &str = html
+        .find("<svg")
+        .and_then(|start| html[start..].find("</svg>").map(|end| &html[start..start + end + 6]))
+        .unwrap_or("<svg block not found>");
+
+    // The SVG must use polyline with stroke-linejoin (for 90° steps), not diagonal lines.
+    assert!(
+        html.contains("<polyline"),
+        "BC-8.01.003 AC-006: logo SVG must use <polyline> for the trace path \
+         (PCB-style 90° steps); found:\n{svg_block}"
+    );
+    assert!(
+        html.contains(r#"stroke-linejoin="round""#),
+        "BC-8.01.003 AC-006: trace polyline must have stroke-linejoin=\"round\" \
+         to soften 90° corners; found:\n{svg_block}"
+    );
+
+    // At least 4 circle nodes (the brand mark has 4 dots per AC-006 amendment).
+    let circle_count = html.matches("<circle").count();
+    assert!(
+        circle_count >= 4,
+        "BC-8.01.003 AC-006: logo SVG must have >= 4 <circle> nodes \
+         (the brand mark dots); found {circle_count}"
+    );
+}
+
+/// AC-007 / BC-8.01.003: the asset inventory table and the top-flows table
+/// must each be wrapped in a `<details open>` collapsible block so operators
+/// can collapse large tables while reading findings.
+///
+/// Red Gate: fails on the current template (tables are rendered directly
+/// without any enclosing `<details>` element).
+#[test]
+fn render_html_tables_wrapped_in_collapsible_details() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+
+    // Exactly two <details open> blocks — Asset inventory and Top flows.
+    let details_open_count = html.matches("<details open>").count();
+    assert!(
+        details_open_count >= 2,
+        "BC-8.01.003 AC-007: expected >= 2 <details open> blocks for asset + \
+         flow tables; found {details_open_count}"
+    );
+
+    // Each <details open> must contain a <summary> followed by a <table>.
+    // Strict structural test: the substring "<details open>" appears before
+    // both "Asset inventory" and "Top flows" headings.
+    let assets_idx = html
+        .find("Asset inventory")
+        .expect("BC-8.01.003 AC-007: asset inventory section missing from rendered HTML");
+    let flows_idx = html
+        .find("Top flows")
+        .expect("BC-8.01.003 AC-007: top flows section missing from rendered HTML");
+
+    html[..assets_idx]
+        .rfind("<details open>")
+        .expect("BC-8.01.003 AC-007: asset inventory section not wrapped in <details open>");
+    let flows_details_idx = html[..flows_idx]
+        .rfind("<details open>")
+        .expect("BC-8.01.003 AC-007: top flows section not wrapped in <details open>");
+
+    assert!(
+        flows_details_idx < flows_idx,
+        "BC-8.01.003 AC-007: <details open> must precede 'Top flows'"
+    );
+
+    // Inside the asset <details>, there must be a <table>.
+    let assets_details_idx = html[..assets_idx]
+        .rfind("<details open>")
+        .expect("BC-8.01.003 AC-007: asset inventory section not wrapped in <details open>");
+    let after_assets_details = &html[assets_details_idx..];
+    let close_details_pos = after_assets_details
+        .find("</details>")
+        .expect("BC-8.01.003 AC-007: asset <details> not closed");
+    let assets_block = &after_assets_details[..close_details_pos];
+    assert!(
+        assets_block.contains("<table"),
+        "BC-8.01.003 AC-007: asset inventory <details> block must contain a <table>"
+    );
+}
