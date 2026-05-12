@@ -166,6 +166,7 @@ pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     out.extend(plaintext_creds::detect(obs));
     out.extend(internet_egress::detect(obs));
     out.extend(engineering_commands::detect(obs, ot_subnets));
+    out.extend(dnp3_engineering::detect(obs, ot_subnets));
     out.extend(unexpected_protocols::detect(obs, ot_subnets));
     out.extend(smbv1::detect(obs));
     out.extend(stale_tls::detect(obs));
