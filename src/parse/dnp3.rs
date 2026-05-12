@@ -17,15 +17,40 @@ impl Dnp3Pdu {
     /// Initialize Application (16), Disable Unsolicited (20),
     /// Enable Unsolicited (21), Save Configuration (24).
     pub fn is_engineering_class(&self) -> bool {
-        todo!("S-2.04: classify DNP3 function code")
+        matches!(
+            self.function_code,
+            4 | 5 | 6           // Operate, Direct Operate, Direct Operate No Ack
+            | 13 | 14           // Cold Restart, Warm Restart
+            | 15 | 16           // Initialize Data, Initialize Application
+            | 20 | 21           // Disable Unsolicited, Enable Unsolicited
+            | 24                // Save Configuration
+        )
     }
 }
 
 /// Recognize a DNP3 frame from a TCP payload. Returns None when bytes
 /// are not a valid DNP3 frame (missing sync bytes, length mismatch,
 /// truncated, etc.).
-pub fn parse(_payload: &[u8]) -> Option<Dnp3Pdu> {
-    todo!("S-2.04: DNP3 frame parser")
+///
+/// Minimum frame layout (13 bytes):
+///   [0..1]  sync 0x05 0x64
+///   [2]     length
+///   [3]     control
+///   [4..5]  dst address (LE)
+///   [6..7]  src address (LE)
+///   [8..9]  link-layer CRC
+///   [10]    transport header
+///   [11]    app control
+///   [12]    app function code
+pub fn parse(payload: &[u8]) -> Option<Dnp3Pdu> {
+    if payload.len() < 13 {
+        return None;
+    }
+    if payload[0] != 0x05 || payload[1] != 0x64 {
+        return None;
+    }
+    let function_code = payload[12];
+    Some(Dnp3Pdu { function_code })
 }
 
 #[cfg(test)]
