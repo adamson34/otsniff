@@ -25,10 +25,13 @@ stories:
     branch: null
     worktree: null
   S-1.04:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-1.04-unexpected-protocols-trigger
     worktree: null
+    merge_sha: 95da1e2
+    pr: 43
+    completed_at: 2026-05-12T13:40:39Z
   S-1.06:
     status: pending
     wave: 1
