@@ -44,14 +44,15 @@ status: draft
 | S-5.03 | AI-augmented findings | E-5 | 3 | 8 | draft | S-2.05, S-2.06, S-2.07 (hard); S-2.08..2.11 (soft) | S.3, S.6, S.8 |
 | S-5.04 | Harden `--ai` invocation (disallow-tools + review-scrub) | E-5 | 1 | 3 | merged (#45, 5a1fe21) | — | S.6, S.9 |
 | S-5.05 | Report HTML visual polish (hero band + severity-tinted cards + dark mode + collapsible tables) | E-5 | 1 | 3 | merged (#51, b3de579) | — | S.8 |
+| S-5.06 | Brand handoff application (sniff-trail mark + ink/paper/accent palette + JetBrains Mono + inline favicon) | E-5 | 1 | 5 | draft | S-5.05 | S.8 + docs |
 | S-6.01 | Scrub map merge | E-6 | 1 | 5 | draft | — | S.5 |
 | S-6.02 | `diff` subcommand core | E-6 | 2 | 5 | draft | S-6.01 | S.9 + new |
 | S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | draft | S-6.02 | S.8 |
 
-**Total points:** 111 (Wave 1: ~74, Wave 2: ~24, Wave 3: ~13)
-**Total stories:** 33 (Wave 1: 25, Wave 2: 6, Wave 3: 2)
-**Math check:** E-1=14, E-2=29, E-3=18, E-4=18, E-5=17, E-6=15 → 111.
-**Story-count check:** E-1=6, E-2=11, E-3=4, E-4=4, E-5=5, E-6=3 → 33.
+**Total points:** 116 (Wave 1: ~79, Wave 2: ~24, Wave 3: ~13)
+**Total stories:** 34 (Wave 1: 26, Wave 2: 6, Wave 3: 2)
+**Math check:** E-1=14, E-2=29, E-3=18, E-4=18, E-5=22, E-6=15 → 116.
+**Story-count check:** E-1=6, E-2=11, E-3=4, E-4=4, E-5=6, E-6=3 → 34.
 
 ## Epic rollup
 
@@ -61,7 +62,7 @@ status: draft
 | E-2 detection | 11 | 29 | 9 new detectors + DNP3 parser + OUI refresh + cred_events cap + port-table test |
 | E-3 perf/robustness | 4 | 18 | Criterion + prompt evals + mutation + fuzz |
 | E-4 Kani | 4 | 18 | Four proofs covering privacy invariant |
-| E-5 UX + AI hardening | 5 | 17 | Progress feedback + heartbeat + AI second-pass + invocation hardening + report visual polish |
+| E-5 UX + AI hardening | 6 | 22 | Progress feedback + heartbeat + AI second-pass + invocation hardening + report visual polish + brand application |
 | E-6 diff | 3 | 15 | Map merge + diff core + renderer |
 
 ## BC coverage map

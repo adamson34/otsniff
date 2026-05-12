@@ -17,7 +17,7 @@ total_epics: 6
 
 # Epics — otsniff Phase 2
 
-Brownfield-mode decomposition. 33 stories across six epics group the open work — bugs,
+Brownfield-mode decomposition. 34 stories across six epics group the open work — bugs,
 spec drift, formal verification, new detection rules, perf/robustness
 tooling, UX, and the cross-capture diff feature. Already-shipped BCs
 from the 60-BC catalog are not re-decomposed; existing code IS the
@@ -126,9 +126,10 @@ or add behavior.
   - BC-6.03.002 — Claude invocation passes `--disallowed-tools` always (S-5.04)
   - BC-9.06.001 — `analyze --review-scrub` pauses for human eyeball (S-5.04)
   - BC-8.01.003 — Report HTML renders with hero band, severity-tinted finding cards, and dark-mode awareness (S-5.05)
-- **Subsystems touched:** S.6 (ai), S.9 (cli), S.3 (findings), S.8 (rendering)
-- **Estimated stories:** 5
-- **Source items:** ROADMAP P1-2, P0-8; threat model surfaced 2026-05-12 (S-5.04); visual polish requested 2026-05-12 (S-5.05)
+  - BC-8.01.004 — Report HTML applies the otsniff brand handoff (sniff-trail mark, ink/paper/accent palette, JetBrains Mono type, inline favicon) (S-5.06)
+- **Subsystems touched:** S.6 (ai), S.9 (cli), S.3 (findings), S.8 (rendering), docs
+- **Estimated stories:** 6
+- **Source items:** ROADMAP P1-2, P0-8; threat model surfaced 2026-05-12 (S-5.04); visual polish requested 2026-05-12 (S-5.05); brand handoff applied 2026-05-12 (S-5.06)
 
 ## Epic E-6: Cross-capture diff
 

@@ -25,8 +25,8 @@ Wave 3 carries the two stories deliberately delayed for richness
 
 | Metric | Value |
 |--------|-------|
-| Total stories | 33 |
-| Total points | 111 |
+| Total stories | 34 |
+| Total points | 116 |
 | Total waves | 3 |
 | Max parallelism (groups per wave) | 6 |
 | Estimated agent spawns | ~30 (one per story + a few re-spins) |
@@ -42,7 +42,7 @@ Wave 3 carries the two stories deliberately delayed for richness
 | 1-B detection-rules | S-2.02, S-2.03, S-2.04, S-2.05, S-2.06, S-2.07, S-2.08, S-2.09, S-2.10, S-2.11 | 2+2+5+3+3+2+3+2+3+3 = 28 | M-L | parse + findings | 10 stories — must serialize edits to `findings/mod.rs` + `rule_catalog.rs` |
 | 1-C perf-bootstrap | S-3.01, S-3.02 | 3+5 = 8 | M | benches + ai | 2 stories |
 | 1-D kani | S-4.01, S-4.02, S-4.03 | 5+5+3 = 13 | L | scrub + ai | 3 stories (one-time Kani install in first one) |
-| 1-E ux | S-5.01, S-5.02, S-5.04, S-5.05 | 2+2+3+2 = 9 | S–M | pcap + ai + cli + render | 4 stories (S-5.04, S-5.05 added mid-cycle 2026-05-12) |
+| 1-E ux | S-5.01, S-5.02, S-5.04, S-5.05, S-5.06 | 2+2+3+3+5 = 15 | S–M | pcap + ai + cli + render + docs | 5 stories (S-5.04, S-5.05, S-5.06 added mid-cycle 2026-05-12) |
 | 1-F diff-foundation | S-6.01 | 5 | M | scrub | 1 story |
 
 Wave 1 total: 24 stories, ~72 points. Maximum sensible parallelism

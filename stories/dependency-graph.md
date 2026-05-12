@@ -4,7 +4,7 @@ project: otsniff
 phase: 2
 generated: 2026-05-11T20:30:00Z
 producer: phase-2-story-decomposition (inline)
-total_stories: 33
+total_stories: 34
 status: draft
 ---
 
@@ -51,6 +51,7 @@ S-5.02 → ∅                                  (claude heartbeat)
 S-5.03 → S-2.05, S-2.06, S-2.07             (AI-augmented findings anchors on richer rule set — only the three named detectors are hard prerequisites; S-2.08..2.11 are soft preferences not graph edges)
 S-5.04 → ∅                                  (harden --ai invocation: --disallowed-tools + --review-scrub; defense-in-depth, no deps)
 S-5.05 → ∅                                  (report HTML visual polish; touches only templates/report.html + tests/snapshots/*.snap)
+S-5.06 → S-5.05                             (apply brand handoff; supersedes S-5.05's freehand SVG + token names; touches templates/report.html + media/*.svg + README.md + tests/snapshots/*.snap)
 
 S-6.01 → ∅                                  (scrub map merge)
 S-6.02 → S-6.01                             (diff core needs merged maps)
@@ -87,7 +88,7 @@ tabletop walk below). No story appears in any cycle.
   S-6.03 (deps: S-6.02 — level 1)
   (2 stories — but S-5.03 is actually level 1 since all S-2.x deps are level 0; we place S-5.03 in Wave 3 anyway for a separate reason: it consumes the most context and benefits from waiting until the detection layer is fully shipped, including snapshot-tested integration)
 
-Total: 25 + 6 + 2 = 33 stories — all uniquely placed. (S-5.04 and S-5.05 added 2026-05-12 mid-cycle.)
+Total: 26 + 6 + 2 = 34 stories — all uniquely placed. (S-5.04, S-5.05, S-5.06 all added 2026-05-12 mid-cycle.)
 
 **Result: no cycle.**
 
