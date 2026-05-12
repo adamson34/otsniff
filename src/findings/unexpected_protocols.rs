@@ -155,3 +155,30 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         playbook,
     }]
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn metadata_trigger_lists_all_eleven_labels() {
+        let trigger = super::METADATA.trigger;
+        for label in [
+            "anydesk", "apns", "bittorrent", "gcm", "irc",
+            "openvpn", "rtmp", "sip", "smtp", "stun", "teamviewer",
+        ] {
+            assert!(
+                trigger.contains(label),
+                "METADATA.trigger missing label {label:?} — current text: {trigger:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_trigger_uses_src_or_dst_zone_phrasing() {
+        let trigger = super::METADATA.trigger;
+        let lower = trigger.to_ascii_lowercase();
+        assert!(
+            lower.contains("src or dst") || lower.contains("source or destination"),
+            "METADATA.trigger should say 'src OR dst in OT' but reads: {trigger:?}",
+        );
+    }
+}
