@@ -872,3 +872,409 @@ fn dnp3_engineering_wired_into_run_all() {
         "run_all must include ics.dnp3_engineering when dnp3_events are present"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BC-3.05.005 — recon.port_scan detector tests
+// ---------------------------------------------------------------------------
+
+/// Build a minimal Observations with `n` flows from `src` to distinct
+/// destination IPs, all on the same `(dst_port, proto)`.
+///
+/// Destination IPs are generated as 192.168.1.{base_octet..base_octet+n}.
+/// The `src` host and all dst hosts are inserted into `obs.hosts` so
+/// the fixture is self-consistent.
+fn build_scan_fixture(
+    src_str: &str,
+    dst_base_octet: u8,
+    count: u8,
+    dst_port: u16,
+    proto: u8,
+) -> Observations {
+    use std::collections::{BTreeMap, HashMap, HashSet};
+
+    let src = ip(src_str);
+    let mut hosts = HashMap::new();
+    hosts.insert(
+        src,
+        HostObs {
+            ip: src,
+            macs: vec![[0xAA, 0xBB, 0xCC, 0x00, 0x00, 0x01]],
+            protocols: HashSet::from(["smb".to_string()]),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: (count as u64) * 3,
+            bytes: (count as u64) * 300,
+            in_ot_zone: true,
+        },
+    );
+
+    let mut flows = HashMap::new();
+    for i in 0..count {
+        let dst_oct = dst_base_octet.wrapping_add(i);
+        let dst = ip(&format!("192.168.1.{dst_oct}"));
+        hosts.entry(dst).or_insert(HostObs {
+            ip: dst,
+            macs: vec![[0xBB, 0xCC, 0xDD, 0x00, 0x00, dst_oct]],
+            protocols: HashSet::new(),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 1,
+            bytes: 60,
+            in_ot_zone: true,
+        });
+        let key = format!("scan-{i}");
+        flows.insert(
+            key,
+            FlowObs {
+                key: FlowKey {
+                    src,
+                    dst,
+                    dst_port,
+                    proto,
+                },
+                packets: 3,
+                bytes: 300,
+                first_seen: fixed_ts(),
+                last_seen: fixed_ts(),
+                label: None,
+                unique_src_ports: HashSet::from([50000 + i as u16]),
+            },
+        );
+    }
+
+    Observations {
+        hosts,
+        flows,
+        hostnames: BTreeMap::new(),
+        ..Default::default()
+    }
+}
+
+/// Build an Observations where all flows go to broadcast/multicast
+/// destinations (should never count as scan targets per EC-001).
+fn build_broadcast_fixture(src_str: &str, dst_port: u16, proto: u8) -> Observations {
+    use std::collections::{BTreeMap, HashMap, HashSet};
+    use std::net::Ipv6Addr;
+
+    let src = ip(src_str);
+    let mut hosts = HashMap::new();
+    hosts.insert(
+        src,
+        HostObs {
+            ip: src,
+            macs: vec![[0xAA, 0xBB, 0xCC, 0x00, 0x00, 0x01]],
+            protocols: HashSet::from(["udp".to_string()]),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 18,
+            bytes: 1_800,
+            in_ot_zone: true,
+        },
+    );
+
+    // Six broadcast/multicast addresses that must be excluded from counts.
+    let non_targets: &[IpAddr] = &[
+        IpAddr::V4("255.255.255.255".parse().unwrap()),
+        IpAddr::V4("0.0.0.0".parse().unwrap()),
+        IpAddr::V4("224.0.0.1".parse().unwrap()),   // all-hosts multicast
+        IpAddr::V4("239.255.255.250".parse().unwrap()), // SSDP
+        IpAddr::V4("224.0.0.251".parse().unwrap()),  // mDNS
+        IpAddr::V4("224.0.0.252".parse().unwrap()),  // LLMNR
+    ];
+
+    // Silence the unused-import warning: Ipv6Addr is intentionally not
+    // used — it serves as a reminder that IPv6 multicast (ff00::/8) is
+    // also excluded, but testing that is out of scope for this story.
+    let _ = Ipv6Addr::UNSPECIFIED;
+
+    let mut flows = HashMap::new();
+    for (i, &dst) in non_targets.iter().enumerate() {
+        flows.insert(
+            format!("bc-{i}"),
+            FlowObs {
+                key: FlowKey {
+                    src,
+                    dst,
+                    dst_port,
+                    proto,
+                },
+                packets: 3,
+                bytes: 300,
+                first_seen: fixed_ts(),
+                last_seen: fixed_ts(),
+                label: None,
+                unique_src_ports: HashSet::from([51000 + i as u16]),
+            },
+        );
+    }
+
+    Observations {
+        hosts,
+        flows,
+        hostnames: BTreeMap::new(),
+        ..Default::default()
+    }
+}
+
+/// OT subnet covering 192.168.1.0/24 — used by the recon fixture.
+fn scan_ot_subnets() -> Vec<IpNet> {
+    vec!["192.168.1.0/24".parse().unwrap()]
+}
+
+/// BC-3.05.005 / AC-001: recon.port_scan fires at Medium when one source
+/// reaches >= 5 distinct destinations on the same port (SMB tcp/445).
+///
+/// This test will panic on `todo!("S-2.10: implement recon.port_scan
+/// detector")` until the implementer lands real logic — that panic is the
+/// Red Gate signal.
+#[test]
+fn recon_port_scan_fires_at_threshold() {
+    use otsniff::findings::recon_scan;
+
+    // 5 distinct dsts on tcp/445 — exactly at PORT_SCAN_THRESHOLD.
+    let obs = build_scan_fixture("192.168.1.10", 20, 5, 445, 6);
+    let subnets = scan_ot_subnets();
+
+    let findings = recon_scan::detect(&obs, &subnets);
+
+    assert!(
+        !findings.is_empty(),
+        "recon.port_scan must fire when src reaches >= 5 distinct dsts on the same port"
+    );
+
+    let f = &findings[0];
+    assert_eq!(f.id, "recon.port_scan", "finding id must be recon.port_scan");
+    assert_eq!(
+        f.severity,
+        otsniff::findings::Severity::Medium,
+        "severity must be Medium for count in 5..25 range"
+    );
+
+    let evidence_text = f.evidence.join("\n");
+    assert!(
+        evidence_text.contains("192.168.1.10"),
+        "evidence must mention the scanning source IP: {evidence_text}"
+    );
+    assert!(
+        evidence_text.contains("445"),
+        "evidence must mention the scanned port: {evidence_text}"
+    );
+
+    insta::assert_json_snapshot!("recon_port_scan_at_threshold", findings);
+}
+
+/// BC-3.05.005 / AC-001: severity escalates to High when count >= 25.
+///
+/// Red Gate: panics on `todo!()` until implemented.
+#[test]
+fn recon_port_scan_escalates_at_high_threshold() {
+    use otsniff::findings::recon_scan;
+
+    // 25 distinct dsts — exactly at the High escalation threshold.
+    let obs = build_scan_fixture("192.168.1.10", 20, 25, 445, 6);
+    let subnets = scan_ot_subnets();
+
+    let findings = recon_scan::detect(&obs, &subnets);
+
+    assert!(
+        !findings.is_empty(),
+        "recon.port_scan must fire when src reaches >= 25 distinct dsts"
+    );
+
+    let f = &findings[0];
+    assert_eq!(f.id, "recon.port_scan");
+    assert_eq!(
+        f.severity,
+        otsniff::findings::Severity::High,
+        "severity must be High for count >= 25"
+    );
+
+    insta::assert_json_snapshot!("recon_port_scan_high_severity", findings);
+}
+
+/// BC-3.05.005 / EC-002: finding must NOT fire when distinct dst count is
+/// below PORT_SCAN_THRESHOLD (< 5).
+///
+/// Red Gate: panics on `todo!()` until implemented.
+#[test]
+fn recon_port_scan_silent_below_threshold() {
+    use otsniff::findings::recon_scan;
+
+    // 4 distinct dsts — one below threshold.
+    let obs = build_scan_fixture("192.168.1.10", 20, 4, 445, 6);
+    let subnets = scan_ot_subnets();
+
+    let findings = recon_scan::detect(&obs, &subnets);
+
+    let scan_findings: Vec<_> = findings.iter().filter(|f| f.id == "recon.port_scan").collect();
+    assert!(
+        scan_findings.is_empty(),
+        "recon.port_scan must NOT fire for {} distinct dsts (below threshold of 5)",
+        4
+    );
+}
+
+/// BC-3.05.005 / EC-001: broadcast and multicast destination addresses must
+/// not count toward the scan threshold.
+///
+/// Fixture: 6 flows from one src to 6 broadcast/multicast dsts.
+/// Expected: no recon.port_scan finding (0 unicast targets).
+///
+/// Red Gate: panics on `todo!()` until implemented.
+#[test]
+fn recon_port_scan_skips_broadcast_dst() {
+    use otsniff::findings::recon_scan;
+
+    let obs = build_broadcast_fixture("192.168.1.10", 445, 6);
+    let subnets = scan_ot_subnets();
+
+    let findings = recon_scan::detect(&obs, &subnets);
+
+    let scan_findings: Vec<_> = findings.iter().filter(|f| f.id == "recon.port_scan").collect();
+    assert!(
+        scan_findings.is_empty(),
+        "recon.port_scan must not count broadcast/multicast destinations; \
+         got {} findings when expecting 0",
+        scan_findings.len()
+    );
+}
+
+/// BC-3.05.005 / EC-004: flows on different ports must produce SEPARATE
+/// findings, not one merged finding (the grouping key is (src, dst_port, proto)).
+///
+/// Fixture: 1 src → 10 dsts split as 5 on tcp/445 and 5 on tcp/3389.
+/// Expected: exactly 2 recon.port_scan findings, one per port.
+///
+/// Red Gate: panics on `todo!()` until implemented.
+#[test]
+fn recon_port_scan_separates_by_port() {
+    use otsniff::findings::recon_scan;
+    use std::collections::{BTreeMap, HashMap, HashSet};
+
+    let src = ip("192.168.1.10");
+
+    // Build the mixed-port fixture manually so we control the exact split.
+    let mut hosts = HashMap::new();
+    hosts.insert(
+        src,
+        HostObs {
+            ip: src,
+            macs: vec![[0xAA, 0xBB, 0xCC, 0x00, 0x00, 0x01]],
+            protocols: HashSet::from(["smb".to_string(), "rdp".to_string()]),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 30,
+            bytes: 3_000,
+            in_ot_zone: true,
+        },
+    );
+
+    let mut flows = HashMap::new();
+    // 5 flows on tcp/445
+    for i in 0u8..5 {
+        let dst = ip(&format!("192.168.1.{}", 20 + i));
+        hosts.entry(dst).or_insert(HostObs {
+            ip: dst,
+            macs: vec![[0xBB, 0xCC, 0xDD, 0x00, 0x01, 20 + i]],
+            protocols: HashSet::new(),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 1,
+            bytes: 60,
+            in_ot_zone: true,
+        });
+        flows.insert(
+            format!("smb-{i}"),
+            FlowObs {
+                key: FlowKey {
+                    src,
+                    dst,
+                    dst_port: 445,
+                    proto: 6,
+                },
+                packets: 3,
+                bytes: 300,
+                first_seen: fixed_ts(),
+                last_seen: fixed_ts(),
+                label: None,
+                unique_src_ports: HashSet::from([52000 + i as u16]),
+            },
+        );
+    }
+    // 5 flows on tcp/3389
+    for i in 0u8..5 {
+        let dst = ip(&format!("192.168.1.{}", 30 + i));
+        hosts.entry(dst).or_insert(HostObs {
+            ip: dst,
+            macs: vec![[0xBB, 0xCC, 0xDD, 0x00, 0x02, 30 + i]],
+            protocols: HashSet::new(),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 1,
+            bytes: 60,
+            in_ot_zone: true,
+        });
+        flows.insert(
+            format!("rdp-{i}"),
+            FlowObs {
+                key: FlowKey {
+                    src,
+                    dst,
+                    dst_port: 3389,
+                    proto: 6,
+                },
+                packets: 3,
+                bytes: 300,
+                first_seen: fixed_ts(),
+                last_seen: fixed_ts(),
+                label: None,
+                unique_src_ports: HashSet::from([53000 + i as u16]),
+            },
+        );
+    }
+
+    let obs = Observations {
+        hosts,
+        flows,
+        hostnames: BTreeMap::new(),
+        ..Default::default()
+    };
+
+    let subnets = scan_ot_subnets();
+    let findings = recon_scan::detect(&obs, &subnets);
+
+    let scan_findings: Vec<_> = findings.iter().filter(|f| f.id == "recon.port_scan").collect();
+    assert_eq!(
+        scan_findings.len(),
+        2,
+        "expected 2 separate recon.port_scan findings (one per port), got {}",
+        scan_findings.len()
+    );
+
+    // Each finding must mention its own port.
+    let ports_in_evidence: std::collections::HashSet<&str> = scan_findings
+        .iter()
+        .flat_map(|f| f.evidence.iter().map(|s| s.as_str()))
+        .filter(|s| s.contains("445") || s.contains("3389"))
+        .flat_map(|s| {
+            let mut v = vec![];
+            if s.contains("445") {
+                v.push("445");
+            }
+            if s.contains("3389") {
+                v.push("3389");
+            }
+            v
+        })
+        .collect();
+    assert!(
+        ports_in_evidence.contains("445"),
+        "no finding mentions port 445 in its evidence"
+    );
+    assert!(
+        ports_in_evidence.contains("3389"),
+        "no finding mentions port 3389 in its evidence"
+    );
+
+    insta::assert_json_snapshot!("recon_port_scan_separate_by_port", findings);
+}
