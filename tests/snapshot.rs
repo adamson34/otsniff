@@ -1560,6 +1560,213 @@ fn render_html_logo_uses_pcb_style_traces() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// BC-8.01.004 — S-5.06 Brand handoff application tests
+// ---------------------------------------------------------------------------
+
+/// Helper: build and render the standard fixture to HTML.
+/// Mirrors the inline render calls throughout this file; centralised here so
+/// all six S-5.06 tests share a single call site.
+fn render_fixture() -> String {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+/// AC-001 / BC-8.01.004: the six brand SVG files must be committed under
+/// `media/` and the legacy PNG must be deleted.
+///
+/// Red Gate: `media/otsniff-mark.svg` (and siblings) do not exist yet;
+/// `media/otsniff-logo.png` still exists.  Both assertions fail until the
+/// implementer copies the SVGs from the brand handoff and deletes the PNG.
+#[test]
+fn brand_svgs_committed_to_media() {
+    let expected = [
+        "media/otsniff-mark.svg",
+        "media/otsniff-mark-ink.svg",
+        "media/otsniff-mark-paper.svg",
+        "media/otsniff-favicon.svg",
+        "media/otsniff-favicon-ink.svg",
+        "media/otsniff-favicon-paper.svg",
+    ];
+    for path in expected {
+        assert!(
+            std::path::Path::new(path).exists(),
+            "expected brand SVG at {path} per AC-001"
+        );
+    }
+
+    // Legacy PNG must be removed
+    assert!(
+        !std::path::Path::new("media/otsniff-logo.png").exists(),
+        "media/otsniff-logo.png should be deleted per AC-001 — superseded by SVG"
+    );
+}
+
+/// AC-002 / BC-8.01.004: rendered HTML must contain the brand color tokens
+/// (`--ink`, `--paper`, `--accent`) and must NOT contain the obsolete S-5.05
+/// soft-tint tokens (`--bg-strong`, `--crit-soft`, `--high-soft`).
+///
+/// Red Gate: template still uses `--bg-strong` / `--crit-soft` / `--high-soft`
+/// from S-5.05 and lacks `--ink: #15171c` etc.
+#[test]
+fn render_html_uses_brand_palette() {
+    let html = render_fixture();
+    for token in ["--ink: #15171c", "--paper: #fbfaf6", "--accent: #ff7e35"] {
+        assert!(html.contains(token), "rendered HTML missing brand token: {token}");
+    }
+    // Obsolete S-5.05 tokens must be gone
+    for obsolete in ["--bg-strong", "--crit-soft", "--high-soft"] {
+        assert!(
+            !html.contains(obsolete),
+            "obsolete S-5.05 token {obsolete} must be removed per AC-002"
+        );
+    }
+}
+
+/// AC-003 / BC-8.01.004: rendered HTML must define the JetBrains Mono type
+/// stack via `--font-mono` and `--font-sans` CSS custom properties.
+///
+/// Red Gate: template has no `--font-mono`, `--font-sans`, or `"JetBrains Mono"`.
+#[test]
+fn render_html_uses_jetbrains_mono_type_stack() {
+    let html = render_fixture();
+    assert!(
+        html.contains("--font-mono"),
+        "rendered HTML missing CSS custom property --font-mono (AC-003)"
+    );
+    assert!(
+        html.contains("--font-sans"),
+        "rendered HTML missing CSS custom property --font-sans (AC-003)"
+    );
+    assert!(
+        html.contains(r#""JetBrains Mono""#),
+        r#"rendered HTML missing "JetBrains Mono" in the font stack (AC-003)"#
+    );
+}
+
+/// AC-004 / BC-8.01.004: rendered HTML must use a `<header class="brand-header">`
+/// with `.brand-wordmark` and `.brand-meta` elements, an inline sniff-trail
+/// SVG containing exactly 7 `<circle>` elements, 0 `<polyline>` elements, and
+/// 0 `<path>` elements inside the brand-header block.
+///
+/// Red Gate: template uses `class="hero"` (S-5.05); no brand-header, no sniff-trail.
+#[test]
+fn render_html_uses_brand_header_with_sniff_trail_svg() {
+    let html = render_fixture();
+    assert!(
+        html.contains(r#"class="brand-header""#),
+        r#"rendered HTML missing <header class="brand-header"> (AC-004)"#
+    );
+    assert!(
+        html.contains(r#"class="brand-wordmark""#),
+        r#"rendered HTML missing element with class="brand-wordmark" (AC-004)"#
+    );
+    assert!(
+        html.contains(r#"class="brand-meta""#),
+        r#"rendered HTML missing element with class="brand-meta" (AC-004)"#
+    );
+
+    // The freehand hexagon path from S-5.05 must be gone
+    assert!(
+        !html.contains(r#"d="M32 4 L56 18"#),
+        "freehand hexagon path must be replaced by sniff-trail SVG (AC-004)"
+    );
+
+    // Scope circle/polyline/path counts to the brand-header block only
+    let header_start = html
+        .find(r#"class="brand-header""#)
+        .expect("brand-header missing from rendered HTML");
+    let header_end_marker = "</header>";
+    let header_end = html[header_start..]
+        .find(header_end_marker)
+        .expect("brand-header not closed with </header>")
+        + header_start;
+    let header_block = &html[header_start..header_end];
+
+    let circle_count = header_block.matches("<circle").count();
+    let polyline_count = header_block.matches("<polyline").count();
+    let path_count = header_block.matches("<path ").count();
+    assert_eq!(
+        circle_count, 7,
+        "brand-header SVG must have exactly 7 circles (1 hollow ring + 5 packet dots + 1 disc per brand §2); got {circle_count}"
+    );
+    assert_eq!(
+        polyline_count, 0,
+        "brand-header SVG must have 0 polylines; got {polyline_count}"
+    );
+    assert_eq!(
+        path_count, 0,
+        "brand-header SVG must have 0 <path> elements; got {path_count}"
+    );
+}
+
+/// AC-005 / BC-8.01.004: rendered HTML `<head>` must include a
+/// `<link rel="icon">` with an inline `data:image/svg+xml;base64,` favicon
+/// so the report remains a single self-contained file.
+///
+/// Red Gate: template has no `<link rel="icon">` at all.
+///
+/// Note: `base64` is not a project dependency; the decode sanity check is
+/// omitted.  The substring assertions are sufficient to verify the invariant.
+#[test]
+fn render_html_has_inline_favicon_data_url() {
+    let html = render_fixture();
+    assert!(
+        html.contains(r#"<link rel="icon""#),
+        r#"rendered HTML missing <link rel="icon"> in <head> (AC-005)"#
+    );
+    assert!(
+        html.contains("data:image/svg+xml;base64,"),
+        "rendered HTML missing inline SVG favicon data URL (AC-005)"
+    );
+}
+
+/// AC-006 / BC-8.01.004: README.md must reference at least one SVG mark
+/// file, must NOT reference the legacy PNG, and must not contain the
+/// forbidden brand-tone words (powerful, robust, seamless, leverage).
+///
+/// Red Gate: README currently references `media/otsniff-logo.png` and
+/// does not reference any of the SVG marks.
+#[test]
+fn readme_references_brand_svg_not_legacy_png() {
+    let readme = std::fs::read_to_string("README.md").expect("README.md missing");
+    assert!(
+        !readme.contains("media/otsniff-logo.png"),
+        "README must drop the legacy PNG reference per AC-006"
+    );
+    let svg_refs = [
+        "otsniff-mark.svg",
+        "otsniff-mark-ink.svg",
+        "otsniff-mark-paper.svg",
+    ];
+    let has_svg = svg_refs.iter().any(|s| readme.contains(s));
+    assert!(
+        has_svg,
+        "README must reference at least one of the brand SVG marks (AC-006)"
+    );
+
+    // Tone-of-voice grep (case-insensitive, in body text)
+    let forbidden = ["powerful", "robust", "seamless", "leverage"];
+    let lowered = readme.to_lowercase();
+    for word in forbidden {
+        assert!(
+            !lowered.contains(word),
+            "README contains forbidden brand-tone word: {word} (AC-006)"
+        );
+    }
+}
+
 /// AC-007 / BC-8.01.003: the asset inventory table and the top-flows table
 /// must each be wrapped in a `<details open>` collapsible block so operators
 /// can collapse large tables while reading findings.
