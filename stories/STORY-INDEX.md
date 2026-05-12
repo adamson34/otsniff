@@ -17,9 +17,9 @@ status: draft
 | S-1.01 | Reconcile BC-AUDIT-005..012 labels | E-1 | 1 | 1 | draft | — | docs |
 | S-1.02 | Recount BC confidence summary | E-1 | 1 | 1 | draft | — | docs |
 | S-1.03 | Close ASR-003..007 + S7 trigger PRD findings | E-1 | 1 | 5 | draft | — | docs + S.3 |
-| S-1.04 | Fix `ot.unexpected_protocols` trigger | E-1 | 1 | 1 | merged (#43, 95da1e2) | — | S.3 |
+| S-1.04 | Fix `ot.unexpected_protocols` trigger | E-1 | 1 | 1 | merged (#43, 20c541c) | — | S.3 |
 | S-1.05 | Formalize BC-AUDIT into BCs | E-1 | 2 | 3 | draft | S-1.01, S-1.02 | docs |
-| S-1.06 | ADR-0008..0012 backfill | E-1 | 1 | 3 | merged (#44, 91caba2) | — | docs |
+| S-1.06 | ADR-0008..0012 backfill | E-1 | 1 | 3 | merged (#44, 0a1bb8b) | — | docs |
 | S-2.01 | Port-to-label unit test | E-2 | 2 | 1 | draft | S-1.04 | S.3 |
 | S-2.02 | Cap `cred_events` dedup | E-2 | 1 | 2 | draft | — | S.1 |
 | S-2.03 | OUI table refresh | E-2 | 1 | 2 | draft | — | S.2 |
@@ -42,7 +42,7 @@ status: draft
 | S-5.01 | Parse progress feedback | E-5 | 1 | 2 | draft | — | S.0, S.9 |
 | S-5.02 | Claude heartbeat | E-5 | 1 | 2 | draft | — | S.6 |
 | S-5.03 | AI-augmented findings | E-5 | 3 | 8 | draft | S-2.05, S-2.06, S-2.07 (hard); S-2.08..2.11 (soft) | S.3, S.6, S.8 |
-| S-5.04 | Harden `--ai` invocation (disallow-tools + review-scrub) | E-5 | 1 | 3 | merged (#45, 5237c1b) | — | S.6, S.9 |
+| S-5.04 | Harden `--ai` invocation (disallow-tools + review-scrub) | E-5 | 1 | 3 | merged (#45, 5a1fe21) | — | S.6, S.9 |
 | S-6.01 | Scrub map merge | E-6 | 1 | 5 | draft | — | S.5 |
 | S-6.02 | `diff` subcommand core | E-6 | 2 | 5 | draft | S-6.01 | S.9 + new |
 | S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | draft | S-6.02 | S.8 |

@@ -30,7 +30,7 @@ stories:
     wave: 1
     branch: feature/S-1.04-unexpected-protocols-trigger
     worktree: null
-    merge_sha: 95da1e2
+    merge_sha: 20c541c
     pr: 43
     completed_at: 2026-05-12T13:40:39Z
   S-1.06:
@@ -38,7 +38,7 @@ stories:
     wave: 1
     branch: feature/S-1.06-adr-backfill
     worktree: null
-    merge_sha: 91caba2
+    merge_sha: 0a1bb8b
     pr: 44
     completed_at: 2026-05-12T14:09:37Z
   S-2.02:
@@ -131,7 +131,7 @@ stories:
     wave: 1
     branch: feature/S-5.04-harden-ai-invocation
     worktree: null
-    merge_sha: 5237c1b
+    merge_sha: 5a1fe21
     pr: 45
     completed_at: 2026-05-12T15:08:13Z
   S-6.01:
