@@ -3,84 +3,63 @@
 <head>
 <meta charset="utf-8">
 <title>otsniff report — {{ input }}</title>
+<link rel="icon" type="image/svg+xml"
+      href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiBzaGFwZS1yZW5kZXJpbmc9Imdlb21ldHJpY1ByZWNpc2lvbiI+CiAgCiAgPGNpcmNsZSBjeD0iMy41IiBjeT0iOCIgcj0iMi42IiBmaWxsPSJub25lIiBzdHJva2U9IiMxNTE3MWMiIHN0cm9rZS13aWR0aD0iMS41Ij48L2NpcmNsZT4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iMS40IiBmaWxsPSIjMTUxNzFjIj48L2NpcmNsZT4KICA8Y2lyY2xlIGN4PSIxMi41IiBjeT0iOCIgcj0iMi44IiBmaWxsPSIjMTUxNzFjIj48L2NpcmNsZT4KPC9zdmc+">
 <style>
   :root {
-    --bg:        #ffffff;
-    --bg-soft:   #f6f7f9;
-    --bg-strong: #0d1117;
-    --fg:        #0f1115;
-    --fg-on-dark:#e6e9ee;
-    --muted:     #6b7280;
-    --line:      #e4e6ea;
-    --accent:    #1f3b5e;
-
-    --crit:      #dc2626;   --crit-soft: #fff4f3;
-    --high:      #ea580c;   --high-soft: #fff7f1;
-    --med:       #ca8a04;   --med-soft:  #fffaeb;
-    --info:      #2563eb;   --info-soft: #eff6ff;
-    --ok:        #15803d;
-    --ot:        #0f4c5c;
+    --ink: #15171c;
+    --paper: #fbfaf6;
+    --accent: #ff7e35;
+    --ink-2: #4a4639;
+    --muted: #8a8474;
+    --line: #c8c2ad;
+    --crit:   #c33a36;
+    --high:   #b87325;
+    --med:    #b59121;
+    --info:   #3c6da6;
+    --ok:     #2e7d4a;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    --bg:   var(--paper);
+    --fg:   var(--ink);
 
     --radius:    8px;
     --radius-sm: 4px;
-    --shadow:    0 1px 2px rgba(15,17,21,0.04), 0 1px 1px rgba(15,17,21,0.03);
   }
   html { background: var(--bg); color: var(--fg); }
   body {
-    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-feature-settings: "kern" 1;
+    font: 14px/1.5 var(--font-sans);
     max-width: 1100px;
     margin: 0 auto;
     padding: 0 0 2rem 0;
   }
-  .hero {
-    background: var(--bg-strong);
-    color: var(--fg-on-dark);
-    padding: 2rem 1.5rem 1.5rem 1.5rem;
-    margin-bottom: 2rem;
-  }
-  .hero-mark {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 0.5rem;
-  }
-  .logo {
-    width: 44px;
-    height: 44px;
-    flex-shrink: 0;
-  }
-  .hero h1 {
-    font-size: 1.6rem;
-    margin: 0;
-    color: var(--fg-on-dark);
-  }
-  .hero .meta {
-    color: rgba(230,233,238,0.7);
-    font-size: 0.9rem;
-    margin: 0.25rem 0 1.25rem 0;
-    padding-left: calc(44px + 0.75rem);
-  }
-  .hero .stats {
+  h1, h2, h3, code, .mono { font-family: var(--font-mono); }
+  .brand-header { display: flex; align-items: center; gap: 12px; padding: 20px 0 16px; border-bottom: 1px solid var(--line); margin-bottom: 28px; color: var(--ink); }
+  .brand-header svg { color: var(--ink); flex: none; }
+  .brand-wordmark { font: 600 18px/1 var(--font-mono); }
+  .brand-sep { color: var(--muted); font-weight: 400; }
+  .brand-meta { font: 500 11px/1.4 var(--font-mono); color: var(--muted); margin-top: 4px; }
+  .stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 0.75rem;
-    margin: 0;
+    margin: 0 0 1.5rem 0;
   }
-  .hero .stat {
-    background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(255,255,255,0.12);
+  .stat {
+    background: color-mix(in oklch, var(--ink) 4%, var(--paper));
+    border: 1px solid var(--line);
     border-radius: var(--radius);
     padding: 0.75rem 1rem;
   }
-  .hero .stat .n {
+  .stat .n {
     font-size: 1.4rem;
     font-weight: 600;
     font-feature-settings: "tnum";
-    color: var(--fg-on-dark);
+    font-family: var(--font-mono);
+    color: var(--ink);
   }
-  .hero .stat .l {
-    color: rgba(230,233,238,0.6);
+  .stat .l {
+    color: var(--muted);
     font-size: 0.85rem;
   }
   .page-body {
@@ -107,10 +86,10 @@
     margin: 0.75rem 0;
     box-shadow: var(--shadow);
   }
-  .finding.sev-critical { border-left-color: var(--crit); background: var(--crit-soft); }
-  .finding.sev-high { border-left-color: var(--high); background: var(--high-soft); }
-  .finding.sev-medium { border-left-color: var(--med); background: var(--med-soft); }
-  .finding.sev-info { border-left-color: var(--info); background: var(--info-soft); }
+  .finding.sev-critical { border-left-color: var(--crit); background: color-mix(in oklch, var(--crit) 8%, var(--paper)); }
+  .finding.sev-high { border-left-color: var(--high); background: color-mix(in oklch, var(--high) 8%, var(--paper)); }
+  .finding.sev-medium { border-left-color: var(--med); background: color-mix(in oklch, var(--med) 8%, var(--paper)); }
+  .finding.sev-info { border-left-color: var(--info); background: color-mix(in oklch, var(--info) 8%, var(--paper)); }
   .badge {
     display: inline-block;
     font-size: 0.7rem;
@@ -223,18 +202,17 @@
   }
   table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
   th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { background: var(--bg-soft); font-weight: 600; }
-  tbody tr:nth-child(even) { background: var(--bg-soft); }
+  th { background: color-mix(in oklch, var(--ink) 5%, var(--paper)); font-weight: 600; }
+  tbody tr:nth-child(even) { background: color-mix(in oklch, var(--ink) 3%, var(--paper)); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
   .no-findings { color: var(--ok); padding: 0.5rem 0; }
   .ai-section {
-    background: var(--info-soft);
+    background: color-mix(in oklch, var(--info) 8%, var(--paper));
     border: 1px solid var(--line);
     border-left: 4px solid var(--info);
     border-radius: var(--radius);
     padding: 0.5rem 1rem 0.75rem 1rem;
     margin: 0.75rem 0 1rem 0;
-    box-shadow: var(--shadow);
   }
   .ai-section h1, .ai-section h2, .ai-section h3, .ai-section h4 {
     font-size: 1rem;
@@ -254,7 +232,7 @@
   }
   .ai-section code { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
   .ai-banner {
-    background: var(--bg-soft);
+    background: color-mix(in oklch, var(--ink) 4%, var(--paper));
     border-left: 4px solid var(--info);
     border-radius: var(--radius-sm);
     padding: 0.5rem 0.75rem;
@@ -265,22 +243,19 @@
   footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg:       #0b0d10;
-      --bg-soft:  #14171c;
-      --fg:       #e6e9ee;
-      --muted:    #9aa3af;
-      --line:     #21262d;
-      --shadow:   none;
-      --crit-soft: #2a0e0c;
-      --high-soft: #2a1408;
-      --med-soft:  #25180a;
-      --info-soft: #0c1830;
+      --ink:   #fbfaf6;
+      --paper: #15171c;
+      --ink-2: #c8c2ad;
+      --muted: #8a8474;
+      --line:  #2a2d33;
+      --bg:    var(--paper);
+      --fg:    var(--ink);
     }
     pre.evidence, ol.playbook code, .ai-section pre { background: rgba(0,0,0,0.3); }
   }
   @media print {
     body { max-width: none; margin: 0; padding: 1rem; }
-    .hero {
+    .brand-header {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
@@ -310,32 +285,28 @@
 </head>
 <body>
 
-<header class="hero">
-  <div class="hero-mark">
-    <svg class="logo" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-label="otsniff" role="img">
-      <path d="M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z"
-            fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
-      <polyline points="18,46 26,46 26,38 40,38 40,26 50,26"
-                fill="none" stroke="currentColor" stroke-width="2"
-                stroke-linecap="round" stroke-linejoin="round"/>
-      <circle cx="18" cy="46" r="3" fill="currentColor"/>
-      <circle cx="26" cy="38" r="2.6" fill="currentColor"/>
-      <circle cx="40" cy="26" r="2.6" fill="currentColor"/>
-      <circle cx="50" cy="26" r="3" fill="currentColor"/>
-    </svg>
-    <h1>otsniff report</h1>
-  </div>
-  <div class="meta">
-    Source: <code>{{ input }}</code> &middot;
-    Generated: {{ generated }} &middot; otsniff v{{ version }}
-  </div>
-  <div class="stats">
-    <div class="stat"><div class="n">{{ total_packets }}</div><div class="l">packets parsed</div></div>
-    <div class="stat"><div class="n">{{ total_bytes }}</div><div class="l">payload bytes</div></div>
-    <div class="stat"><div class="n">{{ asset_count }}</div><div class="l">hosts ({{ ot_asset_count }} in OT zones)</div></div>
-    <div class="stat"><div class="n">{{ finding_count }}</div><div class="l">findings</div></div>
+<header class="brand-header">
+  <svg viewBox="0 0 64 64" width="40" height="40" aria-hidden="true" shape-rendering="geometricPrecision">
+    <circle cx="8.08" cy="42.24" r="6.08" fill="none" stroke="currentColor" stroke-width="3.2"/>
+    <circle cx="16.053" cy="33.351" r="2.56" fill="currentColor"/>
+    <circle cx="24.027" cy="28.018" r="2.56" fill="currentColor"/>
+    <circle cx="32" cy="26.24" r="2.56" fill="currentColor"/>
+    <circle cx="39.973" cy="28.018" r="2.56" fill="currentColor"/>
+    <circle cx="47.947" cy="33.351" r="2.56" fill="currentColor"/>
+    <circle cx="55.92" cy="42.24" r="6.08" fill="currentColor"/>
+  </svg>
+  <div>
+    <div class="brand-wordmark">otsniff <span class="brand-sep">·</span> triage report</div>
+    <div class="brand-meta">{{ input }} <span class="brand-sep">·</span> v{{ version }} <span class="brand-sep">·</span> {{ generated }}</div>
   </div>
 </header>
+
+<div class="stats">
+  <div class="stat"><div class="n">{{ total_packets }}</div><div class="l">packets parsed</div></div>
+  <div class="stat"><div class="n">{{ total_bytes }}</div><div class="l">payload bytes</div></div>
+  <div class="stat"><div class="n">{{ asset_count }}</div><div class="l">hosts ({{ ot_asset_count }} in OT zones)</div></div>
+  <div class="stat"><div class="n">{{ finding_count }}</div><div class="l">findings</div></div>
+</div>
 
 <div class="page-body">
 
