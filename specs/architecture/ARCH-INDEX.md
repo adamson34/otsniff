@@ -76,7 +76,7 @@ graph TD
 
 ## ADR catalog
 
-Existing ADRs in `docs/adr/`:
+All ADRs in `docs/adr/`:
 
 | ADR | Title | Status |
 |---|---|---|
@@ -87,16 +87,11 @@ Existing ADRs in `docs/adr/`:
 | ADR-0005 | Embedded OT-vendor OUI table | Accepted |
 | ADR-0006 | Scrub/unscrub for AI-assisted triage | Accepted (amended for CIP-011) |
 | ADR-0007 | AI via Claude Code CLI (no HTTP/SDK) | Accepted |
-
-ADRs proposed but not written (L-P1-005 backfill list):
-
-| Proposed ADR | Topic |
-|---|---|
-| ADR-0008 | Sync throughout — no async runtime |
-| ADR-0009 | Drop ephemeral src_port from flow key |
-| ADR-0010 | Roll up plaintext-cred findings by kind |
-| ADR-0011 | pulldown-cmark with raw-HTML event filter for AI markdown |
-| ADR-0012 | Audit log auto-derives path from `-o` |
+| ADR-0008 | Sync throughout — no async runtime | Accepted |
+| ADR-0009 | Drop ephemeral src_port from flow key (logical-flow grouping) | Accepted |
+| ADR-0010 | Roll up plaintext-cred findings by kind | Accepted |
+| ADR-0011 | pulldown-cmark with raw-HTML event filter for AI markdown | Accepted |
+| ADR-0012 | Audit log auto-derives path from `-o` | Accepted |
 
 ## Component inventory (top-level)
 
