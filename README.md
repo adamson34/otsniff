@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="media/otsniff-logo.png" alt="otsniff" width="640" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="media/otsniff-mark-paper.svg">
+    <img src="media/otsniff-mark-ink.svg" alt="otsniff" width="120" height="120" />
+  </picture>
 </p>
 
 # otsniff

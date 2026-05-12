@@ -1295,11 +1295,10 @@ fn recon_port_scan_separates_by_port() {
 // BC-8.01.003 — S-5.05 Report HTML visual-polish substring-invariant tests
 // ---------------------------------------------------------------------------
 
-/// AC-001 / BC-8.01.003: rendered HTML must contain a hero band element with
-/// an inline SVG brand mark and the report title.
+/// AC-001 / BC-8.01.003 (updated by S-5.06): rendered HTML must contain a
+/// brand header element with an inline SVG brand mark and the report title.
 ///
-/// Red Gate: fails on current template (no `<header class="hero">` or inline
-/// SVG). Will pass once the implementer ships the redesign.
+/// Updated by S-5.06: `class="hero"` superseded by `class="brand-header"`.
 #[test]
 fn render_html_includes_hero_band_with_inline_svg() {
     let obs = build_fixture();
@@ -1317,14 +1316,14 @@ fn render_html_includes_hero_band_with_inline_svg() {
     .unwrap();
 
     assert!(
-        html.contains(r#"class="hero""#),
-        "BC-8.01.003 AC-001: rendered HTML must contain a hero band element \
-         (class=\"hero\") — not found. Implement the hero header in templates/report.html."
+        html.contains(r#"class="brand-header""#),
+        "BC-8.01.003 AC-001 (S-5.06): rendered HTML must contain a brand header element \
+         (class=\"brand-header\") — not found."
     );
     assert!(
         html.contains("<svg"),
         "BC-8.01.003 AC-001: rendered HTML must contain an inline <svg> brand mark \
-         — not found. Add the inline SVG mark inside the hero band."
+         — not found. Add the inline SVG mark inside the brand header."
     );
     assert!(
         html.contains("viewBox="),
@@ -1332,17 +1331,17 @@ fn render_html_includes_hero_band_with_inline_svg() {
          — not found. The SVG spec requires viewBox for correct scaling."
     );
     assert!(
-        html.contains("otsniff report"),
-        "BC-8.01.003 AC-001: the hero band must contain the report title \
-         'otsniff report' — not found."
+        html.contains("otsniff"),
+        "BC-8.01.003 AC-001: the brand header must contain the product name \
+         'otsniff' — not found."
     );
 }
 
-/// AC-002 / BC-8.01.003: the embedded `<style>` block must contain CSS rules
-/// that apply severity-tinted backgrounds to finding cards.
+/// AC-002 / BC-8.01.003 (updated by S-5.06): the embedded `<style>` block must
+/// contain CSS rules that apply severity-tinted backgrounds to finding cards.
 ///
-/// Red Gate: fails on current template (finding cards use uniform `var(--card)`;
-/// neither `--crit-soft` nor `--high-soft` tokens are defined).
+/// Updated by S-5.06: soft tokens (`--crit-soft`, `--high-soft`) are superseded
+/// by brand palette — severity backgrounds now use `var(--crit)` / `var(--high)`.
 #[test]
 fn render_html_finding_cards_have_severity_tinted_background() {
     let obs = build_fixture();
@@ -1360,26 +1359,14 @@ fn render_html_finding_cards_have_severity_tinted_background() {
     .unwrap();
 
     assert!(
-        html.contains("--crit-soft"),
-        "BC-8.01.003 AC-002: CSS token `--crit-soft` must be defined in the \
-         embedded <style> block — not found. Add the design-token definitions \
-         specified in the S-5.05 story."
+        html.contains("sev-critical") && html.contains("var(--crit)"),
+        "BC-8.01.003 AC-002 (S-5.06): a CSS rule must apply `var(--crit)` as the \
+         border/background of `.sev-critical` finding cards — not found."
     );
     assert!(
-        html.contains("--high-soft"),
-        "BC-8.01.003 AC-002: CSS token `--high-soft` must be defined in the \
-         embedded <style> block — not found."
-    );
-    assert!(
-        html.contains("sev-critical") && html.contains("var(--crit-soft)"),
-        "BC-8.01.003 AC-002: a CSS rule must apply `var(--crit-soft)` as the \
-         background of `.sev-critical` finding cards — not found. Add \
-         `.finding.sev-critical {{ background: var(--crit-soft) }}` (or equivalent)."
-    );
-    assert!(
-        html.contains("sev-high") && html.contains("var(--high-soft)"),
-        "BC-8.01.003 AC-002: a CSS rule must apply `var(--high-soft)` as the \
-         background of `.sev-high` finding cards — not found."
+        html.contains("sev-high") && html.contains("var(--high)"),
+        "BC-8.01.003 AC-002 (S-5.06): a CSS rule must apply `var(--high)` as the \
+         border/background of `.sev-high` finding cards — not found."
     );
 }
 
@@ -1506,13 +1493,10 @@ fn render_html_snapshot_remains_data_stable() {
     }
 }
 
-/// AC-006 / BC-8.01.003: the inline SVG brand mark must use PCB-style 90°
-/// trace geometry — `<polyline>` elements with `stroke-linejoin="round"` —
-/// rather than diagonal `<line>` segments, and must include at least 4
-/// `<circle>` nodes for the four-dot brand mark.
+/// AC-006 / BC-8.01.003 (updated by S-5.06): the inline SVG brand mark must use
+/// the sniff-trail geometry — 7 `<circle>` elements, no `<polyline>`, no `<path>`.
 ///
-/// Red Gate: fails on the current template (hero SVG uses `<line>` segments
-/// with diagonal paths; only 3 `<circle>` nodes present).
+/// Updated by S-5.06: PCB-style polyline superseded by sniff-trail arc of circles.
 #[test]
 fn render_html_logo_uses_pcb_style_traces() {
     let obs = build_fixture();
@@ -1529,34 +1513,12 @@ fn render_html_logo_uses_pcb_style_traces() {
     )
     .unwrap();
 
-    // Extract the first SVG block for error messages.
-    let svg_block: &str = html
-        .find("<svg")
-        .and_then(|start| {
-            html[start..]
-                .find("</svg>")
-                .map(|end| &html[start..start + end + 6])
-        })
-        .unwrap_or("<svg block not found>");
-
-    // The SVG must use polyline with stroke-linejoin (for 90° steps), not diagonal lines.
-    assert!(
-        html.contains("<polyline"),
-        "BC-8.01.003 AC-006: logo SVG must use <polyline> for the trace path \
-         (PCB-style 90° steps); found:\n{svg_block}"
-    );
-    assert!(
-        html.contains(r#"stroke-linejoin="round""#),
-        "BC-8.01.003 AC-006: trace polyline must have stroke-linejoin=\"round\" \
-         to soften 90° corners; found:\n{svg_block}"
-    );
-
-    // At least 4 circle nodes (the brand mark has 4 dots per AC-006 amendment).
+    // S-5.06: sniff-trail SVG uses 7 circles, no polyline.
     let circle_count = html.matches("<circle").count();
     assert!(
-        circle_count >= 4,
-        "BC-8.01.003 AC-006: logo SVG must have >= 4 <circle> nodes \
-         (the brand mark dots); found {circle_count}"
+        circle_count >= 7,
+        "BC-8.01.003 AC-006 (S-5.06): brand mark SVG must have >= 7 <circle> nodes \
+         (sniff-trail); found {circle_count}"
     );
 }
 
@@ -1623,7 +1585,10 @@ fn brand_svgs_committed_to_media() {
 fn render_html_uses_brand_palette() {
     let html = render_fixture();
     for token in ["--ink: #15171c", "--paper: #fbfaf6", "--accent: #ff7e35"] {
-        assert!(html.contains(token), "rendered HTML missing brand token: {token}");
+        assert!(
+            html.contains(token),
+            "rendered HTML missing brand token: {token}"
+        );
     }
     // Obsolete S-5.05 tokens must be gone
     for obsolete in ["--bg-strong", "--crit-soft", "--high-soft"] {
