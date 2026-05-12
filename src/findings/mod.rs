@@ -9,6 +9,7 @@ mod dns_resolver;
 mod engineering_commands;
 mod internet_egress;
 mod plaintext_creds;
+pub mod recon_scan;
 mod smbv1;
 mod stale_tls;
 mod unexpected_protocols;
@@ -149,6 +150,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         stale_tls::METADATA,
         internet_egress::METADATA,
         dns_resolver::METADATA,
+        recon_scan::METADATA,
         unexpected_protocols::METADATA,
     ]
 }
