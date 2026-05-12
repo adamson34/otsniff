@@ -1,0 +1,19 @@
+$ grep -A8 "recon.port_scan" docs/RULES.md
+| [`recon.port_scan`](#reconport_scan) | medium | Port scan — single source to many destinations on the same port |
+| [`ot.unexpected_protocols`](#otunexpected_protocols) | medium | Non-OT protocols observed touching OT subnets |
+
+## `creds.ftp`
+
+**Plaintext FTP authentication observed**
+
+- **Severity:** critical
+- **Data source:** `cred_events (kind = FtpAuth)`
+--
+## `recon.port_scan`
+
+**Port scan — single source to many destinations on the same port**
+
+- **Severity:** medium
+- **Data source:** `flows (grouped by src_ip, dst_port, proto; counting distinct dst_ip)`
+
+**Trigger.** Fires when a single source IP talks to >= 5 distinct destination IPs on the same destination port + protocol within the capture window (PORT_SCAN_THRESHOLD = 5). Severity escalates to High at >= 25 distinct destinations. Broadcast and multicast destination addresses are excluded from the count.
