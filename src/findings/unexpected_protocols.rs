@@ -10,14 +10,14 @@ pub const METADATA: RuleMetadata = RuleMetadata {
     id: "ot.unexpected_protocols",
     title: "Non-OT protocols observed touching OT subnets",
     severity: Severity::Medium,
-    trigger: "Fires when a flow on a host inside a configured \
+    trigger: "Fires when a flow whose src or dst is inside a configured \
               `--ot-subnet` carries a protocol label from the no-fly \
-              list — currently anydesk, bittorrent, irc, openvpn, \
-              rtmp, sip, smtp. Labels come from the port-based flow \
-              classifier in `observe.rs::classify_flow`, so the false \
-              positive is a service that happens to use a no-fly port \
-              for an unrelated reason. Findings tag every offending \
-              protocol independently.",
+              list — currently anydesk, apns, bittorrent, gcm, irc, \
+              openvpn, rtmp, sip, smtp, stun, teamviewer. Labels come \
+              from the port-based flow classifier in \
+              `observe.rs::classify_flow`, so the false positive is a \
+              service that happens to use a no-fly port for an unrelated \
+              reason. Findings tag every offending protocol independently.",
     data_source: &["flows (label matches no-fly list)"],
     references: &[
         Reference {
