@@ -1,0 +1,9 @@
+$ cargo test --test snapshot 2>&1 | grep -E "brand_|render_html_uses_brand_|render_html_uses_jetbrains_|render_html_has_inline_favicon|readme_references_brand|test result"
+
+test brand_svgs_committed_to_media ... ok
+test readme_references_brand_svg_not_legacy_png ... ok
+test render_html_has_inline_favicon_data_url ... ok
+test render_html_uses_brand_header_with_sniff_trail_svg ... ok
+test render_html_uses_brand_palette ... ok
+test render_html_uses_jetbrains_mono_type_stack ... ok
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
