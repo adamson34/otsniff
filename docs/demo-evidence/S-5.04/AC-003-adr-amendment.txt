@@ -1,0 +1,34 @@
+AC-003 — ADR-0007 amended (S-5.04)
+
+$ tail -30 docs/adr/0007-ai-via-claude-cli.md
+
+## Amendment — 2026-05-12 (S-5.04)
+
+Original ADR covered the shell-out architecture and the privacy contract
+on prompt bytes. It did not address what tools the spawned `claude -p`
+instance can use at runtime. By default, Claude Code has Bash, Read,
+Write, WebFetch, etc. — which means the LLM could read the source PCAP
+or the scrub map file itself, bypassing the leak detector.
+
+**Decision (amendment):**
+
+1. `ClaudeCliProvider::analyze` always passes
+   `--disallowed-tools "Bash,Read,Write,Edit,WebFetch,WebSearch,Glob,Grep,Task,NotebookEdit"`.
+   Not user-configurable. The leak detector enforces *prompt bytes*;
+   the tool disable enforces *runtime access*. Two airlocks, one
+   contract.
+
+2. New opt-in flag `analyze --review-scrub` prints the scrubbed bytes
+   to stderr and pauses for a `y/N` confirmation before invoking
+   claude. Default off so the fast path is unchanged. Defense for
+   the paranoid operator who doesn't trust the automated leak
+   detector's coverage.
+
+**Status:** Accepted (this amendment is additive to the original ADR;
+nothing in the prior decision is superseded).
+
+**Behavioral contracts introduced:** BC-6.03.002, BC-9.06.001.
+
+---
+Test: test_ac_003_adr_0007_documents_disallowed_tools_amendment (cli_smoke.rs:260)
+Result: PASSED
