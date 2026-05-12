@@ -40,11 +40,7 @@ impl AiProvider for ClaudeCliProvider {
             ));
         }
 
-        let mut cmd = Command::new("claude");
-        cmd.arg("-p").arg(system_prompt);
-        if let Some(model) = &self.model {
-            cmd.args(["--model", model]);
-        }
+        let mut cmd = build_command(self.model.as_deref(), system_prompt);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -100,22 +96,27 @@ fn which_claude() -> Option<std::path::PathBuf> {
     None
 }
 
-/// STUB for Red Gate — implementer replaces with real logic that adds
-/// `--disallowed-tools` and the full tool list to the returned Command.
+/// Disallowed Claude Code tools. The leak detector covers prompt bytes;
+/// this flag prevents the spawned claude instance from using its own
+/// tools to read the source PCAP, the scrub map file, or anything else
+/// on disk / over the network. Defense-in-depth per S-5.04.
+pub(crate) const DISALLOWED_TOOLS: &str =
+    "Bash,Read,Write,Edit,WebFetch,WebSearch,Glob,Grep,Task,NotebookEdit";
+
+/// Build the `claude -p` command with all required flags.
 ///
-/// This function exists so the unit tests in this module compile and fail
-/// on their assertions (Red Gate state) rather than failing to compile.
-/// The implementer must:
-///   1. Define `pub(crate) const DISALLOWED_TOOLS: &str` listing every
-///      Claude Code tool that can read the filesystem or reach the network.
-///   2. Build and return a `Command` that includes `--disallowed-tools`
-///      and `DISALLOWED_TOOLS` in its args.
-///   3. Wire the returned Command into `analyze()` in place of the current
-///      inline `Command::new("claude")` block.
-pub(crate) fn build_command(_model: Option<&str>, _system_prompt: &str) -> Command {
-    // STUB: returns a bare command with no --disallowed-tools flag.
-    // Tests will fail on the assertion — that is the Red Gate.
-    Command::new("claude")
+/// Always includes `--disallowed-tools` to prevent the spawned claude
+/// instance from reading the filesystem or reaching the network at
+/// runtime. Two airlocks: the leak detector enforces prompt bytes;
+/// this flag enforces runtime access.
+pub(crate) fn build_command(model: Option<&str>, system_prompt: &str) -> Command {
+    let mut cmd = Command::new("claude");
+    cmd.arg("-p").arg(system_prompt);
+    cmd.args(["--disallowed-tools", DISALLOWED_TOOLS]);
+    if let Some(m) = model {
+        cmd.args(["--model", m]);
+    }
+    cmd
 }
 
 #[cfg(test)]
