@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{dhcp, enip, modbus, s7comm};
+use crate::parse::{dhcp, dnp3, enip, modbus, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -344,6 +344,19 @@ impl Observer {
                     label: pdu.label().to_string(),
                     engineering_class: pdu.is_engineering_class(),
                     read_class: pdu.is_read_class(),
+                });
+            }
+        }
+
+        // DNP3 (tcp/20000)
+        if pkt.dst_port == dnp3::PORT || pkt.src_port == dnp3::PORT {
+            if let Some(pdu) = dnp3::parse(payload) {
+                self.obs.dnp3_events.push(Dnp3Event {
+                    ts: pkt.ts,
+                    src: pkt.src_ip,
+                    dst: pkt.dst_ip,
+                    function_code: pdu.function_code,
+                    engineering_class: pdu.is_engineering_class(),
                 });
             }
         }
