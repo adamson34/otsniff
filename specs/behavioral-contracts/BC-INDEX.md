@@ -44,6 +44,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-1.04.002 TLS ClientHello version capture (HIGH)
 - BC-1.05.001 External egress aggregation (HIGH)
 - BC-1.05.002 Default OT subnets = RFC1918 (HIGH)
+- BC-1.05.004 Distinct-dst counting per (src, dst_port, proto) group for port-scan recognition (HIGH, added S-2.10 v0.4.0)
 
 ### S.2 — Inventory (`src/inventory.rs`)
 - BC-2.01.001 Asset per host with role inference (HIGH)
@@ -62,6 +63,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-3.04.002 `compat.stale_tls` filters by legacy_version (HIGH)
 - BC-3.05.001 `boundary.dns_resolver` cross-zone filter (HIGH)
 - BC-3.05.002 `ot.unexpected_protocols` no-fly list (HIGH, **B.6 corrected** — 11 labels + src OR dst predicate)
+- BC-3.05.005 `recon.port_scan` fires on ≥5 distinct dsts per (src, port, proto); High at ≥25 (HIGH, added S-2.10 v0.4.0)
 - BC-3.06.001 Findings sorted by severity DESC then id ASC (HIGH)
 - BC-3.06.002 Every fired finding has metadata in catalog (HIGH)
 - BC-3.06.003 Every fired finding carries non-empty playbook (HIGH)
