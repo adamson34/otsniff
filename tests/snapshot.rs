@@ -976,10 +976,10 @@ fn build_broadcast_fixture(src_str: &str, dst_port: u16, proto: u8) -> Observati
     let non_targets: &[IpAddr] = &[
         IpAddr::V4("255.255.255.255".parse().unwrap()),
         IpAddr::V4("0.0.0.0".parse().unwrap()),
-        IpAddr::V4("224.0.0.1".parse().unwrap()),   // all-hosts multicast
+        IpAddr::V4("224.0.0.1".parse().unwrap()), // all-hosts multicast
         IpAddr::V4("239.255.255.250".parse().unwrap()), // SSDP
-        IpAddr::V4("224.0.0.251".parse().unwrap()),  // mDNS
-        IpAddr::V4("224.0.0.252".parse().unwrap()),  // LLMNR
+        IpAddr::V4("224.0.0.251".parse().unwrap()), // mDNS
+        IpAddr::V4("224.0.0.252".parse().unwrap()), // LLMNR
     ];
 
     // Silence the unused-import warning: Ipv6Addr is intentionally not
@@ -1043,7 +1043,10 @@ fn recon_port_scan_fires_at_threshold() {
     );
 
     let f = &findings[0];
-    assert_eq!(f.id, "recon.port_scan", "finding id must be recon.port_scan");
+    assert_eq!(
+        f.id, "recon.port_scan",
+        "finding id must be recon.port_scan"
+    );
     assert_eq!(
         f.severity,
         otsniff::findings::Severity::Medium,
@@ -1106,7 +1109,10 @@ fn recon_port_scan_silent_below_threshold() {
 
     let findings = recon_scan::detect(&obs, &subnets);
 
-    let scan_findings: Vec<_> = findings.iter().filter(|f| f.id == "recon.port_scan").collect();
+    let scan_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "recon.port_scan")
+        .collect();
     assert!(
         scan_findings.is_empty(),
         "recon.port_scan must NOT fire for {} distinct dsts (below threshold of 5)",
@@ -1130,7 +1136,10 @@ fn recon_port_scan_skips_broadcast_dst() {
 
     let findings = recon_scan::detect(&obs, &subnets);
 
-    let scan_findings: Vec<_> = findings.iter().filter(|f| f.id == "recon.port_scan").collect();
+    let scan_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "recon.port_scan")
+        .collect();
     assert!(
         scan_findings.is_empty(),
         "recon.port_scan must not count broadcast/multicast destinations; \
@@ -1243,7 +1252,10 @@ fn recon_port_scan_separates_by_port() {
     let subnets = scan_ot_subnets();
     let findings = recon_scan::detect(&obs, &subnets);
 
-    let scan_findings: Vec<_> = findings.iter().filter(|f| f.id == "recon.port_scan").collect();
+    let scan_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "recon.port_scan")
+        .collect();
     assert_eq!(
         scan_findings.len(),
         2,

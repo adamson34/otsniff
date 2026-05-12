@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**13 rules.**
+**14 rules.**
 
 ## Index
 
@@ -22,6 +22,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`compat.stale_tls`](#compatstale_tls) | medium | Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1) |
 | [`egress.ot_to_internet`](#egressot_to_internet) | critical | Internet-bound traffic from OT subnets |
 | [`boundary.dns_resolver`](#boundarydns_resolver) | medium | DNS queries from OT to an out-of-zone resolver |
+| [`recon.port_scan`](#reconport_scan) | medium | Port scan — single source to many destinations on the same port |
 | [`ot.unexpected_protocols`](#otunexpected_protocols) | medium | Non-OT protocols observed touching OT subnets |
 
 ## `creds.ftp`
@@ -194,6 +195,20 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Network segmentation
 - **Spec** — Purdue Reference Model — boundary services
+
+## `recon.port_scan`
+
+**Port scan — single source to many destinations on the same port**
+
+- **Severity:** medium
+- **Data source:** `flows (grouped by src_ip, dst_port, proto; counting distinct dst_ip)`
+
+**Trigger.** Fires when a single source IP talks to >= 5 distinct destination IPs on the same destination port + protocol within the capture window (PORT_SCAN_THRESHOLD = 5). Severity escalates to High at >= 25 distinct destinations. Broadcast and multicast destination addresses are excluded from the count.
+
+**References:**
+
+- **MITRE ATT&CK for ICS** — T0846 — Remote System Discovery ([link](https://attack.mitre.org/techniques/T0846/))
+- **Spec** — ISA/IEC 62443-3-3 SR-7.7 — Least privilege
 
 ## `ot.unexpected_protocols`
 
