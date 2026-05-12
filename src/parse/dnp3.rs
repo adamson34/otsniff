@@ -1,7 +1,8 @@
 //! DNP3 Distributed Network Protocol parser (function-code-level).
 //!
-//! Stub for S-2.04. Implementation is `todo!()` until the
-//! implementer wires real frame recognition.
+//! Recognizes DNP3 frames on tcp/udp 20000 and classifies
+//! engineering-class function codes per IEEE 1815-2012. Full
+//! PDU/object decoding is out of scope (see ROADMAP, L-P1-1 follow-ons).
 
 pub const PORT: u16 = 20000;
 

@@ -348,7 +348,7 @@ impl Observer {
             }
         }
 
-        // DNP3 (tcp/20000)
+        // DNP3 (tcp/20000) — see also observe_udp for the UDP/20000 path
         if pkt.dst_port == dnp3::PORT || pkt.src_port == dnp3::PORT {
             if let Some(pdu) = dnp3::parse(payload) {
                 self.obs.dnp3_events.push(Dnp3Event {
@@ -465,6 +465,22 @@ impl Observer {
             if let Some(info) = dhcp::parse(&pkt.payload) {
                 let ip = IpAddr::V4(info.ip);
                 self.obs.hostnames.insert(ip, info.hostname);
+            }
+        }
+
+        // DNP3 (udp/20000) — mirrors the tcp/20000 path in observe_tcp.
+        // DNP3 is predominantly TCP in modern deployments but the standard
+        // also defines a UDP transport; some outstations use it for
+        // unsolicited responses and broadcast commands.
+        if pkt.dst_port == dnp3::PORT || pkt.src_port == dnp3::PORT {
+            if let Some(pdu) = dnp3::parse(&pkt.payload) {
+                self.obs.dnp3_events.push(Dnp3Event {
+                    ts: pkt.ts,
+                    src: pkt.src_ip,
+                    dst: pkt.dst_ip,
+                    function_code: pdu.function_code,
+                    engineering_class: pdu.is_engineering_class(),
+                });
             }
         }
 
@@ -721,6 +737,45 @@ mod tests {
             dnp3_flow.unwrap().label.as_deref(),
             Some("dnp3"),
             "flow label for tcp/20000 must be 'dnp3'"
+        );
+    }
+
+    /// AC-003: Observer must recognise DNP3 on udp/20000 and append a
+    /// Dnp3Event — mirrors ingest_dnp3_recognizes_function_code but uses
+    /// Transport::Udp to verify the observe_udp() path.
+    #[test]
+    fn ingest_dnp3_udp_recognizes_function_code() {
+        use crate::pcap::{Packet, Transport};
+
+        let ot_subnet: ipnet::IpNet = "10.10.0.0/16".parse().unwrap();
+        let mut observer = Observer::new(vec![ot_subnet]);
+
+        let pkt = Packet {
+            ts: fixed_ts(),
+            src_mac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01],
+            dst_mac: [0x00, 0x1B, 0x1B, 0x11, 0x22, 0x33],
+            src_ip: ip("10.10.0.5"),
+            dst_ip: ip("10.10.0.20"),
+            transport: Transport::Udp,
+            src_port: 54322,
+            dst_port: 20000,
+            payload: make_dnp3_payload(13), // Cold Restart over UDP
+        };
+
+        observer.observe(&pkt);
+        let obs = observer.finish();
+
+        assert!(
+            !obs.dnp3_events.is_empty(),
+            "observer must append a Dnp3Event for udp/20000 DNP3 traffic"
+        );
+        assert_eq!(
+            obs.dnp3_events[0].function_code, 13,
+            "Dnp3Event over UDP must carry the application-layer function code"
+        );
+        assert!(
+            obs.dnp3_events[0].engineering_class,
+            "Cold Restart (fc=13) must be classified as engineering-class over UDP"
         );
     }
 
