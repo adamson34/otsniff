@@ -136,10 +136,13 @@ stories:
     branch: null
     worktree: null
   S-5.05:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-5.05-html-polish
     worktree: null
+    merge_sha: b3de579
+    pr: 51
+    completed_at: 2026-05-12T20:00:00Z
   S-5.04:
     status: completed
     wave: 1
