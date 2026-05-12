@@ -1290,3 +1290,339 @@ fn recon_port_scan_separates_by_port() {
 
     insta::assert_json_snapshot!("recon_port_scan_separate_by_port", findings);
 }
+
+// ---------------------------------------------------------------------------
+// BC-8.01.003 — S-5.05 Report HTML visual-polish substring-invariant tests
+// ---------------------------------------------------------------------------
+
+/// AC-001 / BC-8.01.003: rendered HTML must contain a hero band element with
+/// an inline SVG brand mark and the report title.
+///
+/// Red Gate: fails on current template (no `<header class="hero">` or inline
+/// SVG). Will pass once the implementer ships the redesign.
+#[test]
+fn render_html_includes_hero_band_with_inline_svg() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(
+        html.contains(r#"class="hero""#),
+        "BC-8.01.003 AC-001: rendered HTML must contain a hero band element \
+         (class=\"hero\") — not found. Implement the hero header in templates/report.html."
+    );
+    assert!(
+        html.contains("<svg"),
+        "BC-8.01.003 AC-001: rendered HTML must contain an inline <svg> brand mark \
+         — not found. Add the inline SVG mark inside the hero band."
+    );
+    assert!(
+        html.contains("viewBox="),
+        "BC-8.01.003 AC-001: the inline SVG must carry a viewBox attribute \
+         — not found. The SVG spec requires viewBox for correct scaling."
+    );
+    assert!(
+        html.contains("otsniff report"),
+        "BC-8.01.003 AC-001: the hero band must contain the report title \
+         'otsniff report' — not found."
+    );
+}
+
+/// AC-002 / BC-8.01.003: the embedded `<style>` block must contain CSS rules
+/// that apply severity-tinted backgrounds to finding cards.
+///
+/// Red Gate: fails on current template (finding cards use uniform `var(--card)`;
+/// neither `--crit-soft` nor `--high-soft` tokens are defined).
+#[test]
+fn render_html_finding_cards_have_severity_tinted_background() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(
+        html.contains("--crit-soft"),
+        "BC-8.01.003 AC-002: CSS token `--crit-soft` must be defined in the \
+         embedded <style> block — not found. Add the design-token definitions \
+         specified in the S-5.05 story."
+    );
+    assert!(
+        html.contains("--high-soft"),
+        "BC-8.01.003 AC-002: CSS token `--high-soft` must be defined in the \
+         embedded <style> block — not found."
+    );
+    assert!(
+        html.contains("sev-critical") && html.contains("var(--crit-soft)"),
+        "BC-8.01.003 AC-002: a CSS rule must apply `var(--crit-soft)` as the \
+         background of `.sev-critical` finding cards — not found. Add \
+         `.finding.sev-critical {{ background: var(--crit-soft) }}` (or equivalent)."
+    );
+    assert!(
+        html.contains("sev-high") && html.contains("var(--high-soft)"),
+        "BC-8.01.003 AC-002: a CSS rule must apply `var(--high-soft)` as the \
+         background of `.sev-high` finding cards — not found."
+    );
+}
+
+/// AC-003 / BC-8.01.003: the embedded `<style>` block must contain a
+/// `@media (prefers-color-scheme: dark)` section.
+///
+/// Red Gate: fails on current template (no dark-mode media query present).
+#[test]
+fn render_html_has_dark_mode_media_query() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(
+        html.contains("@media (prefers-color-scheme: dark)"),
+        "BC-8.01.003 AC-003: the embedded CSS must contain a \
+         `@media (prefers-color-scheme: dark)` block — not found. \
+         Add the dark-mode overrides for `--bg`, `--bg-soft`, `--fg`, \
+         `--muted`, `--line` as specified in the S-5.05 story."
+    );
+}
+
+/// AC-004 / BC-8.01.003: the embedded `<style>` block must include
+/// `print-color-adjust: exact` inside the `@media print` section so that
+/// severity colors are preserved when printing to PDF.
+///
+/// Red Gate: fails on current template (the existing @media print block does
+/// not carry print-color-adjust).
+#[test]
+fn render_html_print_styles_preserve_color() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(
+        html.contains("print-color-adjust: exact"),
+        "BC-8.01.003 AC-004: the @media print block must contain \
+         `print-color-adjust: exact` so severity badges keep their fill \
+         when printed to PDF — not found. Add the property as specified \
+         in the S-5.05 story."
+    );
+}
+
+/// AC-005 / BC-8.01.003: data-shape stability guard.
+///
+/// This test verifies that after the template redesign the rendered HTML
+/// still carries the same asset rows and finding IDs as the current output.
+/// It does NOT snapshot visual/structural HTML — that is handled by
+/// `html_report_snapshot` (which the implementer will regenerate via
+/// `cargo insta review`). This test guards only the data layer.
+///
+/// Expected: passes on the current template AND after the redesign.
+/// A failure here after the redesign means the implementer accidentally
+/// broke data rendering while changing layout.
+#[test]
+fn render_html_snapshot_remains_data_stable() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+
+    // --- Asset table row count ---
+    // The fixture has 3 hosts; one <tr> per asset plus one header row.
+    // Count all <tr> occurrences across the whole document, then subtract
+    // the known header rows (asset table + flows table + their thead rows).
+    // Simpler: just assert the three expected IPs appear in the HTML.
+    assert!(
+        html.contains("10.10.0.5"),
+        "BC-8.01.003 AC-005: IP 10.10.0.5 from fixture must appear in the \
+         rendered asset table — not found after template redesign."
+    );
+    assert!(
+        html.contains("10.10.0.20"),
+        "BC-8.01.003 AC-005: IP 10.10.0.20 from fixture must appear in the \
+         rendered asset table — not found after template redesign."
+    );
+    assert!(
+        html.contains("8.8.8.8"),
+        "BC-8.01.003 AC-005: IP 8.8.8.8 from fixture must appear in the \
+         rendered asset table — not found after template redesign."
+    );
+
+    // --- Finding IDs ---
+    // Assert the IDs produced by the standard fixture all appear verbatim
+    // in the rendered HTML (each id is rendered inside a <code> element).
+    // The fixture produces creds.telnet, egress.ot_to_internet, and at least
+    // one ics.* engineering-command finding.
+    let expected_finding_ids = ["creds.telnet", "egress.ot_to_internet", "ics.modbus_writes"];
+    for id in &expected_finding_ids {
+        assert!(
+            html.contains(id),
+            "BC-8.01.003 AC-005: finding id `{id}` disappeared from the \
+             rendered HTML after template redesign — data-shape regression."
+        );
+    }
+}
+
+/// AC-006 / BC-8.01.003: the inline SVG brand mark must use PCB-style 90°
+/// trace geometry — `<polyline>` elements with `stroke-linejoin="round"` —
+/// rather than diagonal `<line>` segments, and must include at least 4
+/// `<circle>` nodes for the four-dot brand mark.
+///
+/// Red Gate: fails on the current template (hero SVG uses `<line>` segments
+/// with diagonal paths; only 3 `<circle>` nodes present).
+#[test]
+fn render_html_logo_uses_pcb_style_traces() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+
+    // Extract the first SVG block for error messages.
+    let svg_block: &str = html
+        .find("<svg")
+        .and_then(|start| {
+            html[start..]
+                .find("</svg>")
+                .map(|end| &html[start..start + end + 6])
+        })
+        .unwrap_or("<svg block not found>");
+
+    // The SVG must use polyline with stroke-linejoin (for 90° steps), not diagonal lines.
+    assert!(
+        html.contains("<polyline"),
+        "BC-8.01.003 AC-006: logo SVG must use <polyline> for the trace path \
+         (PCB-style 90° steps); found:\n{svg_block}"
+    );
+    assert!(
+        html.contains(r#"stroke-linejoin="round""#),
+        "BC-8.01.003 AC-006: trace polyline must have stroke-linejoin=\"round\" \
+         to soften 90° corners; found:\n{svg_block}"
+    );
+
+    // At least 4 circle nodes (the brand mark has 4 dots per AC-006 amendment).
+    let circle_count = html.matches("<circle").count();
+    assert!(
+        circle_count >= 4,
+        "BC-8.01.003 AC-006: logo SVG must have >= 4 <circle> nodes \
+         (the brand mark dots); found {circle_count}"
+    );
+}
+
+/// AC-007 / BC-8.01.003: the asset inventory table and the top-flows table
+/// must each be wrapped in a `<details open>` collapsible block so operators
+/// can collapse large tables while reading findings.
+///
+/// Red Gate: fails on the current template (tables are rendered directly
+/// without any enclosing `<details>` element).
+#[test]
+fn render_html_tables_wrapped_in_collapsible_details() {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap();
+
+    // Exactly two <details open> blocks — Asset inventory and Top flows.
+    let details_open_count = html.matches("<details open>").count();
+    assert!(
+        details_open_count >= 2,
+        "BC-8.01.003 AC-007: expected >= 2 <details open> blocks for asset + \
+         flow tables; found {details_open_count}"
+    );
+
+    // Each <details open> must contain a <summary> followed by a <table>.
+    // Strict structural test: the substring "<details open>" appears before
+    // both "Asset inventory" and "Top flows" headings.
+    let assets_idx = html
+        .find("Asset inventory")
+        .expect("BC-8.01.003 AC-007: asset inventory section missing from rendered HTML");
+    let flows_idx = html
+        .find("Top flows")
+        .expect("BC-8.01.003 AC-007: top flows section missing from rendered HTML");
+
+    html[..assets_idx]
+        .rfind("<details open>")
+        .expect("BC-8.01.003 AC-007: asset inventory section not wrapped in <details open>");
+    let flows_details_idx = html[..flows_idx]
+        .rfind("<details open>")
+        .expect("BC-8.01.003 AC-007: top flows section not wrapped in <details open>");
+
+    assert!(
+        flows_details_idx < flows_idx,
+        "BC-8.01.003 AC-007: <details open> must precede 'Top flows'"
+    );
+
+    // Inside the asset <details>, there must be a <table>.
+    let assets_details_idx = html[..assets_idx]
+        .rfind("<details open>")
+        .expect("BC-8.01.003 AC-007: asset inventory section not wrapped in <details open>");
+    let after_assets_details = &html[assets_details_idx..];
+    let close_details_pos = after_assets_details
+        .find("</details>")
+        .expect("BC-8.01.003 AC-007: asset <details> not closed");
+    let assets_block = &after_assets_details[..close_details_pos];
+    assert!(
+        assets_block.contains("<table"),
+        "BC-8.01.003 AC-007: asset inventory <details> block must contain a <table>"
+    );
+}

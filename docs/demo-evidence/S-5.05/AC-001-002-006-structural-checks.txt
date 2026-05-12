@@ -1,0 +1,26 @@
+=== Hero band ===
+1
+
+=== Inline SVG mark (PCB style) ===
+polyline:
+1
+circle:
+4
+
+=== Severity-tinted finding cards ===
+sev-critical:
+6
+--crit-soft:
+3
+
+=== Dark mode media query ===
+1
+
+=== Print color preservation ===
+6
+
+=== Collapsible table sections ===
+details open:
+10
+section-summary:
+2

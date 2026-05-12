@@ -1,0 +1,8 @@
+test render_html_finding_cards_have_severity_tinted_background ... ok
+test render_html_has_dark_mode_media_query ... ok
+test render_html_includes_hero_band_with_inline_svg ... ok
+test render_html_logo_uses_pcb_style_traces ... ok
+test render_html_print_styles_preserve_color ... ok
+test render_html_snapshot_remains_data_stable ... ok
+test render_html_tables_wrapped_in_collapsible_details ... ok
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
