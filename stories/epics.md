@@ -17,7 +17,7 @@ total_epics: 6
 
 # Epics — otsniff Phase 2
 
-Brownfield-mode decomposition. 31 stories across six epics group the open work — bugs,
+Brownfield-mode decomposition. 32 stories across six epics group the open work — bugs,
 spec drift, formal verification, new detection rules, perf/robustness
 tooling, UX, and the cross-capture diff feature. Already-shipped BCs
 from the 60-BC catalog are not re-decomposed; existing code IS the
@@ -108,21 +108,26 @@ or add behavior.
 - **Estimated stories:** 4
 - **Source items:** L-P1-004
 
-## Epic E-5: UX feedback + AI-augmented detection
+## Epic E-5: UX feedback + AI-augmented detection + invocation hardening
 
 - **Goal:** Close the silent-long-running-process UX gap (parse-loop and
   Claude invocation both currently emit one line then go quiet for
-  minutes), and add the AI-augmented findings second pass that the v0.3
-  demo run informally proved valuable. After this epic, the AI flow is a
-  multiplier on rule findings instead of a separate text blob.
+  minutes), add the AI-augmented findings second pass that the v0.3
+  demo run informally proved valuable, and harden the `--ai` invocation
+  surface (tool sandbox + opt-in scrub review) so the privacy claim
+  isn't defeated by claude reading the source files at runtime. After
+  this epic, the AI flow is a multiplier on rule findings AND its
+  attack surface is shrunk to "prompt bytes only."
 - **BCs touched (add new):**
   - BC-9.04.001 — `-v` parse progress emission cadence
   - BC-6.04.001 — Claude invocation heartbeat
   - BC-6.05.001..003 — augmented-findings second-pass orchestration (request, response shape, deduplication)
   - BC-3.07.001 — `AugmentedFinding` render section
+  - BC-6.03.002 — Claude invocation passes `--disallowed-tools` always (S-5.04)
+  - BC-9.06.001 — `analyze --review-scrub` pauses for human eyeball (S-5.04)
 - **Subsystems touched:** S.6 (ai), S.9 (cli), S.3 (findings), S.8 (rendering)
-- **Estimated stories:** 3
-- **Source items:** ROADMAP P1-2, P0-8
+- **Estimated stories:** 4
+- **Source items:** ROADMAP P1-2, P0-8; threat model surfaced 2026-05-12 (S-5.04)
 
 ## Epic E-6: Cross-capture diff
 

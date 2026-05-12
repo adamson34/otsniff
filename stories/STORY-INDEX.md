@@ -42,14 +42,15 @@ status: draft
 | S-5.01 | Parse progress feedback | E-5 | 1 | 2 | draft | — | S.0, S.9 |
 | S-5.02 | Claude heartbeat | E-5 | 1 | 2 | draft | — | S.6 |
 | S-5.03 | AI-augmented findings | E-5 | 3 | 8 | draft | S-2.05, S-2.06, S-2.07 (hard); S-2.08..2.11 (soft) | S.3, S.6, S.8 |
+| S-5.04 | Harden `--ai` invocation (disallow-tools + review-scrub) | E-5 | 1 | 3 | draft | — | S.6, S.9 |
 | S-6.01 | Scrub map merge | E-6 | 1 | 5 | draft | — | S.5 |
 | S-6.02 | `diff` subcommand core | E-6 | 2 | 5 | draft | S-6.01 | S.9 + new |
 | S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | draft | S-6.02 | S.8 |
 
-**Total points:** 106 (Wave 1: ~69, Wave 2: ~24, Wave 3: ~13)
-**Total stories:** 31 (Wave 1: 23, Wave 2: 6, Wave 3: 2)
-**Math check:** E-1=14, E-2=29, E-3=18, E-4=18, E-5=12, E-6=15 → 106.
-**Story-count check:** E-1=6, E-2=11, E-3=4, E-4=4, E-5=3, E-6=3 → 31.
+**Total points:** 109 (Wave 1: ~72, Wave 2: ~24, Wave 3: ~13)
+**Total stories:** 32 (Wave 1: 24, Wave 2: 6, Wave 3: 2)
+**Math check:** E-1=14, E-2=29, E-3=18, E-4=18, E-5=15, E-6=15 → 109.
+**Story-count check:** E-1=6, E-2=11, E-3=4, E-4=4, E-5=4, E-6=3 → 32.
 
 ## Epic rollup
 
@@ -59,7 +60,7 @@ status: draft
 | E-2 detection | 11 | 29 | 9 new detectors + DNP3 parser + OUI refresh + cred_events cap + port-table test |
 | E-3 perf/robustness | 4 | 18 | Criterion + prompt evals + mutation + fuzz |
 | E-4 Kani | 4 | 18 | Four proofs covering privacy invariant |
-| E-5 UX + augmented AI | 3 | 12 | Progress feedback + heartbeat + AI second-pass |
+| E-5 UX + AI hardening | 4 | 15 | Progress feedback + heartbeat + AI second-pass + invocation hardening |
 | E-6 diff | 3 | 15 | Map merge + diff core + renderer |
 
 ## BC coverage map
