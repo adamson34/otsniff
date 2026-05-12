@@ -23,7 +23,7 @@ status: draft
 | S-2.01 | Port-to-label unit test | E-2 | 2 | 1 | draft | S-1.04 | S.3 |
 | S-2.02 | Cap `cred_events` dedup | E-2 | 1 | 2 | draft | — | S.1 |
 | S-2.03 | OUI table refresh | E-2 | 1 | 2 | draft | — | S.2 |
-| S-2.04 | DNP3 parser + detector | E-2 | 1 | 5 | draft | — | S.1, S.3 |
+| S-2.04 | DNP3 parser + detector | E-2 | 1 | 5 | merged (#47, 6de71c8) | — | S.1, S.3 |
 | S-2.05 | `creds.ldap_simple_bind` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
 | S-2.06 | `compat.ntlmv1` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
 | S-2.07 | `compat.weak_tls_cipher` | E-2 | 1 | 2 | draft | — | S.1, S.3 |
