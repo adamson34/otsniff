@@ -4,8 +4,8 @@
 //! zero or more `Finding`s. The CLI runs them all and renders the union into
 //! the report, sorted by severity.
 
-mod dns_resolver;
 pub mod dnp3_engineering;
+mod dns_resolver;
 mod engineering_commands;
 mod internet_egress;
 mod plaintext_creds;

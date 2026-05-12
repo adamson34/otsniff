@@ -637,16 +637,21 @@ mod tests {
     ///         + link_crc(2) + transport(1) + app_ctrl(1) + fc(1) + app_crc(2)
     fn make_dnp3_payload(function_code: u8) -> Vec<u8> {
         vec![
-            0x05, 0x64, // sync
-            0x0A,       // length
-            0x44,       // control
-            0x01, 0x00, // dst LE
-            0x02, 0x00, // src LE
-            0x00, 0x00, // link CRC placeholder
-            0xC0,       // transport: FIN=1 FIR=1 seq=0
-            0xC0,       // app control
+            0x05,
+            0x64, // sync
+            0x0A, // length
+            0x44, // control
+            0x01,
+            0x00, // dst LE
+            0x02,
+            0x00, // src LE
+            0x00,
+            0x00, // link CRC placeholder
+            0xC0, // transport: FIN=1 FIR=1 seq=0
+            0xC0, // app control
             function_code,
-            0x00, 0x00, // app CRC placeholder
+            0x00,
+            0x00, // app CRC placeholder
         ]
     }
 
@@ -707,10 +712,7 @@ mod tests {
         observer.observe(&pkt);
         let obs = observer.finish();
 
-        let dnp3_flow = obs
-            .flows
-            .values()
-            .find(|f| f.key.dst_port == 20000);
+        let dnp3_flow = obs.flows.values().find(|f| f.key.dst_port == 20000);
         assert!(
             dnp3_flow.is_some(),
             "a flow for dst_port 20000 must be recorded"

@@ -83,10 +83,8 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         Severity::High
     };
 
-    let src_ips: std::collections::BTreeSet<IpAddr> =
-        by_pair.keys().map(|(src, _)| *src).collect();
-    let dst_ips: std::collections::BTreeSet<IpAddr> =
-        by_pair.keys().map(|(_, dst)| *dst).collect();
+    let src_ips: std::collections::BTreeSet<IpAddr> = by_pair.keys().map(|(src, _)| *src).collect();
+    let dst_ips: std::collections::BTreeSet<IpAddr> = by_pair.keys().map(|(_, dst)| *dst).collect();
     let sources_str = format_ip_list(&src_ips.into_iter().collect::<Vec<_>>());
     let dests_str = format_ip_list(&dst_ips.into_iter().collect::<Vec<_>>());
 

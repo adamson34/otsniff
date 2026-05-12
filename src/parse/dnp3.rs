@@ -23,7 +23,7 @@ impl Dnp3Pdu {
             | 13 | 14           // Cold Restart, Warm Restart
             | 15 | 16           // Initialize Data, Initialize Application
             | 20 | 21           // Disable Unsolicited, Enable Unsolicited
-            | 24                // Save Configuration
+            | 24 // Save Configuration
         )
     }
 }
@@ -73,16 +73,21 @@ mod tests {
     ///   [13..14] app-layer CRC placeholder
     fn make_frame(function_code: u8) -> Vec<u8> {
         vec![
-            0x05, 0x64, // sync
-            0x0A,       // length
-            0x44,       // control: DIR=1 PRM=1 FUNC=4
-            0x01, 0x00, // dst = 1 (LE)
-            0x02, 0x00, // src = 2 (LE)
-            0x00, 0x00, // link CRC placeholder
-            0xC0,       // transport: FIN=1 FIR=1 seq=0
-            0xC0,       // app control
+            0x05,
+            0x64, // sync
+            0x0A, // length
+            0x44, // control: DIR=1 PRM=1 FUNC=4
+            0x01,
+            0x00, // dst = 1 (LE)
+            0x02,
+            0x00, // src = 2 (LE)
+            0x00,
+            0x00, // link CRC placeholder
+            0xC0, // transport: FIN=1 FIR=1 seq=0
+            0xC0, // app control
             function_code,
-            0x00, 0x00, // app CRC placeholder
+            0x00,
+            0x00, // app CRC placeholder
         ]
     }
 
@@ -133,16 +138,24 @@ mod tests {
     #[test]
     fn parse_rejects_missing_sync_bytes() {
         // EC-001: frame starts with wrong bytes — not DNP3
-        let bad = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00,
-                       0x00, 0x00, 0xC0, 0xC0, 0x04, 0x00, 0x00];
-        assert!(parse(&bad).is_none(), "non-DNP3 sync bytes must return None");
+        let bad = vec![
+            0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xC0, 0x04, 0x00,
+            0x00,
+        ];
+        assert!(
+            parse(&bad).is_none(),
+            "non-DNP3 sync bytes must return None"
+        );
     }
 
     #[test]
     fn parse_rejects_truncated_frame() {
         // EC-001: only the two sync bytes — far too short
         let truncated = vec![0x05, 0x64];
-        assert!(parse(&truncated).is_none(), "truncated frame must return None");
+        assert!(
+            parse(&truncated).is_none(),
+            "truncated frame must return None"
+        );
     }
 
     #[test]
@@ -156,7 +169,10 @@ mod tests {
         // Sync bytes are 0x05 0x64; swapping the first must reject
         let mut frame = make_frame(4);
         frame[0] = 0x06;
-        assert!(parse(&frame).is_none(), "wrong first sync byte must return None");
+        assert!(
+            parse(&frame).is_none(),
+            "wrong first sync byte must return None"
+        );
     }
 
     #[test]
@@ -164,7 +180,10 @@ mod tests {
         // Sync bytes are 0x05 0x64; corrupting the second must reject
         let mut frame = make_frame(4);
         frame[1] = 0x65;
-        assert!(parse(&frame).is_none(), "wrong second sync byte must return None");
+        assert!(
+            parse(&frame).is_none(),
+            "wrong second sync byte must return None"
+        );
     }
 
     // --- BC-1.02.005 / AC-002: engineering classification ---

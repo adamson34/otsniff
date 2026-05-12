@@ -833,10 +833,7 @@ fn dnp3_engineering_fires_on_operate_calls() {
     let f = &findings[0];
     assert_eq!(f.id, "ics.dnp3_engineering");
     // Three engineering events across two (src, dst) pairs
-    assert!(
-        !f.evidence.is_empty(),
-        "finding must carry evidence lines"
-    );
+    assert!(!f.evidence.is_empty(), "finding must carry evidence lines");
     assert!(
         !f.playbook.is_empty(),
         "finding must carry a playbook (every_finding_has_a_non_empty_playbook invariant)"
