@@ -186,7 +186,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **Severity:** medium
 - **Data source:** `flows (label matches no-fly list)`
 
-**Trigger.** Fires when a flow on a host inside a configured `--ot-subnet` carries a protocol label from the no-fly list — currently anydesk, bittorrent, irc, openvpn, rtmp, sip, smtp. Labels come from the port-based flow classifier in `observe.rs::classify_flow`, so the false positive is a service that happens to use a no-fly port for an unrelated reason. Findings tag every offending protocol independently.
+**Trigger.** Fires when a flow whose src or dst is inside a configured `--ot-subnet` carries a protocol label from the no-fly list — currently anydesk, apns, bittorrent, gcm, irc, openvpn, rtmp, sip, smtp, stun, teamviewer. Labels come from the port-based flow classifier in `observe.rs::classify_flow`, so the false positive is a service that happens to use a no-fly port for an unrelated reason. Findings tag every offending protocol independently.
 
 **References:**
 
