@@ -131,7 +131,7 @@ mod tests {
         let args: Vec<&OsStr> = cmd.get_args().collect();
         let strs: Vec<&str> = args.iter().filter_map(|a| a.to_str()).collect();
         assert!(
-            strs.iter().any(|s| *s == "--disallowed-tools"),
+            strs.contains(&"--disallowed-tools"),
             "claude command must always pass --disallowed-tools; got args: {strs:?}"
         );
     }
@@ -183,12 +183,13 @@ mod tests {
             .collect();
         // --disallowed-tools must still be present even with a model override
         assert!(
-            strs.iter().any(|s| s == "--disallowed-tools"),
+            strs.contains(&"--disallowed-tools".to_string()),
             "--disallowed-tools must be present even when --model is supplied; args: {strs:?}"
         );
         // --model must be present
         assert!(
-            strs.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-opus-4-5"),
+            strs.windows(2)
+                .any(|w| w[0] == "--model" && w[1] == "claude-opus-4-5"),
             "--model claude-opus-4-5 must appear in command args; got: {strs:?}"
         );
     }

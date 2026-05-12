@@ -310,7 +310,10 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
 /// Returns `Ok(())` if the user answers "y" or "yes"; aborts with an error
 /// for any other answer (including EOF).
 fn review_scrub_gate(scrubbed: &str) -> Result<()> {
-    eprintln!("--- scrubbed prompt to claude ({} bytes) ---", scrubbed.len());
+    eprintln!(
+        "--- scrubbed prompt to claude ({} bytes) ---",
+        scrubbed.len()
+    );
     eprintln!("{scrubbed}");
     eprintln!("--- end scrubbed prompt ---");
     eprint!("Send to claude? [y/N]: ");

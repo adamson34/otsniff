@@ -258,10 +258,10 @@ fn test_bc_9_06_001_review_scrub_aborts_on_eof() {
 /// cite S-5.04.  Fails until the implementer appends the amendment section.
 #[test]
 fn test_ac_003_adr_0007_documents_disallowed_tools_amendment() {
-    let adr_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("docs/adr/0007-ai-via-claude-cli.md");
-    let adr = std::fs::read_to_string(&adr_path)
-        .expect("docs/adr/0007-ai-via-claude-cli.md must exist");
+    let adr_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/adr/0007-ai-via-claude-cli.md");
+    let adr =
+        std::fs::read_to_string(&adr_path).expect("docs/adr/0007-ai-via-claude-cli.md must exist");
     assert!(
         adr.contains("--disallowed-tools") || adr.contains("disallowed_tools"),
         "ADR-0007 must document the --disallowed-tools amendment; file: {}",
