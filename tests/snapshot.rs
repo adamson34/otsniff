@@ -1532,7 +1532,11 @@ fn render_html_logo_uses_pcb_style_traces() {
     // Extract the first SVG block for error messages.
     let svg_block: &str = html
         .find("<svg")
-        .and_then(|start| html[start..].find("</svg>").map(|end| &html[start..start + end + 6]))
+        .and_then(|start| {
+            html[start..]
+                .find("</svg>")
+                .map(|end| &html[start..start + end + 6])
+        })
         .unwrap_or("<svg block not found>");
 
     // The SVG must use polyline with stroke-linejoin (for 90° steps), not diagonal lines.

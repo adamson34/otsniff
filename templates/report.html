@@ -136,6 +136,59 @@
   }
   details summary::before { content: "▸ "; }
   details[open] summary::before { content: "▾ "; }
+  details.table-section {
+    margin-top: 2.4rem;
+  }
+  details.table-section > summary.section-summary {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    list-style: none;
+  }
+  details.table-section > summary.section-summary::-webkit-details-marker { display: none; }
+  details.table-section > summary.section-summary::before {
+    content: "▾ ";
+    display: inline-block;
+    width: 1em;
+  }
+  details.table-section:not([open]) > summary.section-summary::before {
+    content: "▸ ";
+  }
+  .row-count {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 0.85rem;
+    margin-left: 0.4rem;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  summary.section-summary {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    list-style: none;
+  }
+  summary.section-summary::-webkit-details-marker { display: none; }
+  summary.section-summary::before {
+    content: "▾ ";
+    display: inline-block;
+    width: 1em;
+  }
+  details:not([open]) > summary.section-summary::before {
+    content: "▸ ";
+  }
   pre.evidence {
     background: rgba(255,255,255,0.7);
     border: 1px solid var(--line);
@@ -242,6 +295,16 @@
     .finding { break-inside: avoid; }
     details[open] summary { display: none; }
     details { margin: 0; }
+    details[open] > summary.section-summary,
+    details:not([open]) > summary.section-summary::before {
+      content: "" !important;
+    }
+    details > summary.section-summary {
+      border-bottom: none;
+    }
+    details > *:not(summary) {
+      display: block !important;
+    }
   }
 </style>
 </head>
@@ -250,11 +313,15 @@
 <header class="hero">
   <div class="hero-mark">
     <svg class="logo" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-label="otsniff" role="img">
-      <path d="M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z" fill="none" stroke="currentColor" stroke-width="2"/>
-      <polyline points="14,40 22,40 28,34 36,34 42,28 50,28" fill="none" stroke="currentColor" stroke-width="2"/>
-      <circle cx="22" cy="40" r="2.4" fill="currentColor"/>
-      <circle cx="36" cy="34" r="2.4" fill="currentColor"/>
-      <circle cx="50" cy="28" r="2.4" fill="currentColor"/>
+      <path d="M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z"
+            fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+      <polyline points="18,46 26,46 26,38 40,38 40,26 50,26"
+                fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="18" cy="46" r="3" fill="currentColor"/>
+      <circle cx="26" cy="38" r="2.6" fill="currentColor"/>
+      <circle cx="40" cy="26" r="2.6" fill="currentColor"/>
+      <circle cx="50" cy="26" r="3" fill="currentColor"/>
     </svg>
     <h1>otsniff report</h1>
   </div>
@@ -313,7 +380,8 @@
   {% endfor %}
 {% endif %}
 
-<h2>Asset inventory</h2>
+<details open>
+<summary class="section-summary">Asset inventory <span class="row-count">({{ assets.len() }})</span></summary>
 <div class="table-wrap">
 <table>
   <thead><tr>
@@ -336,8 +404,10 @@
   </tbody>
 </table>
 </div>
+</details>
 
-<h2>Top flows</h2>
+<details open>
+<summary class="section-summary">Top flows <span class="row-count">({{ top_flows.len() }})</span></summary>
 <div class="table-wrap">
 <table>
   <thead><tr>
@@ -357,6 +427,7 @@
   </tbody>
 </table>
 </div>
+</details>
 
 {% match ai_section %}{% when Some with (html) %}
 <h2>AI analysis</h2>
