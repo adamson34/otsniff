@@ -1,6 +1,6 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 225
+assertion_line: 226
 expression: html
 ---
 <!doctype html>
@@ -10,52 +10,119 @@ expression: html
 <title>otsniff report — tests/fixtures/synthetic.pcap</title>
 <style>
   :root {
-    --fg: #1a1a1a;
-    --muted: #666;
-    --bg: #fff;
-    --card: #f7f7f8;
-    --line: #e3e3e7;
-    --crit: #b3261e;
-    --high: #b9520b;
-    --med: #8b6e00;
-    --info: #4d6580;
-    --ok: #2e7d32;
+    --bg:        #ffffff;
+    --bg-soft:   #f6f7f9;
+    --bg-strong: #0d1117;
+    --fg:        #0f1115;
+    --fg-on-dark:#e6e9ee;
+    --muted:     #6b7280;
+    --line:      #e4e6ea;
+    --accent:    #1f3b5e;
+
+    --crit:      #dc2626;   --crit-soft: #fff4f3;
+    --high:      #ea580c;   --high-soft: #fff7f1;
+    --med:       #ca8a04;   --med-soft:  #fffaeb;
+    --info:      #2563eb;   --info-soft: #eff6ff;
+    --ok:        #15803d;
+    --ot:        #0f4c5c;
+
+    --radius:    8px;
+    --radius-sm: 4px;
+    --shadow:    0 1px 2px rgba(15,17,21,0.04), 0 1px 1px rgba(15,17,21,0.03);
   }
   html { background: var(--bg); color: var(--fg); }
   body {
     font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-feature-settings: "kern" 1;
     max-width: 1100px;
-    margin: 2rem auto;
+    margin: 0 auto;
+    padding: 0 0 2rem 0;
+  }
+  .hero {
+    background: var(--bg-strong);
+    color: var(--fg-on-dark);
+    padding: 2rem 1.5rem 1.5rem 1.5rem;
+    margin-bottom: 2rem;
+  }
+  .hero-mark {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .logo {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+  }
+  .hero h1 {
+    font-size: 1.6rem;
+    margin: 0;
+    color: var(--fg-on-dark);
+  }
+  .hero .meta {
+    color: rgba(230,233,238,0.7);
+    font-size: 0.9rem;
+    margin: 0.25rem 0 1.25rem 0;
+    padding-left: calc(44px + 0.75rem);
+  }
+  .hero .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+    margin: 0;
+  }
+  .hero .stat {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+  }
+  .hero .stat .n {
+    font-size: 1.4rem;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+    color: var(--fg-on-dark);
+  }
+  .hero .stat .l {
+    color: rgba(230,233,238,0.6);
+    font-size: 0.85rem;
+  }
+  .page-body {
     padding: 0 1.5rem;
   }
-  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
-  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid var(--line); padding-bottom: 0.3rem; }
+  h2 {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-top: 2rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.3rem;
+  }
   h3 { font-size: 1rem; margin: 0.5rem 0 0.25rem 0; }
   .muted { color: var(--muted); }
-  .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin: 1rem 0 1.5rem 0; }
-  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 0.75rem 1rem; }
-  .stat .n { font-size: 1.4rem; font-weight: 600; }
-  .stat .l { color: var(--muted); font-size: 0.85rem; }
+  .capture-meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
   .finding {
     border: 1px solid var(--line);
     border-left-width: 4px;
-    border-radius: 6px;
+    border-radius: var(--radius);
     padding: 0.9rem 1rem;
     margin: 0.75rem 0;
-    background: var(--card);
+    box-shadow: var(--shadow);
   }
-  .finding.sev-critical { border-left-color: var(--crit); }
-  .finding.sev-high { border-left-color: var(--high); }
-  .finding.sev-medium { border-left-color: var(--med); }
-  .finding.sev-info { border-left-color: var(--info); }
+  .finding.sev-critical { border-left-color: var(--crit); background: var(--crit-soft); }
+  .finding.sev-high { border-left-color: var(--high); background: var(--high-soft); }
+  .finding.sev-medium { border-left-color: var(--med); background: var(--med-soft); }
+  .finding.sev-info { border-left-color: var(--info); background: var(--info-soft); }
   .badge {
     display: inline-block;
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     padding: 0.15rem 0.5rem;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     font-weight: 600;
     color: #fff;
     margin-right: 0.5rem;
@@ -65,13 +132,19 @@ expression: html
   .badge.sev-high { background: var(--high); }
   .badge.sev-medium { background: var(--med); }
   .badge.sev-info { background: var(--info); }
-  .ot-badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 3px; background: #1f3b5e; color: #fff; }
+  .ot-badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: var(--radius-sm); background: var(--accent); color: #fff; }
   details { margin-top: 0.5rem; }
-  details summary { cursor: pointer; color: var(--muted); }
+  details summary {
+    cursor: pointer;
+    color: var(--muted);
+    list-style: none;
+  }
+  details summary::before { content: "▸ "; }
+  details[open] summary::before { content: "▾ "; }
   pre.evidence {
-    background: #fff;
+    background: rgba(255,255,255,0.7);
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 0.6rem 0.75rem;
     font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     white-space: pre-wrap;
@@ -87,51 +160,90 @@ expression: html
     line-height: 1.5;
   }
   ol.playbook code {
-    background: #fff;
+    background: rgba(255,255,255,0.7);
     border: 1px solid var(--line);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     padding: 0 0.25rem;
     font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
+  .table-wrap {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    margin: 0.5rem 0 1.5rem 0;
+  }
   table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
   th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { background: var(--card); font-weight: 600; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  th { background: var(--bg-soft); font-weight: 600; }
+  tbody tr:nth-child(even) { background: var(--bg-soft); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
   .no-findings { color: var(--ok); padding: 0.5rem 0; }
   .ai-section {
-    background: var(--card);
+    background: var(--info-soft);
     border: 1px solid var(--line);
     border-left: 4px solid var(--info);
-    border-radius: 6px;
+    border-radius: var(--radius);
     padding: 0.5rem 1rem 0.75rem 1rem;
     margin: 0.75rem 0 1rem 0;
+    box-shadow: var(--shadow);
   }
   .ai-section h1, .ai-section h2, .ai-section h3, .ai-section h4 {
     font-size: 1rem;
     border-bottom: none;
     margin: 0.6rem 0 0.3rem 0;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--fg);
   }
   .ai-section pre {
-    background: #fff;
+    background: rgba(255,255,255,0.7);
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 0.6rem 0.75rem;
     font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     white-space: pre-wrap;
   }
   .ai-section code { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
   .ai-banner {
-    background: var(--card);
+    background: var(--bg-soft);
     border-left: 4px solid var(--info);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 0.5rem 0.75rem;
     margin: 0.5rem 0 1rem 0;
     font-size: 0.85rem;
     color: var(--muted);
   }
   footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:       #0b0d10;
+      --bg-soft:  #14171c;
+      --fg:       #e6e9ee;
+      --muted:    #9aa3af;
+      --line:     #21262d;
+      --shadow:   none;
+      --crit-soft: #2a0e0c;
+      --high-soft: #2a1408;
+      --med-soft:  #25180a;
+      --info-soft: #0c1830;
+    }
+    pre.evidence, ol.playbook code, .ai-section pre { background: rgba(0,0,0,0.3); }
+  }
   @media print {
     body { max-width: none; margin: 0; padding: 1rem; }
+    .hero {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .badge {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .ot-badge {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
     .finding { break-inside: avoid; }
     details[open] summary { display: none; }
     details { margin: 0; }
@@ -140,19 +252,32 @@ expression: html
 </head>
 <body>
 
-<h1>otsniff report</h1>
-<div class="meta">
-  Source: <code>tests/fixtures/synthetic.pcap</code><br>
-  Generated: 2026-05-07 12:00:00 UTC &middot; otsniff v0.4.0-dev.1
-</div>
+<header class="hero">
+  <div class="hero-mark">
+    <svg class="logo" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-label="otsniff" role="img">
+      <path d="M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z" fill="none" stroke="currentColor" stroke-width="2"/>
+      <polyline points="14,40 22,40 28,34 36,34 42,28 50,28" fill="none" stroke="currentColor" stroke-width="2"/>
+      <circle cx="22" cy="40" r="2.4" fill="currentColor"/>
+      <circle cx="36" cy="34" r="2.4" fill="currentColor"/>
+      <circle cx="50" cy="28" r="2.4" fill="currentColor"/>
+    </svg>
+    <h1>otsniff report</h1>
+  </div>
+  <div class="meta">
+    Source: <code>tests/fixtures/synthetic.pcap</code> &middot;
+    Generated: 2026-05-07 12:00:00 UTC &middot; otsniff v0.4.0-dev.1
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="n">505</div><div class="l">packets parsed</div></div>
+    <div class="stat"><div class="n">48.6 KB</div><div class="l">payload bytes</div></div>
+    <div class="stat"><div class="n">3</div><div class="l">hosts (2 in OT zones)</div></div>
+    <div class="stat"><div class="n">8</div><div class="l">findings</div></div>
+  </div>
+</header>
 
-<div class="stats">
-  <div class="stat"><div class="n">505</div><div class="l">packets parsed</div></div>
-  <div class="stat"><div class="n">48.6 KB</div><div class="l">payload bytes</div></div>
-  <div class="stat"><div class="n">3</div><div class="l">hosts (2 in OT zones)</div></div>
-  <div class="stat"><div class="n">8</div><div class="l">findings</div></div>
-</div>
-<div class="muted" style="margin-bottom:1rem;">Capture window: 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC</div>
+<div class="page-body">
+
+<div class="capture-meta">Capture window: 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC</div>
 
 
 
@@ -386,6 +511,7 @@ expression: html
 
 
 <h2>Asset inventory</h2>
+<div class="table-wrap">
 <table>
   <thead><tr>
     <th>IP</th><th>Hostname</th><th>Zone</th><th>MAC</th><th>Vendor</th><th>Inferred role</th><th>Protocols</th><th class="num">Packets</th><th class="num">Bytes</th>
@@ -430,8 +556,10 @@ expression: html
   
   </tbody>
 </table>
+</div>
 
 <h2>Top flows</h2>
+<div class="table-wrap">
 <table>
   <thead><tr>
     <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Conns</th><th class="num">Packets</th><th class="num">Bytes</th>
@@ -467,6 +595,7 @@ expression: html
   
   </tbody>
 </table>
+</div>
 
 
 
@@ -475,5 +604,6 @@ expression: html
   Generated by otsniff. This is a triage tool — findings are heuristic and a clean report is not an audit. Validate with the on-site team before acting.
 </footer>
 
+</div><!-- .page-body -->
 </body>
 </html>

@@ -1496,11 +1496,7 @@ fn render_html_snapshot_remains_data_stable() {
     // in the rendered HTML (each id is rendered inside a <code> element).
     // The fixture produces creds.telnet, egress.ot_to_internet, and at least
     // one ics.* engineering-command finding.
-    let expected_finding_ids = [
-        "creds.telnet",
-        "egress.ot_to_internet",
-        "ics.modbus_writes",
-    ];
+    let expected_finding_ids = ["creds.telnet", "egress.ot_to_internet", "ics.modbus_writes"];
     for id in &expected_finding_ids {
         assert!(
             html.contains(id),
