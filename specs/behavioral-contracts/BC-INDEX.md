@@ -99,6 +99,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 ### S.8 — Rendering (`src/report*.rs`, `src/rule_catalog.rs`, `src/ai/html_render.rs`)
 - BC-8.01.001 render_html is deterministic per inputs (HIGH)
 - BC-8.01.003 Report HTML uses hero band + inline-SVG brand mark + severity-tinted finding cards + dark-mode + print-color-adjust + collapsible table sections (HIGH, added S-5.05 v0.4.0)
+- BC-8.01.004 Report HTML applies the otsniff brand handoff: sniff-trail mark (7 circles), ink/paper/accent palette, JetBrains Mono type system, inline favicon as base64 data URL (HIGH, added S-5.06 v0.4.0; supersedes S-5.05's freehand visual)
 - BC-8.02.001 rule_catalog::render_markdown matches committed RULES.md (HIGH)
 - BC-8.03.001 Scrubbed markdown contains no real identifiers (HIGH)
 
