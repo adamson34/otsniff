@@ -17,7 +17,7 @@ total_epics: 6
 
 # Epics — otsniff Phase 2
 
-Brownfield-mode decomposition. 35 stories across six epics group the open work — bugs,
+Brownfield-mode decomposition. 36 stories across six epics group the open work — bugs,
 spec drift, formal verification, new detection rules, perf/robustness
 tooling, UX, and the cross-capture diff feature. Already-shipped BCs
 from the 60-BC catalog are not re-decomposed; existing code IS the

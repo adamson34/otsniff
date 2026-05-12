@@ -4,7 +4,7 @@ project: otsniff
 phase: 2
 generated: 2026-05-11T20:30:00Z
 producer: phase-2-story-decomposition (inline)
-total_stories: 35
+total_stories: 36
 status: draft
 ---
 
@@ -35,6 +35,7 @@ S-2.08 → ∅                                  (creds.rdp_no_nla)
 S-2.09 → ∅                                  (boundary.ntp_external)
 S-2.10 → ∅                                  (recon.port_scan)
 S-2.11 → ∅                                  (ics.modbus_unit_id_sweep)
+S-2.12 → S-2.10                             (recon.port_scan rollup by source IP; fixes over-firing observed on 4SICS-22; cycle_target v0.4.1)
 
 S-3.01 → ∅                                  (criterion benches + perf CI — depends on no other story)
 S-3.02 → ∅                                  (prompt eval harness)
@@ -89,7 +90,7 @@ tabletop walk below). No story appears in any cycle.
   S-6.03 (deps: S-6.02 — level 1)
   (2 stories — but S-5.03 is actually level 1 since all S-2.x deps are level 0; we place S-5.03 in Wave 3 anyway for a separate reason: it consumes the most context and benefits from waiting until the detection layer is fully shipped, including snapshot-tested integration)
 
-Total: 27 + 6 + 2 = 35 stories — all uniquely placed. (S-5.04, S-5.05, S-5.06, S-5.07 all added 2026-05-12 mid-cycle.)
+Total: 28 + 6 + 2 = 36 stories — all uniquely placed. (S-5.04..S-5.07 + S-2.12 added 2026-05-12 mid-cycle.)
 
 **Result: no cycle.**
 

@@ -25,8 +25,8 @@ Wave 3 carries the two stories deliberately delayed for richness
 
 | Metric | Value |
 |--------|-------|
-| Total stories | 35 |
-| Total points | 118 |
+| Total stories | 36 |
+| Total points | 121 |
 | Total waves | 3 |
 | Max parallelism (groups per wave) | 6 |
 | Estimated agent spawns | ~30 (one per story + a few re-spins) |

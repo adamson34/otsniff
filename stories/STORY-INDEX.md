@@ -31,6 +31,7 @@ status: draft
 | S-2.09 | `boundary.ntp_external` | E-2 | 1 | 2 | draft | — | S.3 |
 | S-2.10 | `recon.port_scan` | E-2 | 1 | 3 | merged (#50, 7aea34f) | — | S.3 |
 | S-2.11 | `ics.modbus_unit_id_sweep` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
+| S-2.12 | `recon.port_scan` rollup by source IP (v0.4.1 patch) | E-2 | 1 | 3 | draft | S-2.10 | S.3 |
 | S-3.01 | Criterion + hyperfine perf regression | E-3 | 1 | 3 | draft | — | S.0,1,3, build |
 | S-3.02 | Prompt eval harness | E-3 | 1 | 5 | draft | — | S.6 |
 | S-3.03 | Mutation testing CI | E-3 | 2 | 5 | draft | S-3.01 | build |
@@ -50,17 +51,17 @@ status: draft
 | S-6.02 | `diff` subcommand core | E-6 | 2 | 5 | draft | S-6.01 | S.9 + new |
 | S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | draft | S-6.02 | S.8 |
 
-**Total points:** 118 (Wave 1: ~81, Wave 2: ~24, Wave 3: ~13)
-**Total stories:** 35 (Wave 1: 27, Wave 2: 6, Wave 3: 2)
-**Math check:** E-1=14, E-2=29, E-3=18, E-4=18, E-5=24, E-6=15 → 118.
-**Story-count check:** E-1=6, E-2=11, E-3=4, E-4=4, E-5=7, E-6=3 → 35.
+**Total points:** 121 (Wave 1: ~84, Wave 2: ~24, Wave 3: ~13)
+**Total stories:** 36 (Wave 1: 28, Wave 2: 6, Wave 3: 2)
+**Math check:** E-1=14, E-2=32, E-3=18, E-4=18, E-5=24, E-6=15 → 121.
+**Story-count check:** E-1=6, E-2=12, E-3=4, E-4=4, E-5=7, E-6=3 → 36.
 
 ## Epic rollup
 
 | Epic | Stories | Points | Goal |
 |---|---:|---:|---|
 | E-1 spec hygiene | 6 | 14 | Close ASR-001..007 + L-P0-001 + S7 trigger + ADR backfill + BC-AUDIT formalization |
-| E-2 detection | 11 | 29 | 9 new detectors + DNP3 parser + OUI refresh + cred_events cap + port-table test |
+| E-2 detection | 12 | 32 | 9 new detectors + DNP3 parser + OUI refresh + cred_events cap + port-table test + recon-scan rollup fix |
 | E-3 perf/robustness | 4 | 18 | Criterion + prompt evals + mutation + fuzz |
 | E-4 Kani | 4 | 18 | Four proofs covering privacy invariant |
 | E-5 UX + AI hardening | 7 | 24 | Progress feedback + heartbeat + AI second-pass + invocation hardening + report visual polish + brand application + collapsible finding cards |

@@ -5,7 +5,7 @@
 cycle: v0.4.0-feature
 current_wave: 1
 total_waves: 3
-total_stories: 35
+total_stories: 36
 # S-5.04 added mid-cycle 2026-05-12: harden --ai invocation surface (defense-in-depth on scrub privacy contract).
 
 stories:
@@ -100,6 +100,14 @@ stories:
     wave: 1
     branch: null
     worktree: null
+  S-2.12:
+    status: pending
+    wave: 1
+    blocked_by: [S-2.10]
+    branch: null
+    worktree: null
+    cycle_target: v0.4.1-patch
+    known_issue: "S-2.10 over-fires on real-PCAP scale (26k findings on 4SICS-22)"
   S-3.01:
     status: pending
     wave: 1
