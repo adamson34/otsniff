@@ -17,7 +17,7 @@ status: draft
 | S-1.01 | Reconcile BC-AUDIT-005..012 labels | E-1 | 1 | 1 | draft | — | docs |
 | S-1.02 | Recount BC confidence summary | E-1 | 1 | 1 | draft | — | docs |
 | S-1.03 | Close ASR-003..007 + S7 trigger PRD findings | E-1 | 1 | 5 | draft | — | docs + S.3 |
-| S-1.04 | Fix `ot.unexpected_protocols` trigger | E-1 | 1 | 1 | draft | — | S.3 |
+| S-1.04 | Fix `ot.unexpected_protocols` trigger | E-1 | 1 | 1 | merged (#43, 95da1e2) | — | S.3 |
 | S-1.05 | Formalize BC-AUDIT into BCs | E-1 | 2 | 3 | draft | S-1.01, S-1.02 | docs |
 | S-1.06 | ADR-0008..0012 backfill | E-1 | 1 | 3 | draft | — | docs |
 | S-2.01 | Port-to-label unit test | E-2 | 2 | 1 | draft | S-1.04 | S.3 |
