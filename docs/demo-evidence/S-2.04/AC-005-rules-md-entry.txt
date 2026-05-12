@@ -1,0 +1,19 @@
+$ grep -A8 'ics.dnp3_engineering' docs/RULES.md
+| [`ics.dnp3_engineering`](#icsdnp3_engineering) | high | DNP3 engineering-class commands on the wire |
+| [`compat.smbv1`](#compatsmbv1) | high | SMBv1 traffic observed |
+| [`compat.stale_tls`](#compatstale_tls) | medium | Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1) |
+| [`egress.ot_to_internet`](#egressot_to_internet) | critical | Internet-bound traffic from OT subnets |
+| [`boundary.dns_resolver`](#boundarydns_resolver) | medium | DNS queries from OT to an out-of-zone resolver |
+| [`ot.unexpected_protocols`](#otunexpected_protocols) | medium | Non-OT protocols observed touching OT subnets |
+
+## `creds.ftp`
+
+--
+## `ics.dnp3_engineering`
+
+**DNP3 engineering-class commands on the wire**
+
+- **Severity:** high
+- **Data source:** `dnp3_events (where engineering_class = true)`
+
+**Trigger.** Fires when a DNP3 master issues engineering-class function codes (Operate (4), Direct Operate (5), Direct Operate No Ack (6), Cold Restart (13), Warm Restart (14), Initialize Data (15), Initialize Application (16), Disable Unsolicited (20), Enable Unsolicited (21), Save Configuration (24)) against a controller. DNP3 has no native authentication in its base specification; any host that can reach a DNP3 outstation on tcp/20000 can send these commands.
