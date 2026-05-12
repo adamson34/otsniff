@@ -84,6 +84,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-6.01.001 AI markdown rendering strips raw HTML events (HIGH)
 - BC-6.02.001 System prompt varies by capture-source tag (HIGH)
 - BC-6.03.001 Claude invocation via subprocess shell-out (MEDIUM)
+- BC-6.03.002 Claude invocation always passes `--disallowed-tools` (HIGH, added S-5.04 v0.4.0)
 
 ### S.7 — Audit log (`src/audit.rs`)
 - BC-7.01.001 Audit log auto-derives path from `-o` (HIGH)
@@ -101,6 +102,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-9.01.002 `--ai` engages the full privacy pipeline (HIGH)
 - BC-9.02.001 scrub/unscrub round-trip (HIGH)
 - BC-9.03.001 `otsniff rules` prints the catalog (HIGH)
+- BC-9.06.001 `analyze --review-scrub` pauses for human eyeball (HIGH, added S-5.04 v0.4.0)
 
 ## Audit-derived BCs (from Phase 0 B.5)
 

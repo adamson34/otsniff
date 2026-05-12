@@ -42,7 +42,7 @@ status: draft
 | S-5.01 | Parse progress feedback | E-5 | 1 | 2 | draft | — | S.0, S.9 |
 | S-5.02 | Claude heartbeat | E-5 | 1 | 2 | draft | — | S.6 |
 | S-5.03 | AI-augmented findings | E-5 | 3 | 8 | draft | S-2.05, S-2.06, S-2.07 (hard); S-2.08..2.11 (soft) | S.3, S.6, S.8 |
-| S-5.04 | Harden `--ai` invocation (disallow-tools + review-scrub) | E-5 | 1 | 3 | draft | — | S.6, S.9 |
+| S-5.04 | Harden `--ai` invocation (disallow-tools + review-scrub) | E-5 | 1 | 3 | merged (#45, 5237c1b) | — | S.6, S.9 |
 | S-6.01 | Scrub map merge | E-6 | 1 | 5 | draft | — | S.5 |
 | S-6.02 | `diff` subcommand core | E-6 | 2 | 5 | draft | S-6.01 | S.9 + new |
 | S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | draft | S-6.02 | S.8 |
