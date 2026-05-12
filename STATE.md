@@ -3,14 +3,16 @@ pipeline: PHASE-2-COMPLETE
 phase: phase-2
 product: otsniff
 mode: brownfield
-timestamp: 2026-05-11T22:45:00Z
+timestamp: 2026-05-12T00:30:00Z
 phase_0_status: complete
 phase_1_status: complete-converged
 phase_2_status: complete-approved
 phase_2_approval: human-approved 2026-05-11
-phase_2_adversarial_passes: 1
-phase_2_adversarial_verdict: BLOCKING_PASS_1_then_FIXES_APPLIED
-phase_2_convergence: 7/7 BLOCKING addressed; 6/11 SUBSTANTIVE addressed; 5 SUBSTANTIVE + 4 NITPICK deferred to maintenance
+phase_2_adversarial_passes: 2
+phase_2_adversarial_verdict_pass1: BLOCKING (7B/11S/4N) — fixes applied for 7B + 6S
+phase_2_adversarial_verdict_pass2: BLOCKING (4B/9S/5N) — fixes applied for 4B + 2S
+phase_2_convergence: All 11 BLOCKING resolved across two passes; 8/20 SUBSTANTIVE addressed; remaining 12 SUBSTANTIVE + 9 NITPICK logged in ADV-P1.md + ADV-P2.md for follow-up
+next_phase: phase-3-tdd-implementation (Wave 1 dispatch)
 ---
 
 # otsniff factory state

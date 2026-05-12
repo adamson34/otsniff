@@ -17,7 +17,7 @@ traces_to: .factory/stories/STORY-INDEX.md
 # Wave Schedule — otsniff v0.4.0-feature cycle
 
 Three waves total. Wave 1 carries the unblocked-from-the-start work
-(15 stories). Wave 2 carries the level-1 dependents (8 stories).
+(23 stories). Wave 2 carries the level-1 dependents (6 stories).
 Wave 3 carries the two stories deliberately delayed for richness
 (S-5.03 augmented findings + S-6.03 diff renderer).
 
