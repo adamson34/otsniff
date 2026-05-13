@@ -1,5 +1,9 @@
-//! recon.port_scan detector — fires when a single source talks to
-//! many distinct destinations on the same port within the capture.
+//! recon.port_scan detector — fires when a single source contacts many
+//! distinct destinations (horizontal) or many distinct (port, proto)
+//! combinations (vertical) within the capture window.
+//!
+//! One finding per scanning source IP, classified as horizontal, vertical,
+//! or combined. Broadcast/multicast destinations are excluded from counts.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -10,28 +14,34 @@ use crate::observe::Observations;
 
 use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
-/// Minimum number of distinct destination IPs on the same (src, dst_port,
-/// proto) tuple before the finding fires. Tunable — raise this for noisier
-/// environments where 5 distinct targets is plausible normal traffic.
-const PORT_SCAN_THRESHOLD: usize = 5;
+/// Minimum distinct destination IPs before a horizontal-scan finding fires.
+const DST_THRESHOLD: usize = 10;
+
+/// Minimum distinct (dst_port, proto) pairs before a vertical-scan finding fires.
+const PORT_THRESHOLD: usize = 10;
 
 /// Destination count at which severity escalates from Medium to High.
-const PORT_SCAN_HIGH_THRESHOLD: usize = 25;
+const HIGH_THRESHOLD_DST: usize = 50;
 
-/// Maximum evidence rows per finding (mirrors the per-finding cap used by
-/// sibling detectors — keeps report HTML readable).
+/// (port, proto) count at which severity escalates from Medium to High.
+const HIGH_THRESHOLD_PORT: usize = 50;
+
+/// Maximum evidence rows per finding (mirrors sibling detectors).
 const MAX_EVIDENCE: usize = 15;
 
 pub const METADATA: RuleMetadata = RuleMetadata {
     id: "recon.port_scan",
-    title: "Port scan — single source to many destinations on the same port",
+    title: "Port scan — source host probing many destinations or ports",
     severity: Severity::Medium,
-    trigger: "Fires when a single source IP talks to >= 5 distinct destination \
-              IPs on the same destination port + protocol within the capture \
-              window (PORT_SCAN_THRESHOLD = 5). Severity escalates to High at \
-              >= 25 distinct destinations. Broadcast and multicast destination \
-              addresses are excluded from the count.",
-    data_source: &["flows (grouped by src_ip, dst_port, proto; counting distinct dst_ip)"],
+    trigger: "Fires when a single source IP contacts >= 10 distinct destinations \
+              (horizontal scan) OR >= 10 distinct (port, protocol) combinations \
+              (vertical scan) within the capture window. Severity escalates to \
+              High at >= 50. One finding per scanning source, classified as \
+              horizontal, vertical, or combined. Broadcast/multicast destinations \
+              are skipped.",
+    data_source: &[
+        "flows (grouped by src_ip; counting distinct dst_ip and (dst_port, proto) pairs)",
+    ],
     references: &[
         Reference {
             kind: ReferenceKind::MitreIcsAttack,
@@ -46,53 +56,87 @@ pub const METADATA: RuleMetadata = RuleMetadata {
     ],
 };
 
+/// Accumulated scan metrics for a single source IP.
+#[derive(Default)]
+struct ScanGroup {
+    dsts: BTreeSet<IpAddr>,
+    ports: BTreeSet<(u16, u8)>,
+    total_flows: usize,
+}
+
 pub fn detect(obs: &Observations, _ot_subnets: &[IpNet]) -> Vec<Finding> {
-    // Group flows by (src_ip, dst_port, proto) → set of distinct unicast dst IPs.
-    let mut groups: BTreeMap<(IpAddr, u16, u8), BTreeSet<IpAddr>> = BTreeMap::new();
+    // Group flows by source IP.
+    let mut by_src: BTreeMap<IpAddr, ScanGroup> = BTreeMap::new();
 
     for flow in obs.flows.values() {
         let dst = flow.key.dst;
         if is_broadcast_or_multicast(dst) {
             continue;
         }
-        groups
-            .entry((flow.key.src, flow.key.dst_port, flow.key.proto))
-            .or_default()
-            .insert(dst);
+        let entry = by_src.entry(flow.key.src).or_default();
+        entry.dsts.insert(dst);
+        entry.ports.insert((flow.key.dst_port, flow.key.proto));
+        entry.total_flows += 1;
     }
 
     let mut findings = Vec::new();
 
-    for ((src, dst_port, proto), dsts) in &groups {
-        let count = dsts.len();
-        if count < PORT_SCAN_THRESHOLD {
+    for (src, g) in by_src {
+        if g.dsts.len() < DST_THRESHOLD && g.ports.len() < PORT_THRESHOLD {
             continue;
         }
 
-        let severity = if count >= PORT_SCAN_HIGH_THRESHOLD {
+        let severity = if g.dsts.len() >= HIGH_THRESHOLD_DST || g.ports.len() >= HIGH_THRESHOLD_PORT
+        {
             Severity::High
         } else {
             Severity::Medium
         };
 
-        let proto_str = proto_label(*proto);
-        let src_label = host_label(*src, obs);
+        let classification = classify(g.dsts.len(), g.ports.len());
+        let src_label = host_label(src, obs);
 
-        let evidence: Vec<String> = dsts
+        // Evidence summary rows.
+        let mut evidence: Vec<String> = vec![
+            format!(
+                "{src_label} (scanning host): {} distinct destinations",
+                g.dsts.len()
+            ),
+            format!("{} distinct (port, proto) combinations", g.ports.len()),
+            format!("Classification: {classification}"),
+            format!("Total flows: {}", g.total_flows),
+        ];
+
+        let sample_dsts: Vec<String> = g
+            .dsts
             .iter()
             .take(MAX_EVIDENCE)
-            .map(|dst_ip| {
-                format!(
-                    "{src_label} -> {}:{dst_port}/{proto_str}",
-                    host_label(*dst_ip, obs),
-                )
-            })
+            .map(|d| host_label(*d, obs))
             .collect();
+        evidence.push(format!("Top destinations: {}", sample_dsts.join(", ")));
+
+        let sample_ports: Vec<String> = g
+            .ports
+            .iter()
+            .take(MAX_EVIDENCE)
+            .map(|(p, proto)| format!("{}/{}", p, proto_label(*proto)))
+            .collect();
+        evidence.push(format!("Sample ports: {}", sample_ports.join(", ")));
+
+        let title = format!(
+            "Port scan: {src_label} probed {} host(s) across {} (port, proto) combination(s) \
+             [{classification}]",
+            g.dsts.len(),
+            g.ports.len()
+        );
 
         let summary = format!(
-            "{src_label} contacted {count} distinct destination(s) on {proto_str}/{dst_port} \
-             within the capture window — consistent with a port scan or host-discovery sweep. \
-             Broadcast and multicast addresses were excluded from the count.",
+            "{src_label} contacted {} distinct destination(s) across {} (port, proto) \
+             combination(s) [{classification}] within the capture window — consistent with \
+             a port scan or host-discovery sweep. Broadcast and multicast addresses were \
+             excluded from the count.",
+            g.dsts.len(),
+            g.ports.len()
         );
 
         let playbook = vec![
@@ -107,9 +151,11 @@ pub fn detect(obs: &Observations, _ot_subnets: &[IpNet]) -> Vec<Finding> {
                  list and network connections for unknown tooling."
             ),
             format!(
-                "Review the {count} target host(s) on {proto_str}/{dst_port}: were they all \
-                 expected to be reachable from {src_label}? Tighten firewall rules at the \
-                 OT/IT boundary to block lateral scanning between zones."
+                "Review the {} target host(s) and {} (port, proto) combination(s): were \
+                 they all expected to be reachable from {src_label}? Tighten firewall rules \
+                 at the OT/IT boundary to block lateral scanning between zones.",
+                g.dsts.len(),
+                g.ports.len()
             ),
             "If this is a known-good scanner, add it to an explicit allowlist and suppress \
              this finding with `--ot-subnet` tuning or a future ignore-list feature."
@@ -119,9 +165,7 @@ pub fn detect(obs: &Observations, _ot_subnets: &[IpNet]) -> Vec<Finding> {
         findings.push(Finding {
             id: METADATA.id,
             severity,
-            title: format!(
-                "Port scan: {src_label} probed {count} host(s) on {proto_str}/{dst_port}"
-            ),
+            title,
             summary,
             evidence,
             recommendation: "Verify whether the source host is an authorised scanner. \
@@ -132,6 +176,19 @@ pub fn detect(obs: &Observations, _ot_subnets: &[IpNet]) -> Vec<Finding> {
     }
 
     findings
+}
+
+/// Classify the scan pattern based on dst spread and port spread.
+///
+/// "horizontal" — many destinations, few ports (≤ 3 port combinations)
+/// "vertical"   — few destinations (≤ 3), many ports
+/// "combined"   — both spreads are large
+fn classify(dst_count: usize, port_count: usize) -> &'static str {
+    match (dst_count, port_count) {
+        (d, p) if d >= DST_THRESHOLD && p <= 3 => "horizontal",
+        (d, p) if d <= 3 && p >= PORT_THRESHOLD => "vertical",
+        _ => "combined",
+    }
 }
 
 fn is_broadcast_or_multicast(addr: IpAddr) -> bool {

@@ -1285,7 +1285,14 @@ fn build_scan_fixture_two_sources() -> Observations {
             src,
             HostObs {
                 ip: src,
-                macs: vec![[0xAA, 0xBB, 0xCC, 0x00, 0x00, if src == src_a { 0x0A } else { 0x14 }]],
+                macs: vec![[
+                    0xAA,
+                    0xBB,
+                    0xCC,
+                    0x00,
+                    0x00,
+                    if src == src_a { 0x0A } else { 0x14 },
+                ]],
                 protocols: HashSet::from(["smb".to_string()]),
                 first_seen: fixed_ts(),
                 last_seen: fixed_ts(),
@@ -1491,8 +1498,7 @@ fn recon_port_scan_evidence_summarizes_scan_pattern() {
     );
     assert!(
         evidence_text.contains("8")
-            && (evidence_text.contains("port")
-                || evidence_text.contains("combination")),
+            && (evidence_text.contains("port") || evidence_text.contains("combination")),
         "evidence must mention port/combination count (8): {evidence_text}"
     );
 }
