@@ -874,7 +874,7 @@ fn dnp3_engineering_wired_into_run_all() {
 }
 
 // ---------------------------------------------------------------------------
-// BC-3.05.005 — recon.port_scan detector tests
+// BC-3.05.006 — recon.port_scan detector tests (source-IP rollup)
 // ---------------------------------------------------------------------------
 
 /// Build a minimal Observations with `n` flows from `src` to distinct
@@ -1021,28 +1021,40 @@ fn scan_ot_subnets() -> Vec<IpNet> {
     vec!["192.168.1.0/24".parse().unwrap()]
 }
 
-/// BC-3.05.005 / AC-001: recon.port_scan fires at Medium when one source
-/// reaches >= 5 distinct destinations on the same port (SMB tcp/445).
+/// BC-3.05.006 / AC-001: recon.port_scan fires at Medium when one source
+/// reaches >= 10 distinct destinations (DST_THRESHOLD) regardless of port.
 ///
-/// This test will panic on `todo!("S-2.10: implement recon.port_scan
-/// detector")` until the implementer lands real logic — that panic is the
-/// Red Gate signal.
+/// Updated for S-2.12: grouping is now per-source-IP, not per (src, port, proto).
+/// A source with exactly DST_THRESHOLD distinct dsts across one port must emit
+/// exactly ONE finding (not one-per-port).
 #[test]
 fn recon_port_scan_fires_at_threshold() {
     use otsniff::findings::recon_scan;
 
-    // 5 distinct dsts on tcp/445 — exactly at PORT_SCAN_THRESHOLD.
-    let obs = build_scan_fixture("192.168.1.10", 20, 5, 445, 6);
+    // 10 distinct dsts on tcp/445 — exactly at the new DST_THRESHOLD.
+    let obs = build_scan_fixture("192.168.1.10", 20, 10, 445, 6);
     let subnets = scan_ot_subnets();
 
     let findings = recon_scan::detect(&obs, &subnets);
 
     assert!(
         !findings.is_empty(),
-        "recon.port_scan must fire when src reaches >= 5 distinct dsts on the same port"
+        "recon.port_scan must fire when src reaches >= 10 distinct dsts"
     );
 
-    let f = &findings[0];
+    // Post-S-2.12: must be exactly ONE finding per source (not per port).
+    let scan_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "recon.port_scan")
+        .collect();
+    assert_eq!(
+        scan_findings.len(),
+        1,
+        "expected exactly ONE finding per source under new per-source grouping, got {}",
+        scan_findings.len()
+    );
+
+    let f = scan_findings[0];
     assert_eq!(
         f.id, "recon.port_scan",
         "finding id must be recon.port_scan"
@@ -1050,7 +1062,7 @@ fn recon_port_scan_fires_at_threshold() {
     assert_eq!(
         f.severity,
         otsniff::findings::Severity::Medium,
-        "severity must be Medium for count in 5..25 range"
+        "severity must be Medium for 10 dsts (below HIGH_THRESHOLD_DST of 50)"
     );
 
     let evidence_text = f.evidence.join("\n");
@@ -1058,53 +1070,62 @@ fn recon_port_scan_fires_at_threshold() {
         evidence_text.contains("192.168.1.10"),
         "evidence must mention the scanning source IP: {evidence_text}"
     );
-    assert!(
-        evidence_text.contains("445"),
-        "evidence must mention the scanned port: {evidence_text}"
-    );
 
     insta::assert_json_snapshot!("recon_port_scan_at_threshold", findings);
 }
 
-/// BC-3.05.005 / AC-001: severity escalates to High when count >= 25.
-///
-/// Red Gate: panics on `todo!()` until implemented.
+/// BC-3.05.006 / AC-001: severity escalates to High when distinct dsts >= 50
+/// (HIGH_THRESHOLD_DST). Updated for S-2.12 — threshold raised from 25 to 50.
 #[test]
 fn recon_port_scan_escalates_at_high_threshold() {
     use otsniff::findings::recon_scan;
 
-    // 25 distinct dsts — exactly at the High escalation threshold.
-    let obs = build_scan_fixture("192.168.1.10", 20, 25, 445, 6);
+    // 50 distinct dsts — exactly at the new HIGH_THRESHOLD_DST.
+    // build_scan_fixture generates dsts from base_octet..base_octet+count;
+    // use base_octet=1 so 50 dsts land in 192.168.1.1..=192.168.1.50.
+    let obs = build_scan_fixture("192.168.1.10", 1, 50, 445, 6);
     let subnets = scan_ot_subnets();
 
     let findings = recon_scan::detect(&obs, &subnets);
 
     assert!(
         !findings.is_empty(),
-        "recon.port_scan must fire when src reaches >= 25 distinct dsts"
+        "recon.port_scan must fire when src reaches >= 50 distinct dsts"
     );
 
-    let f = &findings[0];
+    let scan_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "recon.port_scan")
+        .collect();
+    assert_eq!(
+        scan_findings.len(),
+        1,
+        "must emit ONE finding per source even at high severity, got {}",
+        scan_findings.len()
+    );
+
+    let f = scan_findings[0];
     assert_eq!(f.id, "recon.port_scan");
     assert_eq!(
         f.severity,
         otsniff::findings::Severity::High,
-        "severity must be High for count >= 25"
+        "severity must be High for distinct_dsts >= HIGH_THRESHOLD_DST (50)"
     );
 
     insta::assert_json_snapshot!("recon_port_scan_high_severity", findings);
 }
 
-/// BC-3.05.005 / EC-002: finding must NOT fire when distinct dst count is
-/// below PORT_SCAN_THRESHOLD (< 5).
+/// BC-3.05.006 / EC-004: finding must NOT fire when distinct dsts AND distinct
+/// ports are both below threshold (< 10 each).
 ///
-/// Red Gate: panics on `todo!()` until implemented.
+/// Updated for S-2.12: silence threshold is now < 10 dsts AND < 10 ports.
+/// 9 dsts on 1 port = 9 < DST_THRESHOLD(10) and 1 < PORT_THRESHOLD(10) → silent.
 #[test]
 fn recon_port_scan_silent_below_threshold() {
     use otsniff::findings::recon_scan;
 
-    // 4 distinct dsts — one below threshold.
-    let obs = build_scan_fixture("192.168.1.10", 20, 4, 445, 6);
+    // 9 distinct dsts on 1 port — both below the new thresholds of 10.
+    let obs = build_scan_fixture("192.168.1.10", 20, 9, 445, 6);
     let subnets = scan_ot_subnets();
 
     let findings = recon_scan::detect(&obs, &subnets);
@@ -1115,8 +1136,7 @@ fn recon_port_scan_silent_below_threshold() {
         .collect();
     assert!(
         scan_findings.is_empty(),
-        "recon.port_scan must NOT fire for {} distinct dsts (below threshold of 5)",
-        4
+        "recon.port_scan must NOT fire for 9 distinct dsts and 1 port (both below threshold of 10)"
     );
 }
 
@@ -1148,147 +1168,455 @@ fn recon_port_scan_skips_broadcast_dst() {
     );
 }
 
-/// BC-3.05.005 / EC-004: flows on different ports must produce SEPARATE
-/// findings, not one merged finding (the grouping key is (src, dst_port, proto)).
+// ---------------------------------------------------------------------------
+// BC-3.05.006 — S-2.12 new tests: per-source rollup
+// ---------------------------------------------------------------------------
+
+/// Build Observations with `dst_count` distinct dsts × `port_count` distinct
+/// ports all from `src_str`, generating 192.168.1.{2..} dst IPs and ports
+/// starting from `port_base`. Each (dst, port) pair gets its own flow key.
 ///
-/// Fixture: 1 src → 10 dsts split as 5 on tcp/445 and 5 on tcp/3389.
-/// Expected: exactly 2 recon.port_scan findings, one per port.
-///
-/// Red Gate: panics on `todo!()` until implemented.
-#[test]
-fn recon_port_scan_separates_by_port() {
-    use otsniff::findings::recon_scan;
+/// Used by the S-2.12 rollup tests.
+fn build_scan_fixture_multi_port(
+    src_str: &str,
+    dst_count: u8,
+    port_count: u8,
+    port_base: u16,
+) -> Observations {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
-    let src = ip("192.168.1.10");
-
-    // Build the mixed-port fixture manually so we control the exact split.
+    let src = ip(src_str);
     let mut hosts = HashMap::new();
     hosts.insert(
         src,
         HostObs {
             ip: src,
             macs: vec![[0xAA, 0xBB, 0xCC, 0x00, 0x00, 0x01]],
-            protocols: HashSet::from(["smb".to_string(), "rdp".to_string()]),
+            protocols: HashSet::from(["unknown".to_string()]),
             first_seen: fixed_ts(),
             last_seen: fixed_ts(),
-            packets: 30,
-            bytes: 3_000,
+            packets: (dst_count as u64) * (port_count as u64) * 3,
+            bytes: (dst_count as u64) * (port_count as u64) * 300,
             in_ot_zone: true,
         },
     );
 
     let mut flows = HashMap::new();
-    // 5 flows on tcp/445
-    for i in 0u8..5 {
-        let dst = ip(&format!("192.168.1.{}", 20 + i));
+    for d in 0..dst_count {
+        let dst_oct = 2u8.wrapping_add(d);
+        let dst = ip(&format!("192.168.1.{dst_oct}"));
         hosts.entry(dst).or_insert(HostObs {
             ip: dst,
-            macs: vec![[0xBB, 0xCC, 0xDD, 0x00, 0x01, 20 + i]],
+            macs: vec![[0xBB, 0xCC, 0xDD, 0x00, 0x01, dst_oct]],
             protocols: HashSet::new(),
             first_seen: fixed_ts(),
             last_seen: fixed_ts(),
-            packets: 1,
-            bytes: 60,
+            packets: port_count as u64,
+            bytes: (port_count as u64) * 60,
             in_ot_zone: true,
         });
-        flows.insert(
-            format!("smb-{i}"),
-            FlowObs {
-                key: FlowKey {
-                    src,
-                    dst,
-                    dst_port: 445,
-                    proto: 6,
+        for p in 0..port_count {
+            let dst_port = port_base + p as u16;
+            let key = format!("flow-d{d}-p{p}");
+            flows.insert(
+                key,
+                FlowObs {
+                    key: FlowKey {
+                        src,
+                        dst,
+                        dst_port,
+                        proto: 6,
+                    },
+                    packets: 3,
+                    bytes: 300,
+                    first_seen: fixed_ts(),
+                    last_seen: fixed_ts(),
+                    label: None,
+                    unique_src_ports: HashSet::from([54000 + d as u16 * 100 + p as u16]),
                 },
-                packets: 3,
-                bytes: 300,
-                first_seen: fixed_ts(),
-                last_seen: fixed_ts(),
-                label: None,
-                unique_src_ports: HashSet::from([52000 + i as u16]),
-            },
-        );
-    }
-    // 5 flows on tcp/3389
-    for i in 0u8..5 {
-        let dst = ip(&format!("192.168.1.{}", 30 + i));
-        hosts.entry(dst).or_insert(HostObs {
-            ip: dst,
-            macs: vec![[0xBB, 0xCC, 0xDD, 0x00, 0x02, 30 + i]],
-            protocols: HashSet::new(),
-            first_seen: fixed_ts(),
-            last_seen: fixed_ts(),
-            packets: 1,
-            bytes: 60,
-            in_ot_zone: true,
-        });
-        flows.insert(
-            format!("rdp-{i}"),
-            FlowObs {
-                key: FlowKey {
-                    src,
-                    dst,
-                    dst_port: 3389,
-                    proto: 6,
-                },
-                packets: 3,
-                bytes: 300,
-                first_seen: fixed_ts(),
-                last_seen: fixed_ts(),
-                label: None,
-                unique_src_ports: HashSet::from([53000 + i as u16]),
-            },
-        );
+            );
+        }
     }
 
-    let obs = Observations {
+    Observations {
         hosts,
         flows,
         hostnames: BTreeMap::new(),
         ..Default::default()
-    };
+    }
+}
 
+/// Convenience alias used by tests that only need one src hitting many dsts
+/// across many ports (12 × 8 = 96 flows).
+fn build_scan_fixture_one_src_many_ports() -> Observations {
+    build_scan_fixture_multi_port("192.168.2.22", 12, 8, 1000)
+}
+
+/// Build Observations for a pure vertical scan: 1 src → 1 dst on `port_count`
+/// distinct ports.
+fn build_scan_fixture_vertical(src_str: &str, port_count: u8) -> Observations {
+    build_scan_fixture_multi_port(src_str, 1, port_count, 2000)
+}
+
+/// Build Observations for a combined scan: 1 src → `dst_count` dsts × `port_count`
+/// ports (large both dimensions).
+fn build_scan_fixture_combined(src_str: &str, dst_count: u8, port_count: u8) -> Observations {
+    build_scan_fixture_multi_port(src_str, dst_count, port_count, 3000)
+}
+
+/// Build Observations with 1 src → 60 distinct dsts on 1 port (triggers High
+/// severity via HIGH_THRESHOLD_DST = 50).
+fn build_scan_fixture_60_dsts() -> Observations {
+    // build_scan_fixture generates 192.168.1.{base..base+count}; use base=2.
+    build_scan_fixture("192.168.1.5", 2, 60, 80, 6)
+}
+
+/// Build Observations with two distinct scanning sources each hitting enough
+/// dsts to trigger a finding independently.
+fn build_scan_fixture_two_sources() -> Observations {
+    use std::collections::{BTreeMap, HashMap, HashSet};
+
+    let src_a = ip("192.168.1.10");
+    let src_b = ip("192.168.1.20");
+    let mut hosts = HashMap::new();
+
+    for &src in &[src_a, src_b] {
+        hosts.insert(
+            src,
+            HostObs {
+                ip: src,
+                macs: vec![[0xAA, 0xBB, 0xCC, 0x00, 0x00, if src == src_a { 0x0A } else { 0x14 }]],
+                protocols: HashSet::from(["smb".to_string()]),
+                first_seen: fixed_ts(),
+                last_seen: fixed_ts(),
+                packets: 30,
+                bytes: 3_000,
+                in_ot_zone: true,
+            },
+        );
+    }
+
+    // Each source scans 10 dsts across 3 distinct ports (30 flows each).
+    // Under old (src, port, proto) grouping → 3 findings per src = 6 total.
+    // Under new per-src grouping → 1 finding per src = 2 total.
+    let ports_a: [u16; 3] = [445, 139, 3389];
+    let ports_b: [u16; 3] = [22, 23, 80];
+
+    let mut flows = HashMap::new();
+    for (pi, &dst_port) in ports_a.iter().enumerate() {
+        for i in 0u8..10 {
+            let dst = ip(&format!("192.168.2.{}", 10 + i));
+            hosts.entry(dst).or_insert(HostObs {
+                ip: dst,
+                macs: vec![[0xCC, 0xDD, 0xEE, 0x00, 0x01, 10 + i]],
+                protocols: HashSet::new(),
+                first_seen: fixed_ts(),
+                last_seen: fixed_ts(),
+                packets: 1,
+                bytes: 60,
+                in_ot_zone: true,
+            });
+            flows.insert(
+                format!("a-p{pi}-{i}"),
+                FlowObs {
+                    key: FlowKey {
+                        src: src_a,
+                        dst,
+                        dst_port,
+                        proto: 6,
+                    },
+                    packets: 3,
+                    bytes: 300,
+                    first_seen: fixed_ts(),
+                    last_seen: fixed_ts(),
+                    label: None,
+                    unique_src_ports: HashSet::from([55000 + pi as u16 * 100 + i as u16]),
+                },
+            );
+        }
+    }
+    for (pi, &dst_port) in ports_b.iter().enumerate() {
+        for i in 0u8..10 {
+            let dst = ip(&format!("192.168.3.{}", 10 + i));
+            hosts.entry(dst).or_insert(HostObs {
+                ip: dst,
+                macs: vec![[0xCC, 0xDD, 0xEE, 0x00, 0x02, 10 + i]],
+                protocols: HashSet::new(),
+                first_seen: fixed_ts(),
+                last_seen: fixed_ts(),
+                packets: 1,
+                bytes: 60,
+                in_ot_zone: true,
+            });
+            flows.insert(
+                format!("b-p{pi}-{i}"),
+                FlowObs {
+                    key: FlowKey {
+                        src: src_b,
+                        dst,
+                        dst_port,
+                        proto: 6,
+                    },
+                    packets: 3,
+                    bytes: 300,
+                    first_seen: fixed_ts(),
+                    last_seen: fixed_ts(),
+                    label: None,
+                    unique_src_ports: HashSet::from([56000 + pi as u16 * 100 + i as u16]),
+                },
+            );
+        }
+    }
+
+    Observations {
+        hosts,
+        flows,
+        hostnames: BTreeMap::new(),
+        ..Default::default()
+    }
+}
+
+/// BC-3.05.006 / AC-001: 1 src hitting 12 dsts on 8 ports emits exactly ONE
+/// finding (not 8). Old (src, port, proto) grouping would emit 8; new per-src
+/// grouping must emit 1.
+///
+/// Red Gate: current detector groups by (src, port, proto) → emits 8 findings.
+/// This test fails until the implementer rewrites detect() for S-2.12.
+#[test]
+fn recon_port_scan_rolls_up_by_source_not_per_port() {
+    use otsniff::findings::recon_scan;
+
+    // 1 src, 12 distinct dsts, 8 distinct ports = 96 total flows.
+    let obs = build_scan_fixture_one_src_many_ports();
     let subnets = scan_ot_subnets();
-    let findings = recon_scan::detect(&obs, &subnets);
 
-    let scan_findings: Vec<_> = findings
+    let findings = recon_scan::detect(&obs, &subnets);
+    let recon: Vec<_> = findings
         .iter()
         .filter(|f| f.id == "recon.port_scan")
         .collect();
     assert_eq!(
-        scan_findings.len(),
-        2,
-        "expected 2 separate recon.port_scan findings (one per port), got {}",
-        scan_findings.len()
+        recon.len(),
+        1,
+        "expected ONE finding per source, got {}: {:?}",
+        recon.len(),
+        recon
     );
+    let f = &recon[0];
+    assert_eq!(
+        f.severity,
+        otsniff::findings::Severity::Medium,
+        "12 dsts × 8 ports — both below HIGH_THRESHOLD (50) — must be Medium"
+    );
+}
 
-    // Each finding must mention its own port.
-    let ports_in_evidence: std::collections::HashSet<&str> = scan_findings
+/// BC-3.05.006 / AC-002: scan-type classification is encoded in the finding.
+///
+/// Three sub-cases:
+/// - Horizontal: many dsts, few ports  → classification "horizontal"
+/// - Vertical: few dsts, many ports    → classification "vertical"
+/// - Combined: many dsts, many ports   → classification "combined"
+///
+/// Red Gate: current detector has no classification concept; all assertions fail.
+#[test]
+fn recon_port_scan_classifies_horizontal_vertical_combined() {
+    use otsniff::findings::recon_scan;
+
+    let subnets = scan_ot_subnets();
+
+    // Horizontal: 12 dsts, 1 port — triggers via dst threshold only.
+    let obs_h = build_scan_fixture("192.168.1.5", 2, 12, 80, 6);
+    let findings_h = recon_scan::detect(&obs_h, &subnets);
+    let f_h = findings_h
         .iter()
-        .flat_map(|f| f.evidence.iter().map(|s| s.as_str()))
-        .filter(|s| s.contains("445") || s.contains("3389"))
-        .flat_map(|s| {
-            let mut v = vec![];
-            if s.contains("445") {
-                v.push("445");
-            }
-            if s.contains("3389") {
-                v.push("3389");
-            }
-            v
-        })
-        .collect();
+        .find(|f| f.id == "recon.port_scan")
+        .expect("horizontal scan (12 dsts, 1 port) must produce a finding");
+    let h_repr = format!("{} {} {}", f_h.title, f_h.summary, f_h.evidence.join(" ")).to_lowercase();
     assert!(
-        ports_in_evidence.contains("445"),
-        "no finding mentions port 445 in its evidence"
-    );
-    assert!(
-        ports_in_evidence.contains("3389"),
-        "no finding mentions port 3389 in its evidence"
+        h_repr.contains("horizontal"),
+        "12-dst × 1-port scan must be classified horizontal; finding repr: {h_repr}"
     );
 
-    insta::assert_json_snapshot!("recon_port_scan_separate_by_port", findings);
+    // Vertical: 1 dst, 12 ports — triggers via port threshold only.
+    let obs_v = build_scan_fixture_vertical("192.168.1.5", 12);
+    let findings_v = recon_scan::detect(&obs_v, &subnets);
+    let f_v = findings_v
+        .iter()
+        .find(|f| f.id == "recon.port_scan")
+        .expect("vertical scan (1 dst, 12 ports) must produce a finding");
+    let v_repr = format!("{} {} {}", f_v.title, f_v.summary, f_v.evidence.join(" ")).to_lowercase();
+    assert!(
+        v_repr.contains("vertical"),
+        "1-dst × 12-port scan must be classified vertical; finding repr: {v_repr}"
+    );
+
+    // Combined: 12 dsts, 12 ports — triggers via both thresholds.
+    let obs_c = build_scan_fixture_combined("192.168.1.5", 12, 12);
+    let findings_c = recon_scan::detect(&obs_c, &subnets);
+    let f_c = findings_c
+        .iter()
+        .find(|f| f.id == "recon.port_scan")
+        .expect("combined scan (12 dsts, 12 ports) must produce a finding");
+    let c_repr = format!("{} {} {}", f_c.title, f_c.summary, f_c.evidence.join(" ")).to_lowercase();
+    assert!(
+        c_repr.contains("combined"),
+        "12-dst × 12-port scan must be classified combined; finding repr: {c_repr}"
+    );
+}
+
+/// BC-3.05.006 / AC-002: evidence rows must summarise dst-count and port-count.
+///
+/// Red Gate: current detector evidence is per-dst-IP list; no count summary.
+#[test]
+fn recon_port_scan_evidence_summarizes_scan_pattern() {
+    use otsniff::findings::recon_scan;
+
+    // 12 dsts × 8 ports.
+    let obs = build_scan_fixture_one_src_many_ports();
+    let subnets = scan_ot_subnets();
+
+    let findings = recon_scan::detect(&obs, &subnets);
+    let f = findings
+        .iter()
+        .find(|f| f.id == "recon.port_scan")
+        .expect("12 dsts × 8 ports must produce a recon.port_scan finding");
+
+    let evidence_text = f.evidence.join("\n").to_lowercase();
+    assert!(
+        evidence_text.contains("12")
+            && (evidence_text.contains("distinct destination")
+                || evidence_text.contains("dsts")
+                || evidence_text.contains("destination")),
+        "evidence must mention distinct destination count (12): {evidence_text}"
+    );
+    assert!(
+        evidence_text.contains("8")
+            && (evidence_text.contains("port")
+                || evidence_text.contains("combination")),
+        "evidence must mention port/combination count (8): {evidence_text}"
+    );
+}
+
+/// BC-3.05.006 / AC-001 (High escalation):
+///
+/// Two sub-assertions:
+/// 1. 60 distinct dsts → exactly ONE finding, severity High.
+/// 2. 49 distinct dsts → exactly ONE finding, severity Medium.
+///    Under the OLD threshold (25), 49 dsts fires High.
+///    Under the NEW threshold (50), 49 dsts fires Medium.
+///    Sub-assertion 2 distinguishes old code from new code and is the
+///    primary Red Gate anchor for this test.
+///
+/// Red Gate: sub-assertion 2 fails under old code (old HIGH_THRESHOLD=25
+/// makes 49 dsts → High, but the test expects Medium).
+#[test]
+fn recon_port_scan_severity_high_at_50_dsts() {
+    use otsniff::findings::recon_scan;
+
+    // Sub-assertion 1: 60 dsts on 1 port — above HIGH_THRESHOLD_DST (50).
+    let obs_60 = build_scan_fixture_60_dsts();
+    let subnets = scan_ot_subnets();
+    let recon_60: Vec<_> = recon_scan::detect(&obs_60, &subnets)
+        .into_iter()
+        .filter(|f| f.id == "recon.port_scan")
+        .collect();
+    assert_eq!(
+        recon_60.len(),
+        1,
+        "60-dst scan must emit exactly ONE finding per source, got {}",
+        recon_60.len()
+    );
+    assert_eq!(
+        recon_60[0].severity,
+        otsniff::findings::Severity::High,
+        "60 distinct dsts must escalate to High (HIGH_THRESHOLD_DST = 50)"
+    );
+
+    // Sub-assertion 2: 49 dsts on 1 port — just BELOW the new HIGH_THRESHOLD_DST (50).
+    // New code: 49 < 50 → Medium.  Old code: 49 >= 25 → High.
+    // This assertion fails under old code, providing the Red Gate signal.
+    let obs_49 = build_scan_fixture("192.168.1.5", 2, 49, 80, 6);
+    let recon_49: Vec<_> = recon_scan::detect(&obs_49, &subnets)
+        .into_iter()
+        .filter(|f| f.id == "recon.port_scan")
+        .collect();
+    assert_eq!(
+        recon_49.len(),
+        1,
+        "49-dst scan must emit exactly ONE finding per source, got {}",
+        recon_49.len()
+    );
+    assert_eq!(
+        recon_49[0].severity,
+        otsniff::findings::Severity::Medium,
+        "49 distinct dsts must be Medium under new HIGH_THRESHOLD_DST (50); old threshold was 25 which would produce High"
+    );
+}
+
+/// BC-3.05.006 / AC-001 (below-both-thresholds negation):
+/// 5 dsts × 5 ports — both below DST_THRESHOLD(10) and PORT_THRESHOLD(10).
+///
+/// Red Gate: old threshold is 5, so 5 dsts fires Medium under old code.
+/// After S-2.12 raises to 10, this must be silent.
+#[test]
+fn recon_port_scan_below_both_thresholds_silent() {
+    use otsniff::findings::recon_scan;
+
+    // 5 dsts × 5 ports = 25 flows, all below the new thresholds.
+    let obs = build_scan_fixture_multi_port("192.168.1.5", 5, 5, 4000);
+    let subnets = scan_ot_subnets();
+
+    let findings = recon_scan::detect(&obs, &subnets);
+    let recon: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "recon.port_scan")
+        .collect();
+    assert_eq!(
+        recon.len(),
+        0,
+        "5 dsts × 5 ports (both below threshold of 10) must produce no finding, got {}",
+        recon.len()
+    );
+}
+
+/// BC-3.05.006 / AC-005: two independent scanning sources each produce exactly
+/// ONE finding, for a total of TWO findings.
+///
+/// The two-source fixture gives each src 10 dsts on 3 distinct ports (30 flows
+/// per src). Old code groups by (src, port, proto) → 3 findings per src = 6
+/// total. New per-src code → 1 per src = 2 total. assert_eq!(…, 2) is the
+/// Red Gate: passes only when the rollup is implemented.
+#[test]
+fn recon_port_scan_two_scanners_two_findings() {
+    use otsniff::findings::recon_scan;
+
+    let obs = build_scan_fixture_two_sources();
+    let subnets = scan_ot_subnets();
+
+    let recon: Vec<_> = recon_scan::detect(&obs, &subnets)
+        .into_iter()
+        .filter(|f| f.id == "recon.port_scan")
+        .collect();
+    assert_eq!(
+        recon.len(),
+        2,
+        "two scanning sources must each emit ONE finding (total = 2), got {}",
+        recon.len()
+    );
+    // Each finding must reference its own source IP.
+    let all_text: String = recon
+        .iter()
+        .map(|f| format!("{} {} {}", f.title, f.summary, f.evidence.join(" ")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        all_text.contains("192.168.1.10"),
+        "one finding must reference src_a (192.168.1.10): {all_text}"
+    );
+    assert!(
+        all_text.contains("192.168.1.20"),
+        "one finding must reference src_b (192.168.1.20): {all_text}"
+    );
 }
 
 // ---------------------------------------------------------------------------
