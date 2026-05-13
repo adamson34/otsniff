@@ -5,9 +5,20 @@
   </picture>
 </p>
 
-# otsniff
+<h1 align="center">otsniff</h1>
 
-One-shot OT-aware PCAP triage. Feed it a span-port capture, get a self-contained HTML report you can hand to a plant manager, IT director, or on-site engineer.
+<p align="center">
+  <strong>One-shot OT-aware PCAP triage.</strong><br>
+  Single binary. Self-contained HTML report. Privacy-preserving AI flow.
+</p>
+
+<p align="center">
+  <a href="https://github.com/adamson34/otsniff/actions/workflows/ci.yml"><img src="https://github.com/adamson34/otsniff/actions/workflows/ci.yml/badge.svg?branch=develop" alt="CI"></a>
+  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?label=release&color=2e7d4a" alt="Release"></a>
+  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?include_prereleases&label=pre-release&color=b87325" alt="Pre-release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/MSRV-1.85-blue" alt="MSRV 1.85">
+</p>
 
 ```sh
 otsniff analyze plant-capture.pcap -o report.html
@@ -15,9 +26,17 @@ otsniff analyze plant-capture.pcap -o report.html
 
 ![otsniff demo](media/demo.gif)
 
+## What you get
+
+A single self-contained HTML file you can email to a plant manager. Open it in any browser. No back-end, no agents, no cloud.
+
+<p align="center">
+  <img src="media/report-screenshot.png" alt="otsniff HTML report — header band with sniff-trail mark, severity-tinted finding cards, brand-aligned palette" width="900">
+</p>
+
 ## Why this exists
 
-Every plant tour with a laptop and a SPAN port produces a PCAP. The existing options for analyzing it are:
+Every plant tour with a laptop and a SPAN port produces a PCAP. The existing options for analyzing it:
 
 - **Wireshark** — manual, expert-only, no findings layer.
 - **Malcolm** (CISA/INL) — excellent but heavyweight: full Elasticsearch + Arkime + Logstash deployment, hours to stand up, not laptop-grade.
@@ -39,6 +58,7 @@ Every plant tour with a laptop and a SPAN port produces a PCAP. The existing opt
 | High     | `compat.smbv1` | SMBv1 magic on tcp/445 or tcp/139 (EternalBlue / WannaCry protocol family) |
 | Medium   | `compat.stale_tls` | SSL 3.0 / TLS 1.0 / TLS 1.1 ClientHellos |
 | Medium   | `boundary.dns_resolver` | OT host querying DNS to a destination outside the OT zone |
+| Medium   | `recon.port_scan` | Single source contacting many distinct destinations on the same `(port, proto)` |
 | Medium   | `ot.unexpected_protocols` | AnyDesk, BitTorrent, IRC, OpenVPN, RTMP, SIP, SMTP on OT VLANs |
 
 Plus an **asset inventory** (IP, hostname when DHCP names it, MAC, OUI vendor inferred from a ~9,000-entry industrial + IT vendor table, inferred role: PLC / HMI / EWS / historian / IT) and a **comms-matrix** of top flows. The report also surfaces a **capture-source classification** (SPAN / host-side / TAP / ambiguous) — declarable explicitly via `--source-type` and guarded by the heuristic.
@@ -52,15 +72,17 @@ otsniff rules            # markdown
 otsniff rules --format json
 ```
 
+> **Known issue (v0.4.0):** `recon.port_scan` over-fires on captures containing an active scanner — emits one finding per `(src, port, proto)` tuple instead of per source IP. A capture with a scanner hitting many ports can produce thousands of cards. Fix tracked at [`.factory/stories/S-2.12-recon-port-scan-rollup.md`](.factory/stories/S-2.12-recon-port-scan-rollup.md) and lands in v0.4.1.
+
 ### What that looks like on real captures
 
 Run against the public 4SICS ICS Lab captures (with `--ot-subnet 10.10.10.0/24`):
 
 | Capture | Hosts | Findings | Notable signals |
 |---|---:|---:|---|
-| 4SICS-GeekLounge-151020 (240K pkt) | 12 | 4 | OpenVPN tunnel from OT to public IP; cross-zone DNS resolver; S7 engineering |
-| 4SICS-GeekLounge-151021 (1.2M pkt, 134 MB) | 47 | 8 | FTP / HTTP-Basic / Telnet plaintext, stale TLS, S7 engineering, internet egress |
-| 4SICS-GeekLounge-151022 (2.3M pkt, 200 MB) | 99 | 10 | Modbus *and* S7 engineering, FTP / HTTP-Basic / SNMPv1 / Telnet plaintext, stale TLS, internet egress |
+| 4SICS-GeekLounge-151020 (240K pkt, 25 MB) | 12 | 1 | S7 engineering on the lab PLC |
+| 4SICS-GeekLounge-151021 (1.2M pkt, 134 MB) | 47 | 5+ | FTP / HTTP-Basic / Telnet plaintext, stale TLS, S7 engineering, + recon.port_scan over-fires (see known issue) |
+| 4SICS-GeekLounge-151022 (2.3M pkt, 200 MB) | 99 | 8+ | Modbus *and* S7 *and* DNP3 engineering, FTP / HTTP-Basic / SNMPv1 / Telnet plaintext, stale TLS, + recon.port_scan over-fires |
 
 ## Install
 
@@ -73,7 +95,7 @@ curl -fsSL https://raw.githubusercontent.com/adamson34/otsniff/main/install.sh |
 To pin a specific version:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/adamson34/otsniff/main/install.sh | sh -s -- v0.3.0
+curl -fsSL https://raw.githubusercontent.com/adamson34/otsniff/main/install.sh | sh -s -- v0.4.0
 ```
 
 Installs to `~/.local/bin/otsniff` by default; set `OTSNIFF_INSTALL_DIR=/usr/local/bin` (or wherever) to override. Verifies the SHA-256 checksum before installing. Read `--help` after install for the next step.
@@ -101,10 +123,10 @@ otsniff analyze input.pcap -o report.html
 # Plus an AI-generated analysis section (privacy-preserving — see below):
 otsniff analyze input.pcap -o report.html --ai
 
-# Tell the tool the capture provenance (recommended). Without it, a
-# heuristic guesses; with it, the heuristic demotes to a guard and
-# warns on stderr if your declaration disagrees with what the frame
-# distribution looks like.
+# Eyeball the scrubbed prompt before it goes to claude:
+otsniff analyze input.pcap -o report.html --ai --review-scrub
+
+# Tell the tool the capture provenance (recommended):
 otsniff analyze input.pcap --source-type span -o report.html
 otsniff analyze input.pcap --source-type host-side -o report.html
 otsniff analyze input.pcap --source-type tap -o report.html
@@ -142,7 +164,7 @@ otsniff analyze plant.pcap -o report.html --ai \
   --verbose
 ```
 
-This is the same `analyze` command as the rules-only run, with `--ai` flipped on. Internally: scrub → fail-closed leak check (regex + map-value) → invoke `claude -p` → unscrub the response → embed as an "AI analysis" section in the rendered HTML. The AI never sees real IPs, MACs, or hostnames at any point.
+This is the same `analyze` command as the rules-only run, with `--ai` flipped on. Internally: scrub → fail-closed leak check (regex + map-value) → tool-sandbox the subprocess → invoke `claude -p` → unscrub the response → embed as an "AI analysis" section in the rendered HTML.
 
 When `--ai` is on, the **privacy audit log** is written automatically alongside the report — `report.html` → `report.audit.json`. Override the location with `--audit-log <PATH>` if you want it elsewhere.
 
@@ -181,8 +203,8 @@ The map file is the only thing tying pseudonyms to real values — keep it where
 **In scope:**
 
 - Offline PCAP / PCAPNG analysis on Ethernet captures
-- Modbus/TCP, EtherNet/IP, S7Comm, and **DNP3** protocol awareness (function-code level)
-- 13 rule-based findings (see table above and [`docs/RULES.md`](docs/RULES.md))
+- Modbus/TCP, EtherNet/IP, S7Comm, and DNP3 protocol awareness (function-code level)
+- 14 rule-based findings (see table above and [`docs/RULES.md`](docs/RULES.md))
 - Asset inventory with DHCP hostname extraction and ~9,000-entry OUI vendor inference (IEEE MA-L registry, industrial + IT focus)
 - Capture-source heuristic classification + explicit `--source-type` flag
 - Scrub/unscrub pipeline + closed-loop AI triage via local `claude` CLI, with three-airlock privacy contract (scrub bytes, leak detector, runtime tool sandbox)
@@ -205,19 +227,6 @@ We don't ship real plant PCAPs (NDA-laden). Public sources you can test against:
 - [ICS-pcap](https://github.com/automayt/ICS-pcap) — large community collection
 - [ICSNPP test traces](https://github.com/cisagov/icsnpp) — bundled per-protocol
 
-## Regenerating the demo GIF
-
-The GIF at the top of this README is a recording of a real `otsniff` run. To regenerate after a UI change:
-
-```sh
-brew install vhs
-# Drop the public 4SICS day-1 capture at media/demo.pcap
-curl -L -o media/demo.pcap https://www.netresec.com/pcap/4SICS-GeekLounge-151020.pcap
-vhs media/demo.tape
-```
-
-The recipe is in [`media/demo.tape`](media/demo.tape) — declarative, no Node, no npm. The input PCAP is gitignored; only the rendered GIF ships in the repo.
-
 ## Caveats
 
 This is a **triage tool**, not an audit. Findings are heuristic. A clean report is not a green light — it means the SPAN port didn't show those particular things during the capture window. Validate with the on-site team before acting. The capture-source classifier (or your explicit `--source-type` declaration) mitigates one of the biggest sources of misinterpretation (treating a host-side `tcpdump` as if it were a SPAN), but doesn't eliminate the need for an operator who knows the network in the loop.
@@ -230,6 +239,31 @@ This is a **triage tool**, not an audit. Findings are heuristic. A clean report 
 - [docs/adr/](docs/adr/) — Architecture Decision Records.
 - [docs/specs/](docs/specs/) — per-feature design specs (one per non-trivial feature). Every new feature spec includes a [scrub stance](docs/specs/scrub-stance-template.md).
 - [docs/ROADMAP.md](docs/ROADMAP.md) — prioritized backlog, explicit non-goals, honest gaps.
+
+---
+
+## How this was built — reproducibility through VSDD
+
+`otsniff` is built with **VSDD** (Verified Spec-Driven Development): every behavior is a numbered behavioral contract, every story traces to a BC, every PR converges through an adversarial review with a different model family, and every release ships with a chain-of-custody audit trail.
+
+This repo is also a **reference implementation** for the methodology applied to a real open-source product. The `factory-artifacts` branch (orphan, alongside `develop`) tracks the planning and verification artifacts:
+
+- `.factory/specs/behavioral-contracts/BC-INDEX.md` — the contract catalog. Every detector, every CLI flag, every privacy invariant has a numbered BC. New code can't ship without one.
+- `.factory/stories/` — sprint-state.yaml, STORY-INDEX, dependency graph, every story (S-N.MM) with acceptance criteria traced back to BCs.
+- `.factory/holdout-scenarios/` — hidden acceptance scenarios used by the holdout-evaluator (information asymmetry: the implementer never sees them).
+- `.factory/cycles/` — per-cycle wave schedules + per-story red-gate logs + adversarial review passes.
+- `.factory/policies.yaml` — governance policies the adversarial review enforces on every dispatch (POL-12 `no_user_paths_in_committed_artifacts` is the one that catches absolute-path leaks before they merge).
+
+A few load-bearing patterns you'll find on `develop`:
+
+| Pattern | Where to look | What it does |
+|---|---|---|
+| Per-story TDD with Red Gate | `tests/snapshot.rs` snapshot regen + `cargo insta review` | No implementation lands without a failing test first |
+| POL-12 lint as CI gate | `.github/workflows/ci.yml` job `no-user-paths` + `scripts/lint-no-user-paths.sh` | Blocks any PR that introduces absolute home-directory paths in committed text |
+| Fresh-context adversarial review | `.factory/stories/adversarial-reviews/ADV-P*.md` | Different model, no story memory, finds the gaps |
+| Brand handoff as a story | `.factory/stories/S-5.06-brand-application.md` | Even visual + asset changes go through the same per-story flow |
+
+If you want to use VSDD on your own project, the plugin is at [`drbothen/vsdd-factory`](https://github.com/drbothen/vsdd-factory). The cleanest way to learn what it does in practice is to grep `.factory/` in this repo — every artifact you see is what the methodology actually produces, not what it promises in a slideshow.
 
 ## License
 
