@@ -101,13 +101,16 @@ stories:
     branch: null
     worktree: null
   S-2.12:
-    status: pending
+    status: completed
     wave: 1
     blocked_by: [S-2.10]
-    branch: null
+    branch: feature/S-2.12-recon-rollup
     worktree: null
+    merge_sha: 7c70ef4
+    pr: 54
+    completed_at: 2026-05-13T13:00:00Z
     cycle_target: v0.4.1-patch
-    known_issue: "S-2.10 over-fires on real-PCAP scale (26k findings on 4SICS-22)"
+    real_pcap_evidence: "4SICS-22: 26,067 → 23 recon findings (1,135× reduction)"
   S-3.01:
     status: pending
     wave: 1

@@ -31,7 +31,7 @@ status: draft
 | S-2.09 | `boundary.ntp_external` | E-2 | 1 | 2 | draft | — | S.3 |
 | S-2.10 | `recon.port_scan` | E-2 | 1 | 3 | merged (#50, 7aea34f) | — | S.3 |
 | S-2.11 | `ics.modbus_unit_id_sweep` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
-| S-2.12 | `recon.port_scan` rollup by source IP (v0.4.1 patch) | E-2 | 1 | 3 | draft | S-2.10 | S.3 |
+| S-2.12 | `recon.port_scan` rollup by source IP (v0.4.1 patch) | E-2 | 1 | 4 | merged (#54, 7c70ef4) | S-2.10 | S.3 |
 | S-3.01 | Criterion + hyperfine perf regression | E-3 | 1 | 3 | draft | — | S.0,1,3, build |
 | S-3.02 | Prompt eval harness | E-3 | 1 | 5 | draft | — | S.6 |
 | S-3.05 | codecov coverage reporting (v0.4.1 patch) | E-3 | 1 | 2 | draft | — | build |
