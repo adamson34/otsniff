@@ -22,7 +22,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`compat.stale_tls`](#compatstale_tls) | medium | Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1) |
 | [`egress.ot_to_internet`](#egressot_to_internet) | critical | Internet-bound traffic from OT subnets |
 | [`boundary.dns_resolver`](#boundarydns_resolver) | medium | DNS queries from OT to an out-of-zone resolver |
-| [`recon.port_scan`](#reconport_scan) | medium | Port scan — single source to many destinations on the same port |
+| [`recon.port_scan`](#reconport_scan) | medium | Port scan — source host probing many destinations or ports |
 | [`ot.unexpected_protocols`](#otunexpected_protocols) | medium | Non-OT protocols observed touching OT subnets |
 
 ## `creds.ftp`
@@ -198,12 +198,12 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 ## `recon.port_scan`
 
-**Port scan — single source to many destinations on the same port**
+**Port scan — source host probing many destinations or ports**
 
 - **Severity:** medium
-- **Data source:** `flows (grouped by src_ip, dst_port, proto; counting distinct dst_ip)`
+- **Data source:** `flows (grouped by src_ip; counting distinct dst_ip and (dst_port, proto) pairs)`
 
-**Trigger.** Fires when a single source IP talks to >= 5 distinct destination IPs on the same destination port + protocol within the capture window (PORT_SCAN_THRESHOLD = 5). Severity escalates to High at >= 25 distinct destinations. Broadcast and multicast destination addresses are excluded from the count.
+**Trigger.** Fires when a single source IP contacts >= 10 distinct destinations (horizontal scan) OR >= 10 distinct (port, protocol) combinations (vertical scan) within the capture window. Severity escalates to High at >= 50. One finding per scanning source, classified as horizontal, vertical, or combined. Broadcast/multicast destinations are skipped.
 
 **References:**
 

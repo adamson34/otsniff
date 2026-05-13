@@ -1,25 +1,27 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 1074
 expression: findings
 ---
 [
   {
     "id": "recon.port_scan",
     "severity": "Medium",
-    "title": "Port scan: 192.168.1.10 probed 5 host(s) on tcp/445",
-    "summary": "192.168.1.10 contacted 5 distinct destination(s) on tcp/445 within the capture window — consistent with a port scan or host-discovery sweep. Broadcast and multicast addresses were excluded from the count.",
+    "title": "Port scan: 192.168.1.10 probed 10 host(s) across 1 (port, proto) combination(s) [horizontal]",
+    "summary": "192.168.1.10 contacted 10 distinct destination(s) across 1 (port, proto) combination(s) [horizontal] within the capture window — consistent with a port scan or host-discovery sweep. Broadcast and multicast addresses were excluded from the count.",
     "evidence": [
-      "192.168.1.10 -> 192.168.1.20:445/tcp",
-      "192.168.1.10 -> 192.168.1.21:445/tcp",
-      "192.168.1.10 -> 192.168.1.22:445/tcp",
-      "192.168.1.10 -> 192.168.1.23:445/tcp",
-      "192.168.1.10 -> 192.168.1.24:445/tcp"
+      "192.168.1.10 (scanning host): 10 distinct destinations",
+      "1 distinct (port, proto) combinations",
+      "Classification: horizontal",
+      "Total flows: 10",
+      "Top destinations: 192.168.1.20, 192.168.1.21, 192.168.1.22, 192.168.1.23, 192.168.1.24, 192.168.1.25, 192.168.1.26, 192.168.1.27, 192.168.1.28, 192.168.1.29",
+      "Sample ports: 445/tcp"
     ],
     "recommendation": "Verify whether the source host is an authorised scanner. If not, isolate and investigate for lateral-movement activity. Restrict inter-zone scanning at the firewall.",
     "playbook": [
       "Identify whether 192.168.1.10 is an authorized scanner (e.g., a Nessus / OpenVAS sensor, patch-management agent, or OT asset-discovery tool). Check your change-management records and asset-inventory for that host.",
       "If the host is NOT an authorized scanner, treat this as a potential lateral-movement precursor. Isolate 192.168.1.10 and inspect its process list and network connections for unknown tooling.",
-      "Review the 5 target host(s) on tcp/445: were they all expected to be reachable from 192.168.1.10? Tighten firewall rules at the OT/IT boundary to block lateral scanning between zones.",
+      "Review the 10 target host(s) and 1 (port, proto) combination(s): were they all expected to be reachable from 192.168.1.10? Tighten firewall rules at the OT/IT boundary to block lateral scanning between zones.",
       "If this is a known-good scanner, add it to an explicit allowlist and suppress this finding with `--ot-subnet` tuning or a future ignore-list feature."
     ]
   }

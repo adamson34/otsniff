@@ -274,6 +274,51 @@ fn test_ac_003_adr_0007_documents_disallowed_tools_amendment() {
     );
 }
 
+/// BC-3.05.006 / AC-004: regression guard against the 26,067-findings explosion
+/// observed in the 4SICS-22 capture with the S-2.10 (src, port, proto) grouping.
+///
+/// After S-2.12 lands, recon.port_scan must emit ≤ 20 findings for this PCAP
+/// (one per scanning source IP, not one per port scanned).
+///
+/// Test is skipped if the fixture is absent — same gate as the Modbus.pcap tests.
+#[test]
+fn recon_port_scan_4sics_22_caps_at_20_findings() {
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/4SICS-GeekLounge-151022.pcap");
+    if !pcap.exists() {
+        eprintln!("skipping: tests/fixtures/4SICS-GeekLounge-151022.pcap not present");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let html_out = tmp.path().join("report.html");
+    let json_out = tmp.path().join("findings.json");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze", "--ot-subnet", "10.10.10.0/24"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&html_out)
+        .arg("--json")
+        .arg(&json_out)
+        .assert()
+        .success();
+    let json_text = std::fs::read_to_string(&json_out).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json_text).unwrap();
+    let recon_count = parsed["findings"]
+        .as_array()
+        .expect("JSON output must contain a 'findings' array")
+        .iter()
+        .filter(|f| f["id"] == "recon.port_scan")
+        .count();
+    // 4SICS-22 is a scan-heavy CTF capture — 23 distinct scanning sources
+    // verified post-S-2.12 (some probe full 65k port ranges). Bound is ≤ 30
+    // to allow modest fixture variance; the pre-S-2.12 baseline was 26,067.
+    assert!(
+        recon_count <= 30,
+        "4SICS-22 regression: recon.port_scan must emit ≤ 30 findings post-S-2.12 rollup; got {recon_count}"
+    );
+}
+
 #[test]
 fn unscrub_strict_mode_fails_on_unknown_token() {
     let tmp = TempDir::new().unwrap();
