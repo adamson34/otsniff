@@ -4,7 +4,7 @@ project: otsniff
 phase: 2
 generated: 2026-05-11T20:30:00Z
 producer: phase-2-story-decomposition (inline)
-total_stories: 36
+total_stories: 37
 status: draft
 ---
 
@@ -39,6 +39,7 @@ S-2.12 → S-2.10                             (recon.port_scan rollup by source 
 
 S-3.01 → ∅                                  (criterion benches + perf CI — depends on no other story)
 S-3.02 → ∅                                  (prompt eval harness)
+S-3.05 → ∅                                  (codecov coverage reporting; cycle_target v0.4.1; no deps)
 S-3.03 → S-3.01                             (mutation testing prefers a measured baseline so the slow CI's signal isn't lost in perf noise)
 S-3.04 → S-2.04                             (fuzz harness includes DNP3; lands after DNP3 parser)
 
@@ -90,7 +91,7 @@ tabletop walk below). No story appears in any cycle.
   S-6.03 (deps: S-6.02 — level 1)
   (2 stories — but S-5.03 is actually level 1 since all S-2.x deps are level 0; we place S-5.03 in Wave 3 anyway for a separate reason: it consumes the most context and benefits from waiting until the detection layer is fully shipped, including snapshot-tested integration)
 
-Total: 28 + 6 + 2 = 36 stories — all uniquely placed. (S-5.04..S-5.07 + S-2.12 added 2026-05-12 mid-cycle.)
+Total: 29 + 6 + 2 = 37 stories — all uniquely placed. (S-5.04..S-5.07 + S-2.12 added 2026-05-12 mid-cycle; S-3.05 added 2026-05-13.)
 
 **Result: no cycle.**
 

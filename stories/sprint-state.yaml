@@ -5,7 +5,7 @@
 cycle: v0.4.0-feature
 current_wave: 1
 total_waves: 3
-total_stories: 36
+total_stories: 37
 # S-5.04 added mid-cycle 2026-05-12: harden --ai invocation surface (defense-in-depth on scrub privacy contract).
 
 stories:
@@ -118,6 +118,12 @@ stories:
     wave: 1
     branch: null
     worktree: null
+  S-3.05:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+    cycle_target: v0.4.1-patch
   S-4.01:
     status: pending
     wave: 1
