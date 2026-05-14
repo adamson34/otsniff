@@ -19,7 +19,7 @@ Pass 4 NFR catalog with B.6 corrections applied.
 
 ## 1. Functional Requirements
 
-### Subsystem S.0 — PCAP iteration
+### Subsystem S.0 — PCAP iteration + error taxonomy
 
 | ID | Requirement | BC trace |
 |---|---|---|
@@ -27,6 +27,8 @@ Pass 4 NFR catalog with B.6 corrections applied.
 | FR-002 | Reject non-PCAP input with `OtError::BadInput` and exit code 2 | BC-0.01.002 |
 | FR-003 | Reject missing input files with `OtError::InputOpen` and exit code 2 | BC-0.01.003 |
 | FR-004 | Packets carry timestamp, src/dst MACs, src/dst IPs, src/dst ports, transport, owned payload | BC-0.01.001, BC-0.01.004 |
+| FR-005 | Every `OtError` variant maps to a sysexits-style exit code via `OtError::exit_code` so shell scripts can branch on failure class (verified by unit tests covering each variant) | BC-0.02.001 (was BC-AUDIT-003) |
+| FR-006 | When `cli::run` returns `Err(e)`, `main` walks `std::error::Error::source()` chain and prints each layer prefixed `"caused by: "`. Preserves I/O-error diagnostics ("permission denied" vs. "no such file") that would otherwise be lost | BC-0.02.002 (was BC-AUDIT-004) |
 
 ### Subsystem S.1 — Observation and protocol parsing
 
@@ -35,9 +37,11 @@ Pass 4 NFR catalog with B.6 corrections applied.
 | FR-101 | Accumulate per-packet observations into a single typed `Observations` struct in a single pass | BC-1.01.001 |
 | FR-102 | Aggregate flows by `(src, dst, dst_port, proto)` — drop ephemeral source port | BC-1.01.002 |
 | FR-103 | Recognize Modbus PDUs on tcp/502 and classify by function code. Engineering set per `src/parse/modbus.rs::ModbusPdu::is_engineering_class`: **Write** category = 0x05 (Write Single Coil), 0x06 (Write Single Register), 0x0F (Write Multiple Coils), 0x10 (Write Multiple Registers), 0x15 (Write File Record), 0x16 (Mask Write Register); **ReadWrite** category = 0x17 (Read/Write Multiple Registers); **Diagnostic** sub-functions of 0x08 = (0x08, 0x0001) Restart Communications, (0x08, 0x0004) Force Listen Only, (0x08, 0x000A) Clear Counters | **BC-1.02.001 (B.6 corrected)** |
+| FR-103a | S7Comm header sizing is ROSCTR-dependent: 10 bytes for Job (0x01) / UserData (0x07), 12 bytes for Ack (0x02) / Ack_Data (0x03) — the latter append error-class + error-code; misalignment otherwise produces false function codes | BC-1.02.008 (was BC-AUDIT-007) |
 | FR-104 | Recognize EtherNet/IP encapsulation on tcp/44818; flag CIP services we classify as engineering (Stop, Reset, Apply Attributes, Forward Close to controller) | BC-1.02.002 |
 | FR-105 | Recognize S7Comm PDUs on tcp/102; classify by function code with engineering flag (PLC stop/start, block download/upload) — **note: "password ops" wording in original BC was inaccurate (B.6 finding)** | **BC-1.02.003 (B.6 corrected)** |
-| FR-106 | Recognize DHCP option 12 on udp/67,68; associate hostname with yiaddr (priority) or ciaddr (fallback) or option-50 requested IP | BC-1.02.004 |
+| FR-106 | Recognize DHCP option 12 on udp/67,68; associate hostname with yiaddr (priority) or ciaddr (fallback) or option-50 requested IP | BC-1.02.004, BC-1.02.007 (3-tier resolution, was BC-AUDIT-006) |
+| FR-106a | DHCP option walk is bounded and length-checked: rejects when `data_end > payload.len()`, honors OPT_END (0xFF) as terminator, OPT_PAD (0x00) as 1-byte filler; returns `None` on truncation, never partial parse | BC-1.02.006 (was BC-AUDIT-005) |
 | FR-107 | Detect plaintext credential traffic: FTP `USER`/`PASS` lines (tcp/21), any Telnet payload (tcp/23), HTTP Basic auth lines (tcp/80,8080), SNMPv1/v2c BER-tagged messages (udp/161,162) | BC-1.03.001–004 |
 | FR-108 | Detect SMBv1 magic bytes `\xFF SMB` at offset 0 or 4 on tcp/445,139 | BC-1.04.001 |
 | FR-109 | Capture TLS ClientHello `legacy_version` field on tcp/443,8443 | BC-1.04.002 |
@@ -50,6 +54,7 @@ Pass 4 NFR catalog with B.6 corrections applied.
 |---|---|---|
 | FR-201 | Derive `Asset` per host with role inference (PLC vendors + ICS protocols → Plc; SCADA shape → Hmi; etc.) | BC-2.01.001 |
 | FR-202 | Populate `Asset.hostname` from `obs.hostnames` lookup; `None` when unknown | BC-2.01.002 |
+| FR-203 | Resolve vendor from MAC via prefix-exact lookup against the embedded IEEE OUI table (`src/oui.rs`); first 3 bytes match | BC-2.02.001 (was BC-AUDIT-001) |
 
 ### Subsystem S.3 — Detection rules
 
@@ -57,16 +62,17 @@ Pass 4 NFR catalog with B.6 corrections applied.
 |---|---|---|
 | FR-301 | Emit one `creds.{ftp,telnet,http_basic,snmp}` Finding per CredKind seen — Severity Critical | BC-3.01.001, .002 |
 | FR-302 | Roll up credential findings by `(dst, port)` within kind; cap evidence at 15 lines (default per-detector cap per BC-AUDIT-008). **Exception:** `ot.unexpected_protocols` caps at 5 rows per label-bucket (`src/findings/unexpected_protocols.rs` `bucket.len() < 5`), so its total evidence count can be up to `5 × labels_observed` rather than a flat 15 | BC-3.01.003, BC-AUDIT-008 |
-| FR-303 | Emit `egress.ot_to_internet` (Severity Critical) when `obs.external_flows` is non-empty | BC-3.02.001 |
-| FR-304 | Emit `ics.{modbus_writes,cip_engineering,s7_engineering}` (Severity High → Critical if any source IP is outside `--ot-subnet`) | BC-3.03.001–.003 |
+| FR-303 | Emit `egress.ot_to_internet` (Severity Critical) when `obs.external_flows` is non-empty. Playbook branches on flow categories: appends category-specific guidance when external flows include DNS (53), NTP (123), or tunnel ports (1194, 4500, 500, 51820) | BC-3.02.001, BC-3.02.002 (was BC-AUDIT-010) |
+| FR-304 | Emit `ics.{modbus_writes,cip_engineering,s7_engineering}` (Severity High → Critical if any source IP is outside `--ot-subnet`). Rolls up per (src, dst) pair across all engineering protocols; one row per source-destination pair carries per-pair count + top-N function codes | BC-3.03.001–.003, BC-3.03.004 (was BC-AUDIT-012) |
 | FR-305 | Emit `compat.smbv1` (Severity High) on any SMBv1 observation | BC-3.04.001 |
-| FR-306 | Emit `compat.stale_tls` (Severity Medium) when any ClientHello version is in `{0x0300, 0x0301, 0x0302}` | BC-3.04.002 |
+| FR-306 | Emit `compat.stale_tls` (Severity Medium) when `is_stale` inclusive range `0x0300..=0x0302` matches ClientHello legacy_version. 0x0303 (TLS 1.2) and 0x0304 (TLS 1.3) explicitly pass the filter | BC-3.04.002, BC-3.04.003 (was BC-AUDIT-011) |
 | FR-307 | Emit `boundary.dns_resolver` (Severity Medium) when a flow on `dst_port=53` has src in OT AND dst NOT in OT | BC-3.05.001 |
-| FR-308 | Emit `ot.unexpected_protocols` (Severity Medium) when a flow whose `src OR dst` is in OT carries a port-derived label in the no-fly list (`anydesk, apns, bittorrent, gcm, irc, openvpn, rtmp, sip, smtp, stun, teamviewer` — 11 labels) | **BC-3.05.002 (B.6 corrected — see L-P0-001)** |
+| FR-308 | Emit `ot.unexpected_protocols` (Severity Medium) when a flow whose `src OR dst` is in OT carries a port-derived label in the no-fly list (`anydesk, apns, bittorrent, gcm, irc, openvpn, rtmp, sip, smtp, stun, teamviewer` — 11 labels). Label table is locked by S-2.01 regression test | **BC-3.05.002 (B.6 corrected — see L-P0-001)**, BC-3.05.003 (was BC-AUDIT-009) |
 | FR-309 | Sort findings by severity DESC then id ASC | BC-3.06.001 |
 | FR-310 | Every fired Finding's `id` must appear in `findings::catalog()` (sentinel-tested) | BC-3.06.002 |
 | FR-311 | Every Finding must carry a non-empty `playbook: Vec<String>` (sentinel-tested) | BC-3.06.003 |
 | FR-312 | When `obs.hostnames` knows a name for an IP, finding evidence renders `HOSTNAME (1.2.3.4)` not just the IP | BC-3.06.004 |
+| FR-313 | Evidence vectors are capped at 15 rows per finding via `take(15)` (general invariant). Exception: `unexpected_protocols` caps at 5 per label-bucket (`bucket.len() < 5`), so its total evidence count can be up to `5 × labels_observed` rather than a flat 15 | BC-3.06.005 (was BC-AUDIT-008) |
 
 ### Subsystem S.4 — Capture-source classification
 
@@ -85,7 +91,7 @@ Pass 4 NFR catalog with B.6 corrections applied.
 | FR-501 | Mint deterministic pseudonyms keyed sorted by real value: `host_NNN` (IPs), `mac_NNN` (MACs), `name_NNN` (hostnames) | BC-5.01.001 |
 | FR-502 | `scrub_text` substitutes only values present in the `ScrubMap` — no false positives on IP-shaped substrings | BC-5.01.002 |
 | FR-503 | `unscrub_text(scrub_text(x, map), map) == x` for any text containing only mapped pseudonyms + ordinary prose | BC-5.01.003 |
-| FR-504 | Leak detector regex scans for IPv4 dotted-quad, IPv6 abbreviated forms, MAC colon-hex | BC-5.02.001 |
+| FR-504 | Leak detector regex scans for IPv4 dotted-quad, IPv6 abbreviated forms, MAC colon-hex. `format_mac` (used by pseudonym minting and observation rendering) produces upper-hex, colon-separated strings that match the leak-detector regex verbatim | BC-5.02.001, BC-5.01.004 (was BC-AUDIT-002) |
 | FR-505 | `ensure_no_map_values` iterates every real value in the ScrubMap and verifies absence verbatim | BC-5.02.002 |
 | FR-506 | Combined check (`ensure_clean` + `ensure_no_map_values`) on the scrubbed report AND on the assembled user message AND on the audit log JSON — fail-closed on any leak | BC-5.02.003 |
 
@@ -94,8 +100,8 @@ Pass 4 NFR catalog with B.6 corrections applied.
 | ID | Requirement | BC trace |
 |---|---|---|
 | FR-601 | Render AI markdown response to HTML with `Event::Html` and `Event::InlineHtml` filtered out (XSS defense) | BC-6.01.001 |
-| FR-602 | System prompt has 4 capture-source-tag variants (span / host-side / tap / ambiguous); each is snapshot-tested | BC-6.02.001 |
-| FR-603 | AI invocation is via subprocess shell-out to `claude -p` — no HTTP, no SDK | BC-6.03.001 |
+| FR-602 | System prompt has 4 capture-source-tag variants (span / host-side / tap / ambiguous); each is snapshot-tested. Sparse-capture refusal branch: when report has 0 findings AND ≤5 hosts AND capture window <5 min, prompt instructs AI to recommend longer recapture rather than producing a prioritized analysis | BC-6.02.001, BC-6.02.002 (was BC-AUDIT-013) |
+| FR-603 | AI invocation is via subprocess shell-out to `claude -p` — no HTTP, no SDK. `ClaudeCliProvider::analyze` pre-checks `claude` is on `PATH` and returns `OtError::Parse("claude not on PATH ...")` if absent (avoids cryptic spawn errors) | BC-6.03.001, BC-6.03.003 (was BC-AUDIT-014) |
 
 ### Subsystem S.7 — Audit log
 
@@ -110,7 +116,7 @@ Pass 4 NFR catalog with B.6 corrections applied.
 
 | ID | Requirement | BC trace |
 |---|---|---|
-| FR-801 | `render_html` is deterministic per inputs (sentinel-tested via snapshot) | BC-8.01.001 |
+| FR-801 | `render_html` is deterministic per inputs (sentinel-tested via snapshot). `report_md` top-level structure orders sections: Capture summary → Findings → Asset inventory → Comms matrix → Notes (snapshot-tested) | BC-8.01.001, BC-8.01.002 (was BC-AUDIT-015) |
 | FR-802 | `rule_catalog::render_markdown` output matches the committed `docs/RULES.md` | BC-8.02.001 |
 | FR-803 | Scrubbed markdown contains no real identifiers from any fixture | BC-8.03.001 |
 
