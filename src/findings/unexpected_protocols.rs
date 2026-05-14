@@ -190,4 +190,155 @@ mod tests {
             "METADATA.trigger should say 'src OR dst in OT' but reads: {trigger:?}",
         );
     }
+
+    /// BC-AUDIT-009 — lock the port-to-label table.
+    /// One positive assertion per label currently returned by
+    /// `unexpected_label`. If a future refactor drops a row or renames
+    /// a label, this test fails.
+    #[test]
+    fn unexpected_label_lookups_match_canonical_table() {
+        use super::unexpected_label;
+
+        // tcp/25, 587, 465 → smtp
+        assert_eq!(unexpected_label(6, 25), Some("smtp"));
+        assert_eq!(unexpected_label(6, 587), Some("smtp"));
+        assert_eq!(unexpected_label(6, 465), Some("smtp"));
+
+        // tcp/6881..=6889 → bittorrent
+        assert_eq!(unexpected_label(6, 6881), Some("bittorrent"));
+        assert_eq!(unexpected_label(6, 6885), Some("bittorrent"));
+        assert_eq!(unexpected_label(6, 6889), Some("bittorrent"));
+        // udp/6881..=6889 → bittorrent
+        assert_eq!(unexpected_label(17, 6881), Some("bittorrent"));
+        assert_eq!(unexpected_label(17, 6889), Some("bittorrent"));
+
+        // tcp/1935 → rtmp
+        assert_eq!(unexpected_label(6, 1935), Some("rtmp"));
+
+        // tcp/5223 → apns
+        assert_eq!(unexpected_label(6, 5223), Some("apns"));
+
+        // tcp/5228..=5230 → gcm
+        assert_eq!(unexpected_label(6, 5228), Some("gcm"));
+        assert_eq!(unexpected_label(6, 5229), Some("gcm"));
+        assert_eq!(unexpected_label(6, 5230), Some("gcm"));
+
+        // udp/3478, 3479 → stun
+        assert_eq!(unexpected_label(17, 3478), Some("stun"));
+        assert_eq!(unexpected_label(17, 3479), Some("stun"));
+
+        // tcp/5060, udp/5060 → sip
+        assert_eq!(unexpected_label(6, 5060), Some("sip"));
+        assert_eq!(unexpected_label(17, 5060), Some("sip"));
+
+        // tcp/6667, 6697 → irc
+        assert_eq!(unexpected_label(6, 6667), Some("irc"));
+        assert_eq!(unexpected_label(6, 6697), Some("irc"));
+
+        // tcp/1194, udp/1194 → openvpn
+        assert_eq!(unexpected_label(6, 1194), Some("openvpn"));
+        assert_eq!(unexpected_label(17, 1194), Some("openvpn"));
+
+        // tcp/5938 → teamviewer
+        assert_eq!(unexpected_label(6, 5938), Some("teamviewer"));
+
+        // tcp/7070, 6568 → anydesk
+        assert_eq!(unexpected_label(6, 7070), Some("anydesk"));
+        assert_eq!(unexpected_label(6, 6568), Some("anydesk"));
+    }
+
+    /// Sentinel: ports NOT in the table return None.
+    #[test]
+    fn unexpected_label_returns_none_for_unmapped_ports() {
+        use super::unexpected_label;
+
+        // Common ports that should NOT be in this no-fly list:
+        // - tcp/23 (telnet) — caught by creds.telnet, not unexpected_protocols
+        // - tcp/80 (http) — normal traffic
+        // - tcp/443 (https) — normal traffic
+        // - tcp/22 (ssh) — normal admin
+        // - tcp/502 (modbus) — OT
+        assert_eq!(
+            unexpected_label(6, 23),
+            None,
+            "telnet handled by creds.telnet"
+        );
+        assert_eq!(unexpected_label(6, 80), None);
+        assert_eq!(unexpected_label(6, 443), None);
+        assert_eq!(unexpected_label(6, 22), None);
+        assert_eq!(unexpected_label(6, 502), None);
+        assert_eq!(unexpected_label(6, 0), None);
+        assert_eq!(unexpected_label(6, 65535), None);
+    }
+
+    /// Sentinel: unsupported protocols return None.
+    #[test]
+    fn unexpected_label_returns_none_for_non_tcp_udp() {
+        use super::unexpected_label;
+
+        // ICMP=1, GRE=47, ESP=50, SCTP=132 — never in this table.
+        assert_eq!(unexpected_label(1, 5060), None);
+        assert_eq!(unexpected_label(47, 1194), None);
+        assert_eq!(unexpected_label(50, 6881), None);
+        assert_eq!(unexpected_label(132, 5938), None);
+    }
+
+    /// Lock the LABEL SET — fails if any label string is renamed.
+    /// This complements the positive assertions: even if a future refactor
+    /// changes a port mapping, the set of distinct labels in the table
+    /// stays exactly these 11.
+    #[test]
+    fn unexpected_label_distinct_label_set_is_exactly_eleven() {
+        use super::unexpected_label;
+        use std::collections::BTreeSet;
+
+        let mut labels: BTreeSet<&str> = BTreeSet::new();
+        // Sweep a small subset that covers every (proto, port) row in the table.
+        let probes: &[(u8, u16)] = &[
+            (6, 25),
+            (6, 6881),
+            (17, 6881),
+            (6, 1935),
+            (6, 5223),
+            (6, 5228),
+            (17, 3478),
+            (6, 5060),
+            (17, 5060),
+            (6, 6667),
+            (6, 1194),
+            (17, 1194),
+            (6, 5938),
+            (6, 7070),
+            (6, 6568),
+        ];
+        for &(proto, port) in probes {
+            if let Some(label) = unexpected_label(proto, port) {
+                labels.insert(label);
+            }
+        }
+        // 11 distinct labels: smtp, bittorrent, rtmp, apns, gcm, stun, sip, irc, openvpn, teamviewer, anydesk
+        assert_eq!(
+            labels.len(),
+            11,
+            "expected exactly 11 distinct labels in the no-fly table; got {labels:?}"
+        );
+        for expected in [
+            "smtp",
+            "bittorrent",
+            "rtmp",
+            "apns",
+            "gcm",
+            "stun",
+            "sip",
+            "irc",
+            "openvpn",
+            "teamviewer",
+            "anydesk",
+        ] {
+            assert!(
+                labels.contains(expected),
+                "label {expected:?} missing from no-fly table; got {labels:?}"
+            );
+        }
+    }
 }
