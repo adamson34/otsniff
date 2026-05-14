@@ -153,20 +153,26 @@ stories:
     worktree: null
     cycle_target: v0.4.1-patch
   S-3.06:
-    status: in_progress
+    status: deferred
     wave: 1
     branch: null
     worktree: null
     cycle_target: v0.4.1-patch
-    stopgap:
-      status: landed
-      pr: 60
-      merge_sha: 547f644
-      landed_at: 2026-05-14T14:45:00Z
-      covers: AC-002 option (a) only (pin macos-14)
+    investigation:
+      status: complete
+      attempts:
+        - {pr: 60, hypothesis: "macos-latest image 15 bug", outcome: "failed - flake hit macos-14 too", state: merged}
+        - {pr: 61, hypothesis: "PATH resolution wrong, add $HOME/.cargo/bin guard", outcome: "guard worked on its step; Swatinem broke things after", state: merged}
+        - {pr: 62, hypothesis: "skip PATH entirely, call cargo by absolute path", outcome: "diagnostic proved binary at path IS rustup-init bytes", state: reverted-via-pr-64}
+        - {pr: 63, hypothesis: "rustup default stable after cache restore", outcome: "rustup binary is also rustup-init bytes; no in-band repair", state: closed-unmerged}
+        - {pr: 64, hypothesis: "revert pr-62 to restore rerun-clears-it workaround", outcome: "success", state: merged}
+      root_cause: "Swatinem/rust-cache@v2 cache restore replaces ALL binaries in $HOME/.cargo/bin/ with rustup-init bytes on macOS. No in-band repair possible — the tools needed to fix it are themselves corrupted."
     remaining:
-      - AC-001 investigation write-up (docs/ci-investigations/2026-05-macos-rustup-flake.md)
-      - AC-002 verification gate (4 more consecutive clean macOS runs needed; first is the PR #60 run itself)
+      - "Option (b''): drop Swatinem/rust-cache@v2 on macOS job only (~90s slower; eliminates cache-corruption vector)"
+      - "Option (c): replace dtolnay+Swatinem with actions-rust-lang/setup-rust-toolchain"
+    current_develop_state:
+      ci_workflow: bare `cargo test --all-features` invocation
+      flake_behavior: PR CI always passes (empty cache); develop pushes intermittently fail and need manual rerun-clears-it
   S-4.01:
     status: pending
     wave: 1
