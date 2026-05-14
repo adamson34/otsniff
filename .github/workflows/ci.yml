@@ -46,22 +46,30 @@ jobs:
   # worth having even if functional divergence between Linux and macOS
   # is rare for this codebase.
   #
-  # NB: pinned to `macos-14` (stopgap) rather than `macos-latest` because
-  # `macos-latest` (currently macOS 15 image) intermittently ships a
-  # broken rustup proxy that resolves `cargo` → `rustup-init`, causing
-  # `cargo test` to fail with "unexpected argument 'test' found" even
-  # though `dtolnay/rust-toolchain@stable` reports successful setup.
-  # Hit three times in 48 hours on this repo (PR #58 CI, develop push
-  # after #58, develop push after #59). Each cleared on rerun. Full
-  # investigation tracked as S-3.06 — the spec requires a write-up plus
-  # a 5-consecutive-clean-runs verification gate; this pin is the
-  # immediate stopgap so develop-pushes stop failing.
+  # PATH guard step:
+  # On macOS GitHub runners, `cargo` (the rustup proxy binary) sometimes
+  # resolves to a stale `rustup-init` binary even after
+  # `dtolnay/rust-toolchain@stable` reports successful install, producing
+  # "error: unexpected argument 'test' found / Usage: rustup-init[EXE]".
+  # Symptom hit five times on this repo (PR #58 CI, post-#58 develop
+  # push, post-#59 develop push, post-#60 first attempt, post-#60 retry)
+  # despite the initial macos-14 pin in #60. PR runs against the runner's
+  # empty cache pass; develop pushes that hit the populated cache fail.
+  # The fix is to explicitly put `$HOME/.cargo/bin` (where rustup writes
+  # its proxy shims) at the front of GITHUB_PATH and verify cargo
+  # resolves correctly before running tests. Tracked end-to-end via
+  # S-3.06; this is option (b) from the spec.
   test-macos:
     name: Test (macos-14)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+      - name: Force rustup-managed cargo to front of PATH
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo "Resolved cargo: $(which cargo || true)"
+          cargo --version
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-features
 
