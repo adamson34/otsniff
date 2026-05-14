@@ -153,11 +153,20 @@ stories:
     worktree: null
     cycle_target: v0.4.1-patch
   S-3.06:
-    status: pending
+    status: in_progress
     wave: 1
     branch: null
     worktree: null
     cycle_target: v0.4.1-patch
+    stopgap:
+      status: landed
+      pr: 60
+      merge_sha: 547f644
+      landed_at: 2026-05-14T14:45:00Z
+      covers: AC-002 option (a) only (pin macos-14)
+    remaining:
+      - AC-001 investigation write-up (docs/ci-investigations/2026-05-macos-rustup-flake.md)
+      - AC-002 verification gate (4 more consecutive clean macOS runs needed; first is the PR #60 run itself)
   S-4.01:
     status: pending
     wave: 1
