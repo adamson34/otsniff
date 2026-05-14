@@ -54,8 +54,7 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     }
 
     let total_queries: u64 = by_pair.values().sum();
-    let mut sorted: Vec<((IpAddr, IpAddr), u64)> =
-        by_pair.iter().map(|(k, v)| (*k, *v)).collect();
+    let mut sorted: Vec<((IpAddr, IpAddr), u64)> = by_pair.iter().map(|(k, v)| (*k, *v)).collect();
     sorted.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
 
     let evidence: Vec<String> = sorted

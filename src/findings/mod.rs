@@ -6,9 +6,9 @@
 
 pub mod dnp3_engineering;
 mod dns_resolver;
-mod ntp_external;
 mod engineering_commands;
 mod internet_egress;
+mod ntp_external;
 mod plaintext_creds;
 pub mod recon_scan;
 mod smbv1;
