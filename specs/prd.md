@@ -34,7 +34,7 @@ Pass 4 NFR catalog with B.6 corrections applied.
 |---|---|---|
 | FR-101 | Accumulate per-packet observations into a single typed `Observations` struct in a single pass | BC-1.01.001 |
 | FR-102 | Aggregate flows by `(src, dst, dst_port, proto)` — drop ephemeral source port | BC-1.01.002 |
-| FR-103 | Recognize Modbus PDUs on tcp/502 and classify by function code (engineering = 0x05, 0x06, 0x08+subfn 0x01, 0x0F, 0x10, 0x15, 0x16, 0x17) | **BC-1.02.001 (B.6 corrected)** |
+| FR-103 | Recognize Modbus PDUs on tcp/502 and classify by function code. Engineering set per `src/parse/modbus.rs::ModbusPdu::is_engineering_class`: **Write** category = 0x05 (Write Single Coil), 0x06 (Write Single Register), 0x0F (Write Multiple Coils), 0x10 (Write Multiple Registers), 0x15 (Write File Record), 0x16 (Mask Write Register); **ReadWrite** category = 0x17 (Read/Write Multiple Registers); **Diagnostic** sub-functions of 0x08 = (0x08, 0x0001) Restart Communications, (0x08, 0x0004) Force Listen Only, (0x08, 0x000A) Clear Counters | **BC-1.02.001 (B.6 corrected)** |
 | FR-104 | Recognize EtherNet/IP encapsulation on tcp/44818; flag CIP services we classify as engineering (Stop, Reset, Apply Attributes, Forward Close to controller) | BC-1.02.002 |
 | FR-105 | Recognize S7Comm PDUs on tcp/102; classify by function code with engineering flag (PLC stop/start, block download/upload) — **note: "password ops" wording in original BC was inaccurate (B.6 finding)** | **BC-1.02.003 (B.6 corrected)** |
 | FR-106 | Recognize DHCP option 12 on udp/67,68; associate hostname with yiaddr (priority) or ciaddr (fallback) or option-50 requested IP | BC-1.02.004 |
@@ -42,7 +42,7 @@ Pass 4 NFR catalog with B.6 corrections applied.
 | FR-108 | Detect SMBv1 magic bytes `\xFF SMB` at offset 0 or 4 on tcp/445,139 | BC-1.04.001 |
 | FR-109 | Capture TLS ClientHello `legacy_version` field on tcp/443,8443 | BC-1.04.002 |
 | FR-110 | Aggregate cross-zone egress: src in `--ot-subnet` AND dst is public | BC-1.05.001 |
-| FR-111 | Default OT zone is RFC1918 (10/8, 172.16/12, 192.168/16) when no `--ot-subnet` flag is supplied | BC-1.05.002 |
+| FR-111 | Default OT zone is **IPv4 RFC1918 only** (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) when no `--ot-subnet` flag is supplied. IPv6 is intentionally **not** included in the default: production IPv6 OT deployments are rare today, link-local `fe80::/10` would produce noise on every Ethernet capture, and operators with IPv6 OT zones can declare them explicitly via `--ot-subnet`. The `--ot-subnet` flag accepts both IPv4 and IPv6 CIDRs (`IpNet` parser handles both families) so mixed-family deployments are supported on opt-in | BC-1.05.002 |
 
 ### Subsystem S.2 — Asset inventory
 
@@ -56,7 +56,7 @@ Pass 4 NFR catalog with B.6 corrections applied.
 | ID | Requirement | BC trace |
 |---|---|---|
 | FR-301 | Emit one `creds.{ftp,telnet,http_basic,snmp}` Finding per CredKind seen — Severity Critical | BC-3.01.001, .002 |
-| FR-302 | Roll up credential findings by `(dst, port)` within kind; cap evidence at 15 lines | BC-3.01.003 |
+| FR-302 | Roll up credential findings by `(dst, port)` within kind; cap evidence at 15 lines (default per-detector cap per BC-AUDIT-008). **Exception:** `ot.unexpected_protocols` caps at 5 rows per label-bucket (`src/findings/unexpected_protocols.rs` `bucket.len() < 5`), so its total evidence count can be up to `5 × labels_observed` rather than a flat 15 | BC-3.01.003, BC-AUDIT-008 |
 | FR-303 | Emit `egress.ot_to_internet` (Severity Critical) when `obs.external_flows` is non-empty | BC-3.02.001 |
 | FR-304 | Emit `ics.{modbus_writes,cip_engineering,s7_engineering}` (Severity High → Critical if any source IP is outside `--ot-subnet`) | BC-3.03.001–.003 |
 | FR-305 | Emit `compat.smbv1` (Severity High) on any SMBv1 observation | BC-3.04.001 |
@@ -122,6 +122,8 @@ Pass 4 NFR catalog with B.6 corrections applied.
 | FR-902 | `analyze --ai <PCAP> -o <HTML>` engages the full privacy pipeline (scrub → leak-check → claude → unscrub → embed) | BC-9.01.002 |
 | FR-903 | `scrub` / `unscrub` round-trip exits 0 with pseudonyms restored; `--strict` exits non-zero on unmapped tokens | BC-9.02.001 |
 | FR-904 | `otsniff rules [--format md|json]` prints the catalog to stdout without requiring a PCAP | BC-9.03.001 |
+| FR-905 | `analyze --md <PATH>` emits an LLM-friendly markdown report sidecar alongside the HTML report. Same rendering pipeline as `scrub --md`; suitable for piping into operator-driven AI tools (Claude.ai web, ChatGPT, local Ollama) without `--ai` | BC-8.02.001 |
+| FR-906 | `analyze --json <PATH>` emits a JSON sidecar with the same `Observations`-derived fields used by the HTML template; intended for downstream automation. `analyze --map <PATH>` emits the scrub map when `--ai` or `--md` is set so unscrubbing the AI's response or the markdown sidecar later is possible | BC-9.01.002 |
 
 ## 2. Non-Functional Requirements
 
@@ -204,9 +206,11 @@ Boundary conditions every requirement must consider:
 | TLS ClientHello with extension that pushes legacy_version offset | Per our parser, we read bytes [9..11] regardless — if those bytes don't represent a real legacy_version (e.g. fragmented record), we still record what we read. Tested by snapshot fixture. |
 | Claude returns response containing `<script>` | `ai::html_render::render_safe` strips it; rendered HTML safe. Tested. |
 | Claude returns response containing valid pseudonym `host_999` not in our map | `unscrub_text` leaves it as-is; `unmapped` count increments; `--strict` mode would error |
-| `--ai` set without `claude` CLI installed | `ClaudeCliProvider::analyze` fails; `OtError::AiProvider` propagates; exit code 1 |
+| `--ai` set, `claude` not on `PATH` | `ClaudeCliProvider::analyze` returns `OtError::Parse("claude not on PATH ...")`; exit code 70 (EX_SOFTWARE) |
+| `--ai` set, `claude` spawn fails (permissions / IO) | `ClaudeCliProvider::analyze` returns `OtError::InputOpen { path: "<spawn:claude>", source: io::Error }`; exit code 2 |
 | `--audit-log` set without `--ai` | Audit log path is computed but not used (no AI invocation = nothing to record) |
 | `--ot-subnet` with overlapping CIDRs | `is_public` and `in_ot_zone` use first-match logic via `IpNet::contains`; equivalent to union semantics |
+| All-IPv6 capture with no `--ot-subnet` declared | `ot_or_default(&[])` returns only IPv4 RFC1918 ranges; no IPv6 host will match `in_ot_zone`. All findings that key off OT classification (egress, recon, boundary, unexpected_protocols) silently become inactive. Operator must declare IPv6 ranges explicitly (`--ot-subnet fd00::/8` for ULA, for example). Documented in FR-111. |
 | `--source-type` declared, heuristic returns Ambiguous | No warning (Ambiguous is treated as "no opinion") |
 | `--source-type` declared, declared matches heuristic kind | No warning |
 
