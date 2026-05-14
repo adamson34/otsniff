@@ -15,7 +15,7 @@ status: draft
 | ID | Title | Epic | Wave | Points | Status | Depends On | Subsystems |
 |----|-------|------|------|--------|--------|------------|------------|
 | S-1.01 | Reconcile BC-AUDIT-005..012 labels | E-1 | 1 | 1 | merged (factory-artifacts, docs-only) | — | docs |
-| S-1.02 | Recount BC confidence summary | E-1 | 1 | 1 | draft | — | docs |
+| S-1.02 | Recount BC confidence summary | E-1 | 1 | 1 | merged (factory-artifacts, docs-only) | — | docs |
 | S-1.03 | Close ASR-003..007 + S7 trigger PRD findings | E-1 | 1 | 5 | draft | — | docs + S.3 |
 | S-1.04 | Fix `ot.unexpected_protocols` trigger | E-1 | 1 | 1 | merged (#43, 20c541c) | — | S.3 |
 | S-1.05 | Formalize BC-AUDIT into BCs | E-1 | 2 | 3 | draft | S-1.01, S-1.02 | docs |

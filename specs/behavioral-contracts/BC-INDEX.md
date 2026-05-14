@@ -3,12 +3,12 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-14
 status: draft (brownfield-recovered)
-total_bcs: 60
+total_bcs: 69  # numbered BCs across S.0..S.9; +15 BC-AUDIT-* tracked separately
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
   - Per-BC sharding (.factory/specs/behavioral-contracts/ss-{subsystem}/BC-{bc-id}.md)
-    skipped for brownfield retrofit on a small project. 60 trivially-different
+    skipped for brownfield retrofit on a small project. 69 trivially-different
     files would outweigh the benefit at this project size. If a customer-grade
     traceability matrix is needed later, this index expands into the canonical
     pattern.
@@ -16,7 +16,8 @@ deviations:
 
 # Behavioral Contracts — Master Index
 
-60 BCs across 10 subsystems (S.0–S.9). Full text in
+69 numbered BCs across 10 subsystems (S.0–S.9), plus 15 BC-AUDIT-*
+contracts derived from the brownfield code audit. Full text in
 `.factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md`
 with B.6 corrections applied in `.factory/specs/prd.md` §5.
 
@@ -131,12 +132,44 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 
 ## Confidence summary
 
-| Confidence | Count |
+Counts derived from direct grep of `(HIGH[,)]` / `(MEDIUM[,)]` / `(LOW[,)]`
+markers in the bullet rows above. BC-AUDIT-* rows are uniformly HIGH per
+the audit source (`.factory/semport/otsniff/otsniff-coverage-audit.md`)
+even though the bullet form omits the per-row tag; they're counted
+separately to preserve the numbered/audit-derived split.
+
+| Bucket | Count |
 |---|---:|
-| HIGH | 54 |
-| MEDIUM | 5 |
-| LOW (gaps) | 3 (memory bound, snapshot stability across Rust toolchain, claude subprocess sandbox) |
-| AUDIT (BC-AUDIT-* from B.5, all HIGH) | 15 |
+| Numbered BCs, HIGH    | 67 |
+| Numbered BCs, MEDIUM  | 2 |
+| Numbered BCs, LOW     | 0 |
+| **Numbered subtotal** | **69** |
+| BC-AUDIT-* (all HIGH) | 15 |
+| **Grand total**       | **84** |
+
+**Verification:** `grep -cE '\(HIGH[,)]' BC-INDEX.md` must equal 67;
+`grep -cE '\(MEDIUM[,)]' BC-INDEX.md` must equal 2;
+`grep -c '^- BC-AUDIT-' BC-INDEX.md` must equal 15;
+`grep -cE '^- BC-[0-9]\.' BC-INDEX.md` must equal 69.
+
+## Open Question BCs (coverage gaps, not yet specified)
+
+These three areas were flagged during Phase 0 / Pass 5 as known gaps in
+the existing BC coverage. They are **not counted in the tally above**
+because no BC has been written for them yet — they are open questions
+awaiting a future story.
+
+- **OQ-1: Memory-bound parsing.** Maximum heap usage per PCAP byte
+  ingested is not bounded by a contract. A 10 GB pathological PCAP could
+  in principle exhaust process memory.
+- **OQ-2: Snapshot stability across Rust toolchain.** `cargo insta`
+  snapshots depend on `Debug` output ordering and floating-point
+  formatting; a Rust toolchain bump could produce semantically-equivalent
+  but textually different snapshots. No BC pins this expectation.
+- **OQ-3: Claude subprocess sandbox.** BC-6.03.002 pins
+  `--disallowed-tools` for invocation hardening, but the broader
+  subprocess sandboxing posture (process isolation, env-var scrubbing,
+  filesystem access) is not contracted.
 
 ## Provable Properties Catalog (for Phase 6 verification architecture)
 
