@@ -28,7 +28,7 @@ status: draft
 | S-2.06 | `compat.ntlmv1` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
 | S-2.07 | `compat.weak_tls_cipher` | E-2 | 1 | 2 | draft | — | S.1, S.3 |
 | S-2.08 | `creds.rdp_no_nla` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
-| S-2.09 | `boundary.ntp_external` | E-2 | 1 | 2 | draft | — | S.3 |
+| S-2.09 | `boundary.ntp_external` | E-2 | 1 | 2 | merged (#65, 89168bd) | — | S.3 |
 | S-2.10 | `recon.port_scan` | E-2 | 1 | 3 | merged (#50, 7aea34f) | — | S.3 |
 | S-2.11 | `ics.modbus_unit_id_sweep` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
 | S-2.12 | `recon.port_scan` rollup by source IP (v0.4.1 patch) | E-2 | 1 | 4 | merged (#54, 7c70ef4) | S-2.10 | S.3 |
