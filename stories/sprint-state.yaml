@@ -5,8 +5,9 @@
 cycle: v0.4.0-feature
 current_wave: 1
 total_waves: 3
-total_stories: 37
+total_stories: 38
 # S-5.04 added mid-cycle 2026-05-12: harden --ai invocation surface (defense-in-depth on scrub privacy contract).
+# S-3.06 added mid-cycle 2026-05-14: investigate + fix recurring macOS CI rustup-init flake (cycle_target: v0.4.1-patch).
 
 stories:
   # ===== Wave 1 (no dependencies) =====
@@ -126,6 +127,12 @@ stories:
     branch: null
     worktree: null
   S-3.05:
+    status: pending
+    wave: 1
+    branch: null
+    worktree: null
+    cycle_target: v0.4.1-patch
+  S-3.06:
     status: pending
     wave: 1
     branch: null

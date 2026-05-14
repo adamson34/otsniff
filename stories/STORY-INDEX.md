@@ -35,6 +35,7 @@ status: draft
 | S-3.01 | Criterion + hyperfine perf regression | E-3 | 1 | 3 | draft | — | S.0,1,3, build |
 | S-3.02 | Prompt eval harness | E-3 | 1 | 5 | draft | — | S.6 |
 | S-3.05 | codecov coverage reporting (v0.4.1 patch) | E-3 | 1 | 2 | draft | — | build |
+| S-3.06 | macOS CI rustup-init flake fix (v0.4.1 patch) | E-3 | 1 | 2 | draft | — | build |
 | S-3.03 | Mutation testing CI | E-3 | 2 | 5 | draft | S-3.01 | build |
 | S-3.04 | Fuzz harnesses for parsers | E-3 | 2 | 5 | draft | S-2.04 | S.1 |
 | S-4.01 | Kani: scrub round-trip | E-4 | 1 | 5 | draft | — | S.5 |
@@ -52,10 +53,10 @@ status: draft
 | S-6.02 | `diff` subcommand core | E-6 | 2 | 5 | draft | S-6.01 | S.9 + new |
 | S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | draft | S-6.02 | S.8 |
 
-**Total points:** 123 (Wave 1: ~86, Wave 2: ~24, Wave 3: ~13)
-**Total stories:** 37 (Wave 1: 29, Wave 2: 6, Wave 3: 2)
-**Math check:** E-1=14, E-2=32, E-3=20, E-4=18, E-5=24, E-6=15 → 123.
-**Story-count check:** E-1=6, E-2=12, E-3=5, E-4=4, E-5=7, E-6=3 → 37.
+**Total points:** 125 (Wave 1: ~88, Wave 2: ~24, Wave 3: ~13)
+**Total stories:** 38 (Wave 1: 30, Wave 2: 6, Wave 3: 2)
+**Math check:** E-1=14, E-2=32, E-3=22, E-4=18, E-5=24, E-6=15 → 125.
+**Story-count check:** E-1=6, E-2=12, E-3=6, E-4=4, E-5=7, E-6=3 → 38.
 
 ## Epic rollup
 
@@ -63,7 +64,7 @@ status: draft
 |---|---:|---:|---|
 | E-1 spec hygiene | 6 | 14 | Close ASR-001..007 + L-P0-001 + S7 trigger + ADR backfill + BC-AUDIT formalization |
 | E-2 detection | 12 | 32 | 9 new detectors + DNP3 parser + OUI refresh + cred_events cap + port-table test + recon-scan rollup fix |
-| E-3 perf/robustness | 5 | 20 | Criterion + prompt evals + mutation + fuzz + codecov coverage |
+| E-3 perf/robustness | 6 | 22 | Criterion + prompt evals + mutation + fuzz + codecov coverage + macOS CI flake fix |
 | E-4 Kani | 4 | 18 | Four proofs covering privacy invariant |
 | E-5 UX + AI hardening | 7 | 24 | Progress feedback + heartbeat + AI second-pass + invocation hardening + report visual polish + brand application + collapsible finding cards |
 | E-6 diff | 3 | 15 | Map merge + diff core + renderer |
