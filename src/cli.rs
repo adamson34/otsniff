@@ -700,6 +700,36 @@ fn run_unscrub(args: UnscrubArgs) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC-005 regression-lockdown: ot_or_default(&[]) must return exactly
+    /// the three IPv4 RFC1918 ranges — no IPv6, no extras, no missing.
+    #[test]
+    fn ot_or_default_empty_input_returns_only_ipv4_rfc1918() {
+        let result = ot_or_default(&[]);
+        assert_eq!(result.len(), 3, "expected exactly 3 default OT subnets, got {}", result.len());
+        let expected: Vec<IpNet> = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+            .iter()
+            .map(|s| s.parse::<IpNet>().unwrap())
+            .collect();
+        assert_eq!(result, expected, "default OT subnets do not match the three RFC1918 ranges");
+        for net in &result {
+            assert!(
+                matches!(net, IpNet::V4(_)),
+                "default OT subnet {} is not IPv4; AC-005 requires IPv4-only RFC1918 defaults",
+                net
+            );
+        }
+        assert_eq!(
+            result.iter().filter(|n| matches!(n, IpNet::V6(_))).count(),
+            0,
+            "one or more default OT subnets are IPv6; AC-005 requires IPv4-only RFC1918 defaults"
+        );
+    }
+}
+
 fn run_rules(args: RulesArgs) -> Result<()> {
     let format = match args.format.as_str() {
         "md" | "markdown" => crate::rule_catalog::CatalogFormat::Markdown,
