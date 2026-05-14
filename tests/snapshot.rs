@@ -2132,3 +2132,215 @@ fn render_html_tables_wrapped_in_collapsible_details() {
         "BC-8.01.003 AC-007: asset inventory <details> block must contain a <table>"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BC-1.05.003 / BC-3.05.004 — S-2.09 boundary.ntp_external detector tests
+// ---------------------------------------------------------------------------
+
+/// Build a minimal Observations with a single UDP/123 flow from `src` to `dst`.
+/// Both hosts are inserted into obs.hosts.  `src_in_ot` controls whether the
+/// source host carries the `in_ot_zone` flag.
+fn make_ntp_flow_obs(
+    src_str: &str,
+    dst_str: &str,
+    src_in_ot: bool,
+    dst_in_ot: bool,
+) -> Observations {
+    use std::collections::{BTreeMap, HashMap, HashSet};
+
+    let src = ip(src_str);
+    let dst = ip(dst_str);
+    let mut hosts = HashMap::new();
+    hosts.insert(
+        src,
+        HostObs {
+            ip: src,
+            macs: vec![[0xAA, 0xBB, 0xCC, 0x00, 0x01, 0x01]],
+            protocols: HashSet::from(["ntp".to_string()]),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 5,
+            bytes: 480,
+            in_ot_zone: src_in_ot,
+        },
+    );
+    hosts.insert(
+        dst,
+        HostObs {
+            ip: dst,
+            macs: vec![[0xAA, 0xBB, 0xCC, 0x00, 0x02, 0x01]],
+            protocols: HashSet::from(["ntp".to_string()]),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 5,
+            bytes: 480,
+            in_ot_zone: dst_in_ot,
+        },
+    );
+    let mut flows = HashMap::new();
+    flows.insert(
+        "ntp-1".to_string(),
+        FlowObs {
+            key: FlowKey {
+                src,
+                dst,
+                dst_port: 123,
+                proto: 17, // UDP
+            },
+            packets: 5,
+            bytes: 480,
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            label: Some("ntp".to_string()),
+            unique_src_ports: HashSet::from([50123]),
+        },
+    );
+
+    Observations {
+        hosts,
+        flows,
+        hostnames: BTreeMap::new(),
+        ..Default::default()
+    }
+}
+
+/// BC-1.05.003 / BC-3.05.004 / AC-001 — cross-zone NTP fires boundary.ntp_external.
+///
+/// Fixture: one UDP/123 flow from OT host 10.10.0.1 (inside 10.10.0.0/16) to
+/// external server 8.8.8.8 (outside all OT subnets), 5 packets.
+///
+/// Assertions:
+/// - detect() (via run_all) returns exactly one finding with id = "boundary.ntp_external"
+/// - severity = Medium
+/// - evidence is non-empty
+///
+/// Red Gate: panics on `todo!("S-2.09 implementer fills this in")` until the
+/// implementer wires real logic into ntp_external::detect.
+#[test]
+fn ntp_external_fires_on_cross_zone_ntp_flow() {
+    let obs = make_ntp_flow_obs("10.10.0.1", "8.8.8.8", true, false);
+    let subnets = ot_subnets(); // 10.10.0.0/16
+
+    let findings = run_all(&obs, &subnets);
+
+    let ntp_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "boundary.ntp_external")
+        .collect();
+
+    assert_eq!(
+        ntp_findings.len(),
+        1,
+        "boundary.ntp_external must fire exactly once when an OT host queries \
+         an external NTP server; got {} findings",
+        ntp_findings.len()
+    );
+
+    let f = ntp_findings[0];
+    assert_eq!(
+        f.id, "boundary.ntp_external",
+        "finding id must be boundary.ntp_external"
+    );
+    assert_eq!(
+        f.severity,
+        otsniff::findings::Severity::Medium,
+        "severity must be Medium per AC-001 / BC-1.05.003"
+    );
+    assert!(
+        !f.evidence.is_empty(),
+        "finding must carry at least one evidence line (AC-001)"
+    );
+}
+
+/// BC-1.05.003 / EC-001 — non-OT source must NOT trigger boundary.ntp_external.
+///
+/// Fixture: UDP/123 flow from 172.99.0.1 → 8.8.8.8. 172.99.0.0/16 is NOT inside
+/// RFC-1918 172.16.0.0/12 and is not inside the configured OT subnet
+/// (10.10.0.0/16), so this host is an IT/external host, not an OT device.
+///
+/// Assertion: run_all returns no boundary.ntp_external finding.
+///
+/// Red Gate: panics on todo!() until implemented.
+#[test]
+fn ntp_external_does_not_fire_for_non_ot_source() {
+    // 172.99.0.1: NOT inside 10.10.0.0/16 (the configured OT subnet) and
+    // not inside RFC-1918 172.16.0.0/12 — unambiguously non-OT.
+    let obs = make_ntp_flow_obs("172.99.0.1", "8.8.8.8", false, false);
+    let subnets = ot_subnets(); // 10.10.0.0/16
+
+    let findings = run_all(&obs, &subnets);
+
+    let ntp_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "boundary.ntp_external")
+        .collect();
+
+    assert!(
+        ntp_findings.is_empty(),
+        "boundary.ntp_external must NOT fire when the NTP source is not inside any \
+         configured OT subnet (EC-001); got {} findings",
+        ntp_findings.len()
+    );
+}
+
+/// BC-1.05.003 / EC-002 — intra-OT NTP (both src and dst inside OT subnet) must
+/// NOT trigger boundary.ntp_external.
+///
+/// Fixture: UDP/123 flow from 10.10.0.1 → 10.10.0.2. Both addresses fall inside
+/// 10.10.0.0/16. This is compliant in-zone NTP; no finding expected.
+///
+/// Assertion: run_all returns no boundary.ntp_external finding.
+///
+/// Red Gate: panics on todo!() until implemented.
+#[test]
+fn ntp_external_does_not_fire_for_intra_ot_traffic() {
+    // Both hosts inside 10.10.0.0/16 — no boundary crossing.
+    let obs = make_ntp_flow_obs("10.10.0.1", "10.10.0.2", true, true);
+    let subnets = ot_subnets(); // 10.10.0.0/16
+
+    let findings = run_all(&obs, &subnets);
+
+    let ntp_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "boundary.ntp_external")
+        .collect();
+
+    assert!(
+        ntp_findings.is_empty(),
+        "boundary.ntp_external must NOT fire when both src and dst are inside the OT \
+         subnet (EC-002 — compliant in-zone NTP); got {} findings",
+        ntp_findings.len()
+    );
+}
+
+/// BC-1.05.003 / EC-003 — multicast NTP destination (224.0.1.1) from an OT source
+/// must be flagged as a boundary crossing.
+///
+/// 224.0.1.1 is the IANA-assigned NTP multicast address. It is not inside
+/// any configured OT subnet (10.10.0.0/16), so a query from an OT host to
+/// this address crosses the OT/external boundary per the detector contract.
+///
+/// Assertion: run_all returns exactly one boundary.ntp_external finding.
+///
+/// Red Gate: panics on todo!() until implemented.
+#[test]
+fn ntp_external_flags_multicast_destination() {
+    // 224.0.1.1 is the IANA NTP multicast group — outside 10.10.0.0/16.
+    let obs = make_ntp_flow_obs("10.10.0.1", "224.0.1.1", true, false);
+    let subnets = ot_subnets(); // 10.10.0.0/16
+
+    let findings = run_all(&obs, &subnets);
+
+    let ntp_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "boundary.ntp_external")
+        .collect();
+
+    assert_eq!(
+        ntp_findings.len(),
+        1,
+        "boundary.ntp_external must fire for OT host → multicast NTP (224.0.1.1) \
+         because multicast is outside the OT subnet (EC-003); got {} findings",
+        ntp_findings.len()
+    );
+}
