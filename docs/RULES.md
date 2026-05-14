@@ -117,7 +117,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **Severity:** high
 - **Data source:** `s7_events (where engineering_class = true)`
 
-**Trigger.** Fires when S7Comm (Siemens S7-300/400/1200/1500 over tcp/102) traffic contains a function code we classify as engineering — PLC stop / start, block download / upload, password operations. S7Comm has no native authentication; S7-1500 adds Secure Communication only when explicitly enabled.
+**Trigger.** Fires when S7Comm (Siemens S7-300/400/1200/1500 over tcp/102) traffic contains a function code we classify as engineering — 0x05 Write Var, 0x1A-0x1C block download, 0x1D-0x1F block upload, 0x28 PLC Control (hot / cold restart sub-types), 0x29 PLC Stop. S7Comm has no native authentication; S7-1500 adds Secure Communication only when explicitly enabled.
 
 **References:**
 
