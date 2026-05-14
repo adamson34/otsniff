@@ -46,35 +46,32 @@ jobs:
   # worth having even if functional divergence between Linux and macOS
   # is rare for this codebase.
   #
-  # Root cause of the macOS flake (diagnosed empirically across PR #60
-  # and PR #61): `Swatinem/rust-cache@v2`'s cache restore step mutates
-  # something — likely either the runner's PATH or a binary placed in
-  # `~/.cargo/bin` — such that after restore, plain `cargo` resolves to
-  # `rustup-init` rather than the rustup-managed proxy installed by
-  # `dtolnay/rust-toolchain@stable`. The PATH guard in #61 confirmed
-  # the toolchain step's cargo resolution (`cargo 1.95.0 (f2d3ce0bd)`),
-  # then Swatinem ran "Cache restored successfully ... full match: true"
-  # and the next `cargo test` failed with the same rustup-init error.
-  #
-  # The fix is to skip PATH resolution entirely and call cargo by its
-  # absolute installed path: `$HOME/.cargo/bin/cargo`. The rustup proxy
-  # at that exact path is the one dtolnay/rust-toolchain installs and
-  # is unaffected by whatever Swatinem does to PATH.
-  #
-  # S-3.06 verification gate: 5 consecutive clean develop-push macOS
-  # runs starting from this commit's CI run.
+  # PATH guard step:
+  # On macOS GitHub runners, `cargo` (the rustup proxy binary) sometimes
+  # resolves to a stale `rustup-init` binary even after
+  # `dtolnay/rust-toolchain@stable` reports successful install, producing
+  # "error: unexpected argument 'test' found / Usage: rustup-init[EXE]".
+  # Symptom hit five times on this repo (PR #58 CI, post-#58 develop
+  # push, post-#59 develop push, post-#60 first attempt, post-#60 retry)
+  # despite the initial macos-14 pin in #60. PR runs against the runner's
+  # empty cache pass; develop pushes that hit the populated cache fail.
+  # The fix is to explicitly put `$HOME/.cargo/bin` (where rustup writes
+  # its proxy shims) at the front of GITHUB_PATH and verify cargo
+  # resolves correctly before running tests. Tracked end-to-end via
+  # S-3.06; this is option (b) from the spec.
   test-macos:
     name: Test (macos-14)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo test (absolute path, bypasses PATH-resolution flake)
+      - name: Force rustup-managed cargo to front of PATH
         run: |
-          echo "Resolved cargo: $(which cargo || echo none)"
-          "$HOME/.cargo/bin/cargo" --version
-          "$HOME/.cargo/bin/cargo" test --all-features
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo "Resolved cargo: $(which cargo || true)"
+          cargo --version
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-features
 
   msrv:
     name: MSRV (1.85.0)
