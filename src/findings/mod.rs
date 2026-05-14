@@ -8,6 +8,7 @@ pub mod dnp3_engineering;
 mod dns_resolver;
 mod engineering_commands;
 mod internet_egress;
+mod ntp_external;
 mod plaintext_creds;
 pub mod recon_scan;
 mod smbv1;
@@ -150,6 +151,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         stale_tls::METADATA,
         internet_egress::METADATA,
         dns_resolver::METADATA,
+        ntp_external::METADATA,
         recon_scan::METADATA,
         unexpected_protocols::METADATA,
     ]
@@ -173,6 +175,7 @@ pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     out.extend(smbv1::detect(obs));
     out.extend(stale_tls::detect(obs));
     out.extend(dns_resolver::detect(obs, ot_subnets));
+    out.extend(ntp_external::detect(obs, ot_subnets));
     out.extend(recon_scan::detect(obs, ot_subnets));
     out.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(b.id)));
     out

@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**14 rules.**
+**15 rules.**
 
 ## Index
 
@@ -22,6 +22,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`compat.stale_tls`](#compatstale_tls) | medium | Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1) |
 | [`egress.ot_to_internet`](#egressot_to_internet) | critical | Internet-bound traffic from OT subnets |
 | [`boundary.dns_resolver`](#boundarydns_resolver) | medium | DNS queries from OT to an out-of-zone resolver |
+| [`boundary.ntp_external`](#boundaryntp_external) | medium | OT host syncing time to public NTP |
 | [`recon.port_scan`](#reconport_scan) | medium | Port scan — source host probing many destinations or ports |
 | [`ot.unexpected_protocols`](#otunexpected_protocols) | medium | Non-OT protocols observed touching OT subnets |
 
@@ -190,6 +191,20 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **Data source:** `flows (dst_port = 53; src in OT, dst not in OT)`
 
 **Trigger.** Fires when at least one flow with `dst_port = 53` has a source IP inside a configured `--ot-subnet` and a destination IP that is NOT inside any configured OT subnet. Cross-zone DNS leaks query patterns to the IT side and trusts an external resolver's answers; both the resolution path and the DNS server itself should be in-zone under change control.
+
+**References:**
+
+- **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Network segmentation
+- **Spec** — Purdue Reference Model — boundary services
+
+## `boundary.ntp_external`
+
+**OT host syncing time to public NTP**
+
+- **Severity:** medium
+- **Data source:** `flows (dst_port = 123; src in OT, dst not in OT)`
+
+**Trigger.** Fires when at least one flow with `dst_port = 123` (UDP) has a source IP inside a configured `--ot-subnet` and a destination IP that is NOT inside any configured OT subnet. OT devices should sync time to an in-zone NTP server under change control; queries to external NTP servers (including public pool addresses) leak timing behaviour across the OT/IT boundary and introduce a dependency on the external network for a safety-critical function.
 
 **References:**
 
