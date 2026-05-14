@@ -1,7 +1,7 @@
 ---
 artifact_type: behavioral-contract-index
 project: otsniff
-generated: 2026-05-11
+generated: 2026-05-14
 status: draft (brownfield-recovered)
 total_bcs: 60
 origin: recovered
@@ -117,14 +117,14 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-AUDIT-002 format_mac upper-hex colon string for leak-detector match
 - BC-AUDIT-003 OtError variant-to-exit-code mapping completeness
 - BC-AUDIT-004 OtError chain-of-sources printing in main.rs
-- BC-AUDIT-005 DHCP 3-tier IP resolution (yiaddr / ciaddr / option 50)
-- BC-AUDIT-006 DHCP bounded option walk after magic-cookie validation
-- BC-AUDIT-007 S7 ROSCTR-driven header sizing
-- BC-AUDIT-008 dns_resolver evidence cap is 15
+- BC-AUDIT-005 DHCP option walk is bounded and length-checked
+- BC-AUDIT-006 DHCP 3-tier IP resolution (yiaddr / ciaddr / option 50)
+- BC-AUDIT-007 S7Comm header sizing depends on ROSCTR
+- BC-AUDIT-008 Evidence cap of 15 rows per finding (general invariant). Exception: `unexpected_protocols` caps at 5 per label (`src/findings/unexpected_protocols.rs` `bucket.len() < 5`), so total evidence rows can be up to `5 × labels_observed`
 - BC-AUDIT-009 unexpected_label port-to-label table (11 entries, see L-P0-001)
-- BC-AUDIT-010 internet_egress evidence cap is 15
-- BC-AUDIT-011 stale_tls evidence cap is 15
-- BC-AUDIT-012 engineering_commands evidence cap is 15
+- BC-AUDIT-010 internet_egress playbook branches on flow categories (DNS, NTP, tunnel ports)
+- BC-AUDIT-011 stale_tls is_stale range is 0x0300..=0x0302
+- BC-AUDIT-012 engineering_commands rolls up by (src, dst) pair
 - BC-AUDIT-013 ai::prompts sparse-capture refusal branch
 - BC-AUDIT-014 ClaudeCliProvider PATH pre-check
 - BC-AUDIT-015 report_md top-level structure ordering

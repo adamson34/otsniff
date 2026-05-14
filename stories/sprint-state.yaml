@@ -11,10 +11,14 @@ total_stories: 37
 stories:
   # ===== Wave 1 (no dependencies) =====
   S-1.01:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: null  # docs-only on factory-artifacts; no develop-branch worktree
     worktree: null
+    merge_sha: null  # no develop PR; committed directly to factory-artifacts
+    pr: null
+    completed_at: 2026-05-14T12:00:00Z
+    semantics: docs-only-on-factory-artifacts (no Rust code, no test infrastructure)
   S-1.02:
     status: pending
     wave: 1
