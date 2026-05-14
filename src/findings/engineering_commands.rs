@@ -378,6 +378,32 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     out
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC-006 Red Gate: S7_METADATA.trigger must NOT mention "password".
+    /// The word crept in as an erroneous classifier label ("password operations")
+    /// and must be removed so the trigger accurately lists only real S7Comm
+    /// engineering function codes (PLC stop/start, block download/upload).
+    /// This test will FAIL until the production string is corrected.
+    #[test]
+    fn s7_metadata_trigger_does_not_mention_password() {
+        assert!(
+            !S7_METADATA.trigger.contains("password"),
+            "S7_METADATA.trigger still mentions 'password': {}",
+            S7_METADATA.trigger
+        );
+        assert!(
+            S7_METADATA.trigger.contains("PLC stop")
+                || S7_METADATA.trigger.contains("block download")
+                || S7_METADATA.trigger.contains("upload"),
+            "S7_METADATA.trigger should list real engineering classifiers (PLC stop, block download, upload): {}",
+            S7_METADATA.trigger
+        );
+    }
+}
+
 fn pair_sources_str(by_pair: &BTreeMap<(IpAddr, IpAddr), Vec<String>>) -> String {
     let sources: std::collections::BTreeSet<IpAddr> = by_pair.keys().map(|(src, _)| *src).collect();
     format_ip_list(&sources.into_iter().collect::<Vec<_>>())
