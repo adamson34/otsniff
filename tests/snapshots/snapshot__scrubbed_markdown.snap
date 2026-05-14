@@ -1,6 +1,5 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 262
 expression: scrubbed
 ---
 # otsniff report
@@ -139,7 +138,7 @@ _id: `ics.modbus_writes`_
 name_001 (host_002) -> name_002 (host_003) : fc=0x1A (Request download)
 ```
 
-**Detection criteria.** Fires when S7Comm (Siemens S7-300/400/1200/1500 over tcp/102) traffic contains a function code we classify as engineering — PLC stop / start, block download / upload, password operations. S7Comm has no native authentication; S7-1500 adds Secure Communication only when explicitly enabled.
+**Detection criteria.** Fires when S7Comm (Siemens S7-300/400/1200/1500 over tcp/102) traffic contains a function code we classify as engineering — 0x05 Write Var, 0x1A-0x1C block download, 0x1D-0x1F block upload, 0x28 PLC Control (hot / cold restart sub-types), 0x29 PLC Stop. S7Comm has no native authentication; S7-1500 adds Secure Communication only when explicitly enabled.
 
 **Recommendation:** Limit which engineering workstations can talk to controllers on tcp/102. For S7-1500 / TIA Portal environments, set the controller access level to "no access (complete protection)" or "read access" and require known-fingerprint TLS via Secure Communication. For older S7-300/400, use switch ACLs and physically lock the keyswitch to RUN.
 
