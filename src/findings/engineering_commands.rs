@@ -73,10 +73,11 @@ pub const S7_METADATA: RuleMetadata = RuleMetadata {
     severity: Severity::High,
     trigger: "Fires when S7Comm (Siemens S7-300/400/1200/1500 over \
               tcp/102) traffic contains a function code we classify as \
-              engineering — PLC stop / start, block download / upload, \
-              password operations. S7Comm has no native authentication; \
-              S7-1500 adds Secure Communication only when explicitly \
-              enabled.",
+              engineering — 0x05 Write Var, 0x1A-0x1C block download, \
+              0x1D-0x1F block upload, 0x28 PLC Control (hot / cold \
+              restart sub-types), 0x29 PLC Stop. S7Comm has no native \
+              authentication; S7-1500 adds Secure Communication only \
+              when explicitly enabled.",
     data_source: &["s7_events (where engineering_class = true)"],
     references: &[
         Reference {
