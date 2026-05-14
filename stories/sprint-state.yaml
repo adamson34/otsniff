@@ -30,20 +30,26 @@ stories:
     completed_at: 2026-05-14T12:45:00Z
     semantics: docs-only-on-factory-artifacts (BC count drift from 60 → 69 + audit row separation)
   S-1.03:
-    status: in_progress
+    status: completed
     wave: 1
-    branch: null  # docs half on factory-artifacts; code half pending develop worktree
+    branch: feature/S-1.03-s7-trigger-and-cli-defaults
     worktree: null
     semantics: hybrid (PRD edits on factory-artifacts + code changes on develop)
+    completed_at: 2026-05-14T14:30:00Z
     docs_half:
       status: completed
       committed_at: 2026-05-14T13:15:00Z
       branch: factory-artifacts
+      merge_sha: 1563848
       covers: [AC-001, AC-002, AC-003, AC-004, AC-005]
     code_half:
-      status: pending
-      target_branch: feature/S-1.03-s7-trigger-and-cli-defaults
+      status: completed
+      branch: feature/S-1.03-s7-trigger-and-cli-defaults
+      merge_sha: 0830aa4
+      pr: 59
       covers: [AC-005 ot_or_default unit test, AC-006 S7_METADATA.trigger edit + unit test + RULES.md regen + snapshot]
+      ci: 7/7 green (no macOS flake retries)
+      review_cycles: 1 (APPROVE, 0 blocking findings, 1 nit)
   S-1.04:
     status: completed
     wave: 1
