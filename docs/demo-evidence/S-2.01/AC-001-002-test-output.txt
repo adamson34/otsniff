@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running unittests src/lib.rs (target/debug/deps/otsniff-...)
+
+running 4 tests
+test findings::unexpected_protocols::tests::unexpected_label_lookups_match_canonical_table ... ok
+test findings::unexpected_protocols::tests::unexpected_label_returns_none_for_non_tcp_udp ... ok
+test findings::unexpected_protocols::tests::unexpected_label_returns_none_for_unmapped_ports ... ok
+test findings::unexpected_protocols::tests::unexpected_label_distinct_label_set_is_exactly_eleven ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 0.00s
