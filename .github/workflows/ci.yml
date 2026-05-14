@@ -45,9 +45,20 @@ jobs:
   # pure Rust and we ship macOS binaries, so PR signal on macOS is
   # worth having even if functional divergence between Linux and macOS
   # is rare for this codebase.
+  #
+  # NB: pinned to `macos-14` (stopgap) rather than `macos-latest` because
+  # `macos-latest` (currently macOS 15 image) intermittently ships a
+  # broken rustup proxy that resolves `cargo` → `rustup-init`, causing
+  # `cargo test` to fail with "unexpected argument 'test' found" even
+  # though `dtolnay/rust-toolchain@stable` reports successful setup.
+  # Hit three times in 48 hours on this repo (PR #58 CI, develop push
+  # after #58, develop push after #59). Each cleared on rerun. Full
+  # investigation tracked as S-3.06 — the spec requires a write-up plus
+  # a 5-consecutive-clean-runs verification gate; this pin is the
+  # immediate stopgap so develop-pushes stop failing.
   test-macos:
-    name: Test (macos-latest)
-    runs-on: macos-latest
+    name: Test (macos-14)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
