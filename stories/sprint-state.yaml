@@ -67,10 +67,14 @@ stories:
     pr: 44
     completed_at: 2026-05-12T14:09:37Z
   S-2.02:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-2.02-cap-cred-events-dedup
     worktree: null
+    merge_sha: 19ee8b0
+    pr: 67
+    merged_at: 2026-05-15T18:41:00Z
+    notes: "3 NITPICK findings from review noted as cosmetic follow-ups (cred_events_index doc, test accessor consistency, cast-style)."
   S-2.03:
     status: completed
     wave: 1

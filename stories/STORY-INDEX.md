@@ -21,7 +21,7 @@ status: draft
 | S-1.05 | Formalize BC-AUDIT into BCs | E-1 | 1 | 3 | merged (factory-artifacts, docs-only; promoted from wave 2) | S-1.01, S-1.02 | docs |
 | S-1.06 | ADR-0008..0012 backfill | E-1 | 1 | 3 | merged (#44, 0a1bb8b) | — | docs |
 | S-2.01 | Port-to-label unit test | E-2 | 1 | 1 | merged (#58, 2caa283) | S-1.04 | S.3 |
-| S-2.02 | Cap `cred_events` dedup | E-2 | 1 | 2 | ready | — | S.1 |
+| S-2.02 | Cap `cred_events` dedup | E-2 | 1 | 2 | completed (#67, 19ee8b0) | — | S.1 |
 | S-2.03 | OUI table refresh | E-2 | 1 | 2 | merged (#48, b34db4d) | — | S.2 |
 | S-2.04 | DNP3 parser + detector | E-2 | 1 | 5 | merged (#47, 6de71c8) | — | S.1, S.3 |
 | S-2.05 | `creds.ldap_simple_bind` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
