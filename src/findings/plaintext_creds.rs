@@ -274,6 +274,7 @@ mod tests {
             dst: ip(dst),
             dst_port: 23,
             kind: CredKind::TelnetSession,
+            count: 1,
             note: "Telnet session (cleartext)".to_string(),
         }
     }
@@ -317,6 +318,7 @@ mod tests {
                     dst: ip("10.0.0.5"),
                     dst_port: 21,
                     kind: CredKind::FtpAuth,
+                    count: 1,
                     note: "USER admin".to_string(),
                 },
             ],

@@ -111,6 +111,11 @@ pub struct CredEvent {
     pub dst: IpAddr,
     pub dst_port: u16,
     pub kind: CredKind,
+    /// Number of times this (src, dst, dst_port, kind) tuple has been
+    /// observed. Initialized to 1; incremented by the dedup helper
+    /// `Observer::record_cred_event` when a duplicate key is seen.
+    /// See BC-1.03.007 (S-2.02).
+    pub count: u32,
     /// Internal-only diagnostic captured from the wire. May contain
     /// CIP-011 High-BCSI bytes (literal `USER` lines, b64-encoded
     /// HTTP Basic credentials). MUST NOT reach any rendered output
@@ -288,6 +293,12 @@ impl Observer {
         }
     }
 
+    /// Record a credential observation, deduplicating by (src, dst, dst_port, kind).
+    /// Stub: not yet implemented.
+    fn record_cred_event(&mut self, _event: CredEvent) {
+        todo!("S-2.02: dedup logic landing in step 4")
+    }
+
     fn update_host(&mut self, ip: IpAddr, mac: [u8; 6], pkt: &Packet, bytes: u64) {
         let in_ot = self.in_ot(ip);
         let proto_label = classify_flow(pkt);
@@ -388,6 +399,7 @@ impl Observer {
                 dst: pkt.dst_ip,
                 dst_port: 21,
                 kind: CredKind::FtpAuth,
+                count: 1,
                 note: first_line(payload, 80),
             });
         }
@@ -400,6 +412,7 @@ impl Observer {
                 dst: pkt.dst_ip,
                 dst_port: 23,
                 kind: CredKind::TelnetSession,
+                count: 1,
                 note: "Telnet session (cleartext)".to_string(),
             });
         }
@@ -413,6 +426,7 @@ impl Observer {
                     dst: pkt.dst_ip,
                     dst_port: pkt.dst_port,
                     kind: CredKind::HttpBasic,
+                    count: 1,
                     note: extract_line(payload, off, 120),
                 });
             }
@@ -504,6 +518,7 @@ impl Observer {
                             dst: pkt.dst_ip,
                             dst_port: pkt.dst_port,
                             kind: CredKind::Snmpv1v2c,
+                            count: 1,
                             note: format!(
                                 "SNMP{} (plaintext community string on the wire)",
                                 if v == 0 { "v1" } else { "v2c" }
