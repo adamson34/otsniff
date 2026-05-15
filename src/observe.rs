@@ -127,7 +127,7 @@ pub struct CredEvent {
     pub note: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum CredKind {
     FtpAuth,
     TelnetSession,
@@ -154,6 +154,12 @@ pub struct Observations {
     pub s7_events: Vec<S7Event>,
     pub dnp3_events: Vec<Dnp3Event>,
     pub cred_events: Vec<CredEvent>,
+    /// Dedup index for `cred_events`. Maps `(src, dst, dst_port, kind)` to the
+    /// index into `cred_events`. Populated and maintained exclusively by
+    /// `Observer::record_cred_event` (BC-1.03.007). Skipped during serialization
+    /// because it is internal bookkeeping, not report content.
+    #[serde(skip)]
+    pub cred_events_index: HashMap<(IpAddr, IpAddr, u16, CredKind), usize>,
     pub external_flows: HashMap<String, ExternalFlow>,
     /// Map of (src, dst, dst_port) → SMBv1 packet count. Bounded by
     /// distinct host pairs, not raw packet count, so a busy SMB
@@ -293,10 +299,23 @@ impl Observer {
         }
     }
 
-    /// Record a credential observation, deduplicating by (src, dst, dst_port, kind).
-    /// Stub: not yet implemented.
-    pub fn record_cred_event(&mut self, _event: CredEvent) {
-        todo!("S-2.02: dedup logic landing in step 4")
+    /// Record a credential observation, deduplicating by `(src, dst, dst_port, kind)`.
+    ///
+    /// BC-1.03.007: if a `CredEvent` with the same key already exists in
+    /// `cred_events`, its `count` is incremented (saturating at `u32::MAX`)
+    /// rather than appending a new entry. This keeps `cred_events.len()`
+    /// proportional to unique (src, dst, port, kind) tuples, not raw packet
+    /// count.
+    pub fn record_cred_event(&mut self, event: CredEvent) {
+        let key = (event.src, event.dst, event.dst_port, event.kind);
+        if let Some(&idx) = self.obs.cred_events_index.get(&key) {
+            self.obs.cred_events[idx].count =
+                self.obs.cred_events[idx].count.saturating_add(event.count);
+        } else {
+            let idx = self.obs.cred_events.len();
+            self.obs.cred_events_index.insert(key, idx);
+            self.obs.cred_events.push(event);
+        }
     }
 
     /// Returns a shared reference to the accumulated observations.
@@ -399,7 +418,7 @@ impl Observer {
         if pkt.dst_port == 21
             && (starts_with_ci(payload, b"USER ") || starts_with_ci(payload, b"PASS "))
         {
-            self.obs.cred_events.push(CredEvent {
+            self.record_cred_event(CredEvent {
                 ts: pkt.ts,
                 src: pkt.src_ip,
                 dst: pkt.dst_ip,
@@ -412,7 +431,7 @@ impl Observer {
 
         // Telnet — any payload to/from port 23 is plaintext by definition.
         if (pkt.dst_port == 23 || pkt.src_port == 23) && !payload.is_empty() {
-            self.obs.cred_events.push(CredEvent {
+            self.record_cred_event(CredEvent {
                 ts: pkt.ts,
                 src: pkt.src_ip,
                 dst: pkt.dst_ip,
@@ -426,7 +445,7 @@ impl Observer {
         // HTTP basic
         if pkt.dst_port == 80 || pkt.dst_port == 8080 {
             if let Some(off) = find_subseq(payload, b"Authorization: Basic ") {
-                self.obs.cred_events.push(CredEvent {
+                self.record_cred_event(CredEvent {
                     ts: pkt.ts,
                     src: pkt.src_ip,
                     dst: pkt.dst_ip,
@@ -518,7 +537,7 @@ impl Observer {
             if let Some(version_off) = find_subseq(&pkt.payload, &[0x02, 0x01]) {
                 if let Some(&v) = pkt.payload.get(version_off + 2) {
                     if v == 0x00 || v == 0x01 {
-                        self.obs.cred_events.push(CredEvent {
+                        self.record_cred_event(CredEvent {
                             ts: pkt.ts,
                             src: pkt.src_ip,
                             dst: pkt.dst_ip,
@@ -862,8 +881,7 @@ mod tests {
             "BC-1.03.007: identical key must dedup to one entry"
         );
         assert_eq!(
-            cred_events[0].count,
-            3,
+            cred_events[0].count, 3,
             "BC-1.03.007: count must equal the number of duplicate observations"
         );
     }
@@ -884,8 +902,7 @@ mod tests {
             "BC-1.03.007: 1000 identical pushes must collapse to one entry"
         );
         assert_eq!(
-            cred_events[0].count,
-            1000,
+            cred_events[0].count, 1000,
             "BC-1.03.007: count must equal 1000 after 1000 duplicate observations"
         );
     }

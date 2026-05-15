@@ -206,6 +206,7 @@ fn build_fixture() -> Observations {
             m.insert(ip("10.10.0.20"), "PLC-LINE3".to_string());
             m
         },
+        cred_events_index: HashMap::new(),
     }
 }
 
