@@ -157,11 +157,12 @@ stories:
     worktree: null
     cycle_target: v0.4.1-patch
   S-3.06:
-    status: deferred
+    status: pending
     wave: 1
     branch: null
     worktree: null
     cycle_target: v0.4.1-patch
+    notes: "Pulled forward from v0.4.1-patch 2026-05-15; investigation complete, fix chosen (option b'': drop Swatinem/rust-cache@v2 on macOS only); ready for delivery."
     investigation:
       status: complete
       attempts:

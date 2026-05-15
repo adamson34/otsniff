@@ -35,7 +35,7 @@ status: draft
 | S-3.01 | Criterion + hyperfine perf regression | E-3 | 1 | 3 | draft | — | S.0,1,3, build |
 | S-3.02 | Prompt eval harness | E-3 | 1 | 5 | draft | — | S.6 |
 | S-3.05 | codecov coverage reporting (v0.4.1 patch) | E-3 | 1 | 2 | draft | — | build |
-| S-3.06 | macOS CI rustup-init flake fix (v0.4.1 patch) | E-3 | 1 | 2 | draft | — | build |
+| S-3.06 | macOS CI rustup-init flake fix (v0.4.1 patch) | E-3 | 1 | 2 | ready | — | build |
 | S-3.03 | Mutation testing CI | E-3 | 2 | 5 | draft | S-3.01 | build |
 | S-3.04 | Fuzz harnesses for parsers | E-3 | 2 | 5 | draft | S-2.04 | S.1 |
 | S-4.01 | Kani: scrub round-trip | E-4 | 1 | 5 | draft | — | S.5 |
