@@ -157,12 +157,15 @@ stories:
     worktree: null
     cycle_target: v0.4.1-patch
   S-3.06:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: fix/S-3.06-drop-swatinem-macos
     worktree: null
+    merge_sha: e425733
+    pr: 66
+    merged_at: 2026-05-15T17:12:47Z
     cycle_target: v0.4.1-patch
-    notes: "Pulled forward from v0.4.1-patch 2026-05-15; investigation complete, fix chosen (option b'': drop Swatinem/rust-cache@v2 on macOS only); ready for delivery."
+    notes: "5-run post-merge verification deferred per AC-002 plan; run 25931099632 = 1/5 PASS. Fix: drop Swatinem/rust-cache@v2 from test-macos job (option b'')."
     investigation:
       status: complete
       attempts:
@@ -172,12 +175,6 @@ stories:
         - {pr: 63, hypothesis: "rustup default stable after cache restore", outcome: "rustup binary is also rustup-init bytes; no in-band repair", state: closed-unmerged}
         - {pr: 64, hypothesis: "revert pr-62 to restore rerun-clears-it workaround", outcome: "success", state: merged}
       root_cause: "Swatinem/rust-cache@v2 cache restore replaces ALL binaries in $HOME/.cargo/bin/ with rustup-init bytes on macOS. No in-band repair possible — the tools needed to fix it are themselves corrupted."
-    remaining:
-      - "Option (b''): drop Swatinem/rust-cache@v2 on macOS job only (~90s slower; eliminates cache-corruption vector)"
-      - "Option (c): replace dtolnay+Swatinem with actions-rust-lang/setup-rust-toolchain"
-    current_develop_state:
-      ci_workflow: bare `cargo test --all-features` invocation
-      flake_behavior: PR CI always passes (empty cache); develop pushes intermittently fail and need manual rerun-clears-it
   S-4.01:
     status: pending
     wave: 1

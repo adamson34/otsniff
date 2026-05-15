@@ -104,3 +104,9 @@ Human approval gate. After approval:
 2. `/vsdd-factory:phase-3-tdd-implementation` — begin Wave 1 dispatch.
    Honour the Serialization Plan in `.factory/stories/dependency-graph.md`
    for the 4 hot files.
+
+## Phase 3 delivery log
+
+| Story | PR | Merge SHA | Merged At | AC Status |
+|---|---|---|---|---|
+| S-3.06 macOS CI flake fix | #66 | e425733 | 2026-05-15T17:12:47Z | AC-001/003 PASS; AC-002 1/5 (deferred) |
