@@ -51,7 +51,7 @@ else
   #  - do NOT contain the word TODO
   #  - do NOT contain the header labels (Date / Trigger / Run ID / Runner)
   data_rows=$(grep -E '^\|' "${DOC}" 2>/dev/null \
-    | { grep -v '^\|[-| ]*$' || true; } \
+    | { grep -vE '^\|[-| ]*$' || true; } \
     | { grep -v 'TODO' || true; } \
     | { grep -v -E '^\| *(Date|Trigger|Run ID|Runner)' || true; } \
     | wc -l \
