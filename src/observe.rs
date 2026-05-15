@@ -295,8 +295,14 @@ impl Observer {
 
     /// Record a credential observation, deduplicating by (src, dst, dst_port, kind).
     /// Stub: not yet implemented.
-    fn record_cred_event(&mut self, _event: CredEvent) {
+    pub fn record_cred_event(&mut self, _event: CredEvent) {
         todo!("S-2.02: dedup logic landing in step 4")
+    }
+
+    /// Returns a shared reference to the accumulated observations.
+    /// Used by integration tests that cannot access the private `obs` field.
+    pub fn observations(&self) -> &Observations {
+        &self.obs
     }
 
     fn update_host(&mut self, ip: IpAddr, mac: [u8; 6], pkt: &Packet, bytes: u64) {
@@ -821,5 +827,91 @@ mod tests {
         assert!(!has_smb1_magic(&[0xFF, 0x53, 0x4D], 0));
         assert!(!has_smb1_magic(&[], 0));
         assert!(!has_smb1_magic(&[0xFF, 0x53, 0x4D, 0x42], 4));
+    }
+
+    // -------------------------------------------------------------------------
+    // S-2.02 / BC-1.03.007: cred_events dedup tests
+    // -------------------------------------------------------------------------
+
+    fn make_ftp_event() -> CredEvent {
+        CredEvent {
+            ts: Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap(),
+            src: "10.0.0.1".parse().unwrap(),
+            dst: "10.0.0.2".parse().unwrap(),
+            dst_port: 21,
+            kind: CredKind::FtpAuth,
+            count: 1,
+            note: "USER admin".to_string(),
+        }
+    }
+
+    /// BC-1.03.007 (AC-001-a): identical (src, dst, dst_port, kind) tuples must
+    /// collapse to a single entry with count == number of observations.
+    #[test]
+    fn test_bc_1_03_007_record_cred_event_dedups_same_key() {
+        let mut obs = Observer::new(vec![]);
+        let event = make_ftp_event();
+        obs.record_cred_event(event.clone());
+        obs.record_cred_event(event.clone());
+        obs.record_cred_event(event.clone());
+
+        let cred_events = &obs.obs.cred_events;
+        assert_eq!(
+            cred_events.len(),
+            1,
+            "BC-1.03.007: identical key must dedup to one entry"
+        );
+        assert_eq!(
+            cred_events[0].count,
+            3,
+            "BC-1.03.007: count must equal the number of duplicate observations"
+        );
+    }
+
+    /// BC-1.03.007 (AC-001-b): same dedup invariant holds for N=1000 repeated
+    /// observations of the same key.
+    #[test]
+    fn test_bc_1_03_007_record_cred_event_property_n_duplicates() {
+        let mut obs = Observer::new(vec![]);
+        let event = make_ftp_event();
+        for _ in 0..1000 {
+            obs.record_cred_event(event.clone());
+        }
+        let cred_events = &obs.obs.cred_events;
+        assert_eq!(
+            cred_events.len(),
+            1,
+            "BC-1.03.007: 1000 identical pushes must collapse to one entry"
+        );
+        assert_eq!(
+            cred_events[0].count,
+            1000,
+            "BC-1.03.007: count must equal 1000 after 1000 duplicate observations"
+        );
+    }
+
+    /// EC-001: events with the same (src, dst, port) but different kind must
+    /// NOT be collapsed — they are distinct credential types.
+    #[test]
+    fn test_bc_1_03_007_record_cred_event_distinct_kinds_not_deduped() {
+        let mut obs = Observer::new(vec![]);
+        let ftp = CredEvent {
+            kind: CredKind::FtpAuth,
+            dst_port: 21,
+            ..make_ftp_event()
+        };
+        let snmp = CredEvent {
+            kind: CredKind::Snmpv1v2c,
+            dst_port: 161,
+            ..make_ftp_event()
+        };
+        obs.record_cred_event(ftp);
+        obs.record_cred_event(snmp);
+        let cred_events = &obs.obs.cred_events;
+        assert_eq!(
+            cred_events.len(),
+            2,
+            "EC-001: distinct kinds must not collapse to one entry"
+        );
     }
 }
