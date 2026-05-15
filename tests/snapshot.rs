@@ -180,6 +180,7 @@ fn build_fixture() -> Observations {
             dst: ip("10.10.0.20"),
             dst_port: 23,
             kind: CredKind::TelnetSession,
+            count: 1,
             note: "Telnet session (cleartext)".to_string(),
         }],
         external_flows,
@@ -205,6 +206,7 @@ fn build_fixture() -> Observations {
             m.insert(ip("10.10.0.20"), "PLC-LINE3".to_string());
             m
         },
+        cred_events_index: HashMap::new(),
     }
 }
 
@@ -646,6 +648,7 @@ fn cred_event_note_must_not_reach_any_rendered_output() {
         dst: ip("10.10.0.20"),
         dst_port: 21,
         kind: CredKind::FtpAuth,
+        count: 1,
         note: format!("USER {canary}"),
     });
     let inventory = build_inventory(&obs);
