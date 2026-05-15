@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-14
 status: draft (brownfield-recovered)
-total_bcs: 84  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs)
+total_bcs: 85  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -16,7 +16,7 @@ deviations:
 
 # Behavioral Contracts — Master Index
 
-84 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
+85 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
 named `BC-AUDIT-NNN` contracts (Phase 0 brownfield audit) were
 promoted to first-class numbered BCs in S-1.05 (v0.4.0); the legacy
 IDs survive as aliases at the bottom of this file for traceability
@@ -49,6 +49,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-1.03.002 Telnet session observation (HIGH)
 - BC-1.03.003 HTTP Basic credential observation (HIGH)
 - BC-1.03.004 SNMPv1/v2c credential observation (HIGH)
+- BC-1.03.007 `cred_events` deduplicated at observation time by `(src, dst, dst_port, kind)`; duplicate increments `count: u32` (saturating); entry not appended (HIGH, added S-2.02 v0.4.0)
 - BC-1.04.001 SMBv1 packet observation (HIGH)
 - BC-1.04.002 TLS ClientHello version capture (HIGH)
 - BC-1.05.001 External egress aggregation (HIGH)
@@ -176,16 +177,16 @@ numbered space (their HIGH tags are now inline).
 
 | Bucket | Count |
 |---|---:|
-| Numbered BCs, HIGH    | 82 |
+| Numbered BCs, HIGH    | 83 |
 | Numbered BCs, MEDIUM  | 2 |
 | Numbered BCs, LOW     | 0 |
-| **Grand total**       | **84** |
+| **Grand total**       | **85** |
 
-**Verification:** `grep -cE '\(HIGH[,)]' BC-INDEX.md` must equal 82;
+**Verification:** `grep -cE '\(HIGH[,)]' BC-INDEX.md` must equal 83;
 `grep -cE '\(MEDIUM[,)]' BC-INDEX.md` must equal 2;
 `grep -c '^- BC-AUDIT-' BC-INDEX.md` must equal 0 (legacy IDs live
 in the alias table, never as numbered-list bullets);
-`grep -cE '^- BC-[0-9]\.' BC-INDEX.md` must equal 84.
+`grep -cE '^- BC-[0-9]\.' BC-INDEX.md` must equal 85.
 
 ## Open Question BCs (coverage gaps, not yet specified)
 
