@@ -29,7 +29,9 @@ unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            let new = ALLOCATED.fetch_add(layout.size(), Ordering::SeqCst).wrapping_add(layout.size());
+            let new = ALLOCATED
+                .fetch_add(layout.size(), Ordering::SeqCst)
+                .wrapping_add(layout.size());
             PEAK.fetch_max(new, Ordering::SeqCst);
         }
         ptr
