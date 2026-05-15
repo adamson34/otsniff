@@ -10,7 +10,7 @@
 Command:
 
 ```
-git -C /Users/lukeadamson/1898/otsniff/.factory log --oneline -5 | grep -i "BC-1.03.007"
+git -C .factory log --oneline -5 | grep -i "BC-1.03.007"
 ```
 
 Output:
@@ -26,7 +26,7 @@ daced54 factory(phase-3): register BC-1.03.007 (S-2.02)
 Command:
 
 ```
-grep -n "BC-1.03.007" /Users/lukeadamson/1898/otsniff/.factory/specs/behavioral-contracts/BC-INDEX.md
+grep -n "BC-1.03.007" .factory/specs/behavioral-contracts/BC-INDEX.md
 ```
 
 Output:

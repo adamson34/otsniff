@@ -36,10 +36,10 @@ Command (relevant tail):
 cargo test --test memory_bound --release -- --nocapture 2>&1 | tail -25
 ```
 
-Output:
+Output (absolute path scrubbed to `<REPO_ROOT>` for POL-12 compliance; captured from a per-story worktree):
 
 ```
-   Compiling otsniff v0.4.0-dev.1 (/Users/lukeadamson/1898/otsniff/.worktrees/S-2.02)
+   Compiling otsniff v0.4.0-dev.1 (<REPO_ROOT>)
     Finished `release` profile [optimized] target(s) in 2.38s
      Running tests/memory_bound.rs (target/release/deps/memory_bound-e94ae93843883cad)
 
