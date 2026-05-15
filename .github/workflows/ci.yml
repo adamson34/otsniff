@@ -70,7 +70,9 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           echo "Resolved cargo: $(which cargo || true)"
           cargo --version
-      - uses: Swatinem/rust-cache@v2
+      # Cache step omitted per S-3.06 option (b''): the rust-cache action's
+      # restore on macOS replaces ~/.cargo/bin/* with rustup-init bytes.
+      # Trade-off: +90s cold compile; eliminates the cache-corruption vector.
       - run: cargo test --all-features
 
   msrv:
