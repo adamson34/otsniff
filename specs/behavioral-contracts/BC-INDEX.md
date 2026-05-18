@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 87  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005
+total_bcs: 89  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -16,7 +16,7 @@ deviations:
 
 # Behavioral Contracts — Master Index
 
-87 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
+89 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
 named `BC-AUDIT-NNN` contracts (Phase 0 brownfield audit) were
 promoted to first-class numbered BCs in S-1.05 (v0.4.0); the legacy
 IDs survive as aliases at the bottom of this file for traceability
@@ -50,6 +50,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-1.03.003 HTTP Basic credential observation (HIGH)
 - BC-1.03.004 SNMPv1/v2c credential observation (HIGH)
 - BC-1.03.005 LDAP simple-bind observation: BER-encoded BindRequest on tcp/389 or tcp/3268 with version 3 and SimpleAuthentication choice (tag 0x80); `anonymous: bool` set when DN + password are both empty (EC-003); STARTTLS state tracked per flow by observer (HIGH, added S-2.05 v0.4.0)
+- BC-1.03.006 NTLMSSP NEGOTIATE recognized in TCP payloads on ports 445/139/80/443/8080/135; signature scan via `windows(8)` then full recognizer validates MessageType=1 and flags; classified V1 if NTLM bit (0x00000200) set and NTLM2_KEY (0x00080000) unset, V2 if NTLM2_KEY set; emits NtlmEvent (HIGH, added S-2.06 v0.4.0)
 - BC-1.03.007 `cred_events` deduplicated at observation time by `(src, dst, dst_port, kind)`; duplicate increments `count: u32` (saturating); entry not appended (HIGH, added S-2.02 v0.4.0)
 - BC-1.04.001 SMBv1 packet observation (HIGH)
 - BC-1.04.002 TLS ClientHello version capture (HIGH)
@@ -77,6 +78,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-3.04.001 `compat.smbv1` fires on SMBv1 observations (HIGH)
 - BC-3.04.002 `compat.stale_tls` filters by legacy_version (HIGH)
 - BC-3.04.003 `stale_tls::is_stale` inclusive range is exactly 0x0300..=0x0302; 0x0303 (TLS 1.2) and 0x0304 (TLS 1.3) explicitly pass the filter (HIGH, promoted from BC-AUDIT-011 in S-1.05)
+- BC-3.04.004 `compat.ntlmv1` fires at High for NTLMv1 events; not for V2 (EC-001); rolls up by `(src, dst)` pair; evidence capped at 5 samples per finding (HIGH, added S-2.06 v0.4.0)
 - BC-3.05.001 `boundary.dns_resolver` cross-zone filter (HIGH)
 - BC-3.05.002 `ot.unexpected_protocols` no-fly list (HIGH, **B.6 corrected** — 11 labels + src OR dst predicate)
 - BC-3.05.003 `unexpected_label` port-to-label table contains exactly 11 entries: smtp, bittorrent, rtmp, apns, gcm, stun, sip, irc, openvpn, teamviewer, anydesk (HIGH, promoted from BC-AUDIT-009 in S-1.05; locked by S-2.01 regression tests)
