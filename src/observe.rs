@@ -135,6 +135,35 @@ pub enum CredKind {
     Snmpv1v2c,
 }
 
+/// NTLM protocol version inferred from the NEGOTIATE_MESSAGE flags field.
+///
+/// `V1` — `NTLMSSP_NEGOTIATE_NTLM` (bit 9) is set and
+///        `NTLMSSP_NEGOTIATE_NTLM2_KEY` (bit 19) is unset.
+/// `V2` — both `NTLMSSP_NEGOTIATE_NTLM` and `NTLMSSP_NEGOTIATE_NTLM2_KEY`
+///        are set.
+///
+/// See S-2.06 AC-001 (BC-1.03.006).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum NtlmVersion {
+    V1,
+    V2,
+}
+
+/// One NTLMSSP NEGOTIATE_MESSAGE (message type 1) observed in an SMB, HTTP,
+/// or RPC payload.
+///
+/// Populated by `Observer::observe_tcp` when the `NTLMSSP\0` signature is
+/// found in a TCP payload and the flags field is decoded. See S-2.06
+/// AC-001 (BC-1.03.006).
+#[derive(Debug, Clone, Serialize)]
+pub struct NtlmEvent {
+    pub ts: DateTime<Utc>,
+    pub src: IpAddr,
+    pub dst: IpAddr,
+    pub dst_port: u16,
+    pub version: NtlmVersion,
+}
+
 /// One LDAP `BindRequest` with `SimpleAuthentication` observed on the wire.
 ///
 /// Populated by `Observer::observe_tcp` for tcp/389 (and non-standard LDAP
@@ -175,6 +204,7 @@ pub struct Observations {
     pub enip_events: Vec<EnipEvent>,
     pub s7_events: Vec<S7Event>,
     pub dnp3_events: Vec<Dnp3Event>,
+    pub ntlm_events: Vec<NtlmEvent>,
     pub ldap_bind_events: Vec<LdapBindEvent>,
     pub cred_events: Vec<CredEvent>,
     /// Dedup index for `cred_events`. Maps `(src, dst, dst_port, kind)` to the

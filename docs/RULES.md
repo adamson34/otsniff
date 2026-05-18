@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**16 rules.**
+**17 rules.**
 
 ## Index
 
@@ -15,6 +15,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`creds.http_basic`](#credshttp_basic) | critical | HTTP Basic authentication over plaintext HTTP |
 | [`creds.snmp`](#credssnmp) | critical | SNMPv1 / SNMPv2c traffic (plaintext community strings) |
 | [`creds.ldap_simple_bind`](#credsldap_simple_bind) | critical | LDAP plaintext simple-bind observed |
+| [`compat.ntlmv1`](#compatntlmv1) | high | NTLMv1 authentication observed |
 | [`ics.modbus_writes`](#icsmodbus_writes) | high | Modbus engineering-class commands on the wire |
 | [`ics.cip_engineering`](#icscip_engineering) | high | EtherNet/IP engineering-class CIP services |
 | [`ics.s7_engineering`](#icss7_engineering) | high | S7Comm engineering-class commands on the wire |
@@ -97,6 +98,20 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 - **RFC** — RFC 4511 — Lightweight Directory Access Protocol (LDAP): The Protocol ([link](https://datatracker.ietf.org/doc/html/rfc4511))
 - **RFC** — RFC 4513 — LDAP Authentication Methods and Security Mechanisms (STARTTLS) ([link](https://datatracker.ietf.org/doc/html/rfc4513))
+
+## `compat.ntlmv1`
+
+**NTLMv1 authentication observed**
+
+- **Severity:** high
+- **Data source:** `ntlm_events`
+
+**Trigger.** S-2.06: TBD by implementer
+
+**References:**
+
+- **CWE** — CWE-916 — Use of Password Hash With Insufficient Computational Effort ([link](https://cwe.mitre.org/data/definitions/916.html))
+- **MITRE ATT&CK for ICS** — T0859 — Valid Accounts ([link](https://attack.mitre.org/techniques/T0859/))
 
 ## `ics.modbus_writes`
 
