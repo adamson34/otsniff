@@ -174,6 +174,7 @@ fn build_fixture() -> Observations {
             read_class: false,
         }],
         dnp3_events: vec![],
+        ldap_bind_events: Vec::new(),
         cred_events: vec![CredEvent {
             ts: fixed_ts(),
             src: ip("10.10.0.5"),

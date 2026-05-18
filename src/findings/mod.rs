@@ -8,6 +8,7 @@ pub mod dnp3_engineering;
 mod dns_resolver;
 mod engineering_commands;
 mod internet_egress;
+pub mod ldap_creds;
 mod ntp_external;
 mod plaintext_creds;
 pub mod recon_scan;
@@ -143,6 +144,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         plaintext_creds::TELNET_METADATA,
         plaintext_creds::HTTP_BASIC_METADATA,
         plaintext_creds::SNMP_METADATA,
+        ldap_creds::LDAP_METADATA,
         engineering_commands::MODBUS_METADATA,
         engineering_commands::ENIP_METADATA,
         engineering_commands::S7_METADATA,
@@ -168,6 +170,7 @@ pub fn metadata_for(id: &str) -> Option<RuleMetadata> {
 pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     let mut out = Vec::new();
     out.extend(plaintext_creds::detect(obs));
+    out.extend(ldap_creds::build_findings(obs));
     out.extend(internet_egress::detect(obs));
     out.extend(engineering_commands::detect(obs, ot_subnets));
     out.extend(dnp3_engineering::detect(obs, ot_subnets));

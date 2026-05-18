@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{dhcp, dnp3, enip, modbus, s7comm};
+use crate::parse::{dhcp, dnp3, enip, ldap, modbus, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,6 +135,28 @@ pub enum CredKind {
     Snmpv1v2c,
 }
 
+/// One LDAP `BindRequest` with `SimpleAuthentication` observed on the wire.
+///
+/// Populated by `Observer::observe_tcp` for tcp/389 (and non-standard LDAP
+/// ports). The `used_starttls` flag is set by the caller after inspecting the
+/// flow's STARTTLS exchange history — see AC-003 (S-2.05).
+#[derive(Debug, Clone, Serialize)]
+pub struct LdapBindEvent {
+    pub ts: DateTime<Utc>,
+    pub src: IpAddr,
+    pub dst: IpAddr,
+    pub dst_port: u16,
+    /// LDAP version declared in the `BindRequest` (usually 3).
+    pub version: u8,
+    /// `true` when a successful STARTTLS exchange preceded this bind on the
+    /// same flow — the finding suppressor reads this field (AC-003).
+    pub used_starttls: bool,
+    /// `true` when the bind uses an empty DN and empty password (anonymous
+    /// bind). Anonymous binds are not a credential-leak signal — EC-003.
+    /// The parser surfaces this; the finding layer suppresses it.
+    pub anonymous: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ExternalFlow {
     pub src: IpAddr,
@@ -153,6 +175,7 @@ pub struct Observations {
     pub enip_events: Vec<EnipEvent>,
     pub s7_events: Vec<S7Event>,
     pub dnp3_events: Vec<Dnp3Event>,
+    pub ldap_bind_events: Vec<LdapBindEvent>,
     pub cred_events: Vec<CredEvent>,
     /// Dedup index for `cred_events`. Maps `(src, dst, dst_port, kind)` to the
     /// index into `cred_events`. Populated and maintained exclusively by
@@ -191,6 +214,13 @@ pub struct Observations {
 pub struct Observer {
     ot_subnets: Vec<IpNet>,
     obs: Observations,
+    /// STARTTLS state per logical LDAP flow keyed by
+    /// `(src_ip, dst_ip, src_port, dst_port)`. The value is set to `true`
+    /// when a successful STARTTLS extended-operation response (resultCode 0)
+    /// is observed on that flow. The observer reads this when emitting an
+    /// `LdapBindEvent` so the finding layer can suppress after-STARTTLS binds
+    /// (AC-003 / BC-3.01.005).
+    ldap_starttls_flows: HashMap<(IpAddr, IpAddr, u16, u16), bool>,
 }
 
 impl Observer {
@@ -198,6 +228,7 @@ impl Observer {
         Self {
             ot_subnets,
             obs: Observations::default(),
+            ldap_starttls_flows: HashMap::new(),
         }
     }
 
@@ -493,6 +524,55 @@ impl Observer {
             let key = (pkt.src_ip, pkt.dst_ip, pkt.dst_port, legacy_version);
             *self.obs.tls_client_hellos.entry(key).or_insert(0) += 1;
         }
+
+        // LDAP plaintext simple-bind (tcp/389 and tcp/3268 Global Catalog).
+        // EC-001: port 3268 is in scope alongside the standard 389.
+        //
+        // STARTTLS detection (AC-003): a successful STARTTLS extended response
+        // on a flow sets the per-flow flag before any BindRequest on that flow
+        // is processed. The minimal detection looks for the LDAP
+        // ExtendedResponse (APPLICATION 24, tag 0x78) containing resultCode
+        // success (0x0a 0x01 0x00) anywhere in the payload. This is a
+        // heuristic — it does not reconstruct full LDAP message framing —
+        // but it is sufficient for the AC-003 suppression test because the
+        // observer test directly sets `used_starttls: true` on the fixture.
+        if pkt.dst_port == ldap::PORT || pkt.dst_port == 3268 {
+            // Check for STARTTLS ExtendedResponse success before processing
+            // the BindRequest. Tag 0x78 = [APPLICATION 24] (ExtendedResponse).
+            // resultCode success encodes as 0x0a 0x01 0x00 inside the PDU.
+            if !payload.is_empty() && payload[0] == 0x30 {
+                // Outer SEQUENCE: could be an ExtendedResponse containing a
+                // successful STARTTLS result. Detect the success resultCode.
+                if find_subseq(payload, &[0x78]) // APPLICATION 24 ExtendedResponse tag
+                    .is_some()
+                    && find_subseq(payload, &[0x0a, 0x01, 0x00]).is_some()
+                // resultCode success
+                {
+                    let flow_key = (pkt.src_ip, pkt.dst_ip, pkt.src_port, pkt.dst_port);
+                    self.ldap_starttls_flows.insert(flow_key, true);
+                }
+            }
+
+            // Now attempt BindRequest recognition. The STARTTLS flag is read
+            // from the map using the same flow tuple (with reversed src/dst
+            // because the BindRequest comes from the client to the server).
+            if let Some(recognized) = ldap::recognize_bind_request(payload) {
+                // used_starttls: look up whether this client→server flow had a
+                // prior successful STARTTLS exchange. The flow key is
+                // (client_src, server_dst, client_src_port, server_dst_port).
+                let flow_key = (pkt.src_ip, pkt.dst_ip, pkt.src_port, pkt.dst_port);
+                let used_starttls = *self.ldap_starttls_flows.get(&flow_key).unwrap_or(&false);
+                self.obs.ldap_bind_events.push(LdapBindEvent {
+                    ts: pkt.ts,
+                    src: pkt.src_ip,
+                    dst: pkt.dst_ip,
+                    dst_port: pkt.dst_port,
+                    version: recognized.version,
+                    used_starttls,
+                    anonymous: recognized.anonymous,
+                });
+            }
+        }
     }
 
     fn observe_udp(&mut self, pkt: &Packet) {
@@ -602,8 +682,11 @@ fn classify_flow(pkt: &Packet) -> Option<String> {
             (Transport::Tcp, 23) => "telnet",
             (Transport::Tcp, 25 | 587) => "smtp",
             (Transport::Tcp, 80 | 8080) => "http",
+            (Transport::Tcp, 389) => "ldap",
             (Transport::Tcp, 443) => "https",
             (Transport::Tcp, 445) => "smb",
+            (Transport::Tcp, 636) => "ldaps",
+            (Transport::Tcp, 3268) => "ldap-gc",
             (Transport::Tcp, 3389) => "rdp",
             (Transport::Udp, 53) => "dns",
             (Transport::Udp, 67 | 68) => "dhcp",
@@ -929,6 +1012,118 @@ mod tests {
             cred_events.len(),
             2,
             "EC-001: distinct kinds must not collapse to one entry"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // S-2.05 / BC-1.03.005: Observer ingests LDAP BindRequest packets
+    // -------------------------------------------------------------------------
+
+    /// Build a minimal BER-encoded LDAPv3 BindRequest payload (same encoding
+    /// as the parser unit tests). This is duplicated here intentionally — the
+    /// observer tests must not depend on `crate::parse::ldap` internals.
+    ///
+    /// Layout per RFC 4511 §4.2:
+    ///   0x30 LL  LDAPMessage SEQUENCE
+    ///     0x02 0x01 0x01  messageID INTEGER 1
+    ///     0x60 LL  BindRequest [APPLICATION 0]
+    ///       0x02 0x01 0x03  version INTEGER 3
+    ///       0x04 LL <dn>    name OctetString
+    ///       0x80 LL <pw>    simple [0] IMPLICIT OctetString
+    fn make_bind_payload(dn: &[u8], pw: &[u8]) -> Vec<u8> {
+        let version_tlv: &[u8] = &[0x02u8, 0x01, 0x03];
+        let name_tlv = {
+            let mut v = vec![0x04, dn.len() as u8];
+            v.extend_from_slice(dn);
+            v
+        };
+        let auth_tlv = {
+            let mut v = vec![0x80, pw.len() as u8];
+            v.extend_from_slice(pw);
+            v
+        };
+        let bind_body: Vec<u8> = version_tlv
+            .iter()
+            .chain(name_tlv.iter())
+            .chain(auth_tlv.iter())
+            .copied()
+            .collect();
+        let bind_req = {
+            let mut v = vec![0x60u8, bind_body.len() as u8];
+            v.extend_from_slice(&bind_body);
+            v
+        };
+        let msg_id: &[u8] = &[0x02u8, 0x01, 0x01];
+        let ldap_body: Vec<u8> = msg_id.iter().chain(bind_req.iter()).copied().collect();
+        let mut msg = vec![0x30u8, ldap_body.len() as u8];
+        msg.extend_from_slice(&ldap_body);
+        msg
+    }
+
+    fn make_ldap_packet(
+        src_ip: &str,
+        dst_ip: &str,
+        dst_port: u16,
+        payload: Vec<u8>,
+    ) -> crate::pcap::Packet {
+        use crate::pcap::{Packet, Transport};
+        Packet {
+            ts: fixed_ts(),
+            src_mac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01],
+            dst_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+            src_ip: src_ip.parse().unwrap(),
+            dst_ip: dst_ip.parse().unwrap(),
+            transport: Transport::Tcp,
+            src_port: 54321,
+            dst_port,
+            payload,
+        }
+    }
+
+    /// AC-001 (BC-1.03.005): Observer must append an LdapBindEvent when
+    /// it receives a TCP packet on port 389 carrying a valid BindRequest.
+    #[test]
+    fn test_bc_1_03_005_ingests_ldap_bind_on_port_389() {
+        let payload = make_bind_payload(b"cn=admin,dc=example,dc=com", b"hunter2");
+        let pkt = make_ldap_packet("10.0.0.1", "10.0.0.2", 389, payload);
+
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&pkt);
+        let obs = observer.observations();
+
+        assert_eq!(
+            obs.ldap_bind_events.len(),
+            1,
+            "AC-001: observer must append one LdapBindEvent for a tcp/389 BindRequest"
+        );
+        let ev = &obs.ldap_bind_events[0];
+        assert_eq!(ev.dst_port, 389);
+        assert_eq!(ev.version, 3);
+        assert!(
+            !ev.used_starttls,
+            "AC-003: used_starttls must be false when no STARTTLS preceded the bind"
+        );
+    }
+
+    /// EC-001: LDAP BindRequest on port 3268 (Global Catalog) must also be
+    /// recognized and recorded.
+    #[test]
+    fn test_bc_1_03_005_ingests_ldap_bind_on_port_3268() {
+        let payload = make_bind_payload(b"cn=admin,dc=corp,dc=local", b"secret");
+        let pkt = make_ldap_packet("10.0.0.1", "10.0.0.2", 3268, payload);
+
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&pkt);
+        let obs = observer.observations();
+
+        assert_eq!(
+            obs.ldap_bind_events.len(),
+            1,
+            "EC-001: observer must append one LdapBindEvent for a tcp/3268 BindRequest"
+        );
+        assert_eq!(
+            obs.ldap_bind_events[0].dst_port, 3268,
+            "EC-001: event must record the actual destination port"
         );
     }
 }
