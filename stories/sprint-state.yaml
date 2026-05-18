@@ -101,10 +101,14 @@ stories:
     merged_at: 2026-05-18T20:58:12Z
     notes: "5 NITPICK findings logged during review (non-blocking)."
   S-2.06:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-2.06-ntlmv1
     worktree: null
+    merge_sha: 317a575
+    pr: 69
+    merged_at: 2026-05-18T21:31:15Z
+    notes: "3 NITPICK findings deferred to follow-up: F-002 (single-match per packet), F-003 (src_port scan optimization), F-005 (no mid-payload offset test)."
   S-2.07:
     status: pending
     wave: 1
