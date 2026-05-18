@@ -879,6 +879,37 @@ fn dnp3_engineering_wired_into_run_all() {
 }
 
 // ---------------------------------------------------------------------------
+// S-2.06 / BC-3.04.004 — compat.ntlmv1 wiring regression guard
+// ---------------------------------------------------------------------------
+
+/// Regression guard: when a NtlmEvent::V1 is present, run_all must include
+/// a finding with id `compat.ntlmv1`. Mirrors the dnp3_engineering_wired_into_run_all
+/// pattern — catches the case where the stub's empty-Vec return persists into
+/// production or the ntlmv1 detector is accidentally removed from run_all.
+#[test]
+fn compat_ntlmv1_wired_into_run_all() {
+    use otsniff::observe::{NtlmEvent, NtlmVersion};
+
+    let mut obs = Observations::default();
+    obs.ntlm_events.push(NtlmEvent {
+        ts: fixed_ts(),
+        src: ip("10.0.0.1"),
+        dst: ip("10.0.0.2"),
+        dst_port: 445,
+        version: NtlmVersion::V1,
+    });
+
+    let subnets = ot_subnets();
+    let findings = run_all(&obs, &subnets);
+
+    let ntlm_finding = findings.iter().find(|f| f.id == "compat.ntlmv1");
+    assert!(
+        ntlm_finding.is_some(),
+        "run_all must include compat.ntlmv1 when ntlm_events contains a V1 event"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // BC-3.05.006 — recon.port_scan detector tests (source-IP rollup)
 // ---------------------------------------------------------------------------
 

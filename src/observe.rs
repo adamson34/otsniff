@@ -164,6 +164,36 @@ pub struct NtlmEvent {
     pub version: NtlmVersion,
 }
 
+/// Result of parsing an NTLMSSP NEGOTIATE_MESSAGE (message type 1).
+///
+/// Returned by `recognize_ntlm_negotiate` when the `NTLMSSP\0` signature is
+/// found at the start of the payload, message type is 1 (NEGOTIATE), and the
+/// flags field can be decoded. The caller promotes this into an `NtlmEvent`.
+///
+/// See S-2.06 AC-001 (BC-1.03.006).
+pub(crate) struct NtlmNegotiateRecognized {
+    /// Protocol version inferred from the NEGOTIATE_MESSAGE flags field
+    /// (offset 12, 4 bytes little-endian).
+    pub version: NtlmVersion,
+}
+
+/// Attempt to parse an NTLMSSP NEGOTIATE_MESSAGE from a raw TCP payload.
+///
+/// Returns `Some(NtlmNegotiateRecognized)` iff:
+/// - bytes 0-7 == `b"NTLMSSP\0"` (the NTLMSSP signature)
+/// - bytes 8-11 == `[0x01, 0x00, 0x00, 0x00]` (MessageType = 1, NEGOTIATE)
+/// - bytes 12-15 are present (the NegotiateFlags field)
+///
+/// Version classification from the flags (MS-NLMP §2.2.2.5 / §2.2.1.1):
+/// - `NTLMSSP_NEGOTIATE_NTLM2_KEY` (bit 19, 0x00080000) set → V2
+/// - `NTLMSSP_NEGOTIATE_NTLM` (bit 9, 0x00000200) set, NTLM2_KEY unset → V1
+///
+/// Returns `None` for any other payload (wrong signature, wrong message type,
+/// truncated, or flags indicate neither V1 nor V2). See EC-002.
+pub(crate) fn recognize_ntlm_negotiate(_payload: &[u8]) -> Option<NtlmNegotiateRecognized> {
+    todo!("S-2.06 Step 4: implement NTLM NEGOTIATE recognizer")
+}
+
 /// One LDAP `BindRequest` with `SimpleAuthentication` observed on the wire.
 ///
 /// Populated by `Observer::observe_tcp` for tcp/389 (and non-standard LDAP
@@ -1154,6 +1184,179 @@ mod tests {
         assert_eq!(
             obs.ldap_bind_events[0].dst_port, 3268,
             "EC-001: event must record the actual destination port"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // S-2.06 / BC-1.03.006: Observer integration test — NTLM ingestion
+    // -------------------------------------------------------------------------
+
+    /// Build a raw NTLMSSP NEGOTIATE_MESSAGE payload.
+    ///
+    /// The blob is always at least 32 bytes (just the header + flags + zeros).
+    /// flags_le must be 4 bytes (little-endian NegotiateFlags).
+    fn make_ntlmssp_negotiate(flags_le: [u8; 4]) -> Vec<u8> {
+        let mut payload = Vec::with_capacity(32);
+        // Signature: "NTLMSSP\0" (8 bytes)
+        payload.extend_from_slice(b"NTLMSSP\0");
+        // MessageType = 1 (NEGOTIATE), little-endian u32
+        payload.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]);
+        // NegotiateFlags (4 bytes little-endian)
+        payload.extend_from_slice(&flags_le);
+        // Trailing zeros to pad to 32 bytes (workstation fields etc.)
+        payload.extend_from_slice(&[0u8; 16]);
+        payload
+    }
+
+    fn make_smb_packet(
+        src_ip: &str,
+        dst_ip: &str,
+        src_port: u16,
+        dst_port: u16,
+        payload: Vec<u8>,
+    ) -> crate::pcap::Packet {
+        use crate::pcap::{Packet, Transport};
+        Packet {
+            ts: fixed_ts(),
+            src_mac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01],
+            dst_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+            src_ip: src_ip.parse().unwrap(),
+            dst_ip: dst_ip.parse().unwrap(),
+            transport: Transport::Tcp,
+            src_port,
+            dst_port,
+            payload,
+        }
+    }
+
+    /// AC-001 (BC-1.03.006): Observer must append an NtlmEvent with version V1
+    /// when a TCP packet on port 445 carries an NTLMSSP NEGOTIATE_MESSAGE with
+    /// NTLMSSP_NEGOTIATE_NTLM set and NTLMSSP_NEGOTIATE_NTLM2_KEY unset.
+    ///
+    /// Flags: 0x00000200 (NTLM only) → little-endian [0x00, 0x02, 0x00, 0x00]
+    #[test]
+    fn test_bc_1_03_006_ingests_ntlmv1_on_smb_port_445() {
+        // NTLMSSP_NEGOTIATE_NTLM = 0x00000200, NTLM2_KEY unset
+        let flags_le = [0x00u8, 0x02, 0x00, 0x00];
+        let payload = make_ntlmssp_negotiate(flags_le);
+        let pkt = make_smb_packet("10.0.0.1", "10.0.0.2", 54321, 445, payload);
+
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&pkt);
+        let obs = observer.observations();
+
+        assert_eq!(
+            obs.ntlm_events.len(),
+            1,
+            "AC-001: observer must append one NtlmEvent for an NTLMSSP NEGOTIATE on tcp/445"
+        );
+        assert_eq!(
+            obs.ntlm_events[0].version,
+            NtlmVersion::V1,
+            "AC-001: NtlmEvent version must be V1 when NTLM2_KEY flag is unset"
+        );
+        assert_eq!(obs.ntlm_events[0].dst_port, 445);
+        assert_eq!(obs.ntlm_events[0].src, ip("10.0.0.1"));
+        assert_eq!(obs.ntlm_events[0].dst, ip("10.0.0.2"));
+    }
+}
+
+// -------------------------------------------------------------------------
+// S-2.06 / BC-1.03.006: Parser unit tests for recognize_ntlm_negotiate
+// -------------------------------------------------------------------------
+
+#[cfg(test)]
+mod ntlm_tests {
+    use super::{recognize_ntlm_negotiate, NtlmVersion};
+
+    /// Build a minimal NTLMSSP NEGOTIATE_MESSAGE (32 bytes).
+    fn negotiate_blob(msg_type_le: [u8; 4], flags_le: [u8; 4]) -> Vec<u8> {
+        let mut v = Vec::with_capacity(32);
+        v.extend_from_slice(b"NTLMSSP\0"); // signature (8 bytes)
+        v.extend_from_slice(&msg_type_le); // MessageType (4 bytes)
+        v.extend_from_slice(&flags_le); // NegotiateFlags (4 bytes)
+        v.extend_from_slice(&[0u8; 16]); // padding
+        v
+    }
+
+    /// AC-001 / BC-1.03.006 (positive, V1):
+    /// Flags = 0x00000200 — NTLM set, NTLM2_KEY unset → NtlmVersion::V1.
+    /// Byte layout: LE u32 0x00000200 = [0x00, 0x02, 0x00, 0x00].
+    #[test]
+    fn test_bc_1_03_006_recognizes_ntlmv1_negotiate() {
+        let blob = negotiate_blob([0x01, 0x00, 0x00, 0x00], [0x00, 0x02, 0x00, 0x00]);
+        let result = recognize_ntlm_negotiate(&blob);
+        let recognized = result.expect("must recognize V1 NEGOTIATE blob");
+        assert_eq!(
+            recognized.version,
+            NtlmVersion::V1,
+            "flags 0x00000200 (NTLM set, NTLM2_KEY unset) must yield NtlmVersion::V1"
+        );
+    }
+
+    /// AC-001 / BC-1.03.006 (positive, V2):
+    /// Flags = 0x00080200 — NTLM + NTLM2_KEY both set → NtlmVersion::V2.
+    /// Byte layout: LE u32 0x00080200 = [0x00, 0x02, 0x08, 0x00].
+    #[test]
+    fn test_bc_1_03_006_recognizes_ntlmv2_negotiate() {
+        let blob = negotiate_blob([0x01, 0x00, 0x00, 0x00], [0x00, 0x02, 0x08, 0x00]);
+        let result = recognize_ntlm_negotiate(&blob);
+        let recognized = result.expect("must recognize V2 NEGOTIATE blob");
+        assert_eq!(
+            recognized.version,
+            NtlmVersion::V2,
+            "flags 0x00080200 (NTLM + NTLM2_KEY set) must yield NtlmVersion::V2"
+        );
+    }
+
+    /// EC-002: random bytes without the NTLMSSP signature must return None.
+    #[test]
+    fn test_bc_1_03_006_rejects_random_bytes() {
+        let garbage: &[u8] = &[0xFF, 0x00, 0x42, 0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03];
+        let result = recognize_ntlm_negotiate(garbage);
+        assert!(
+            result.is_none(),
+            "random bytes without NTLMSSP signature must return None"
+        );
+    }
+
+    /// EC-002: valid NTLMSSP signature but MessageType = 2 (CHALLENGE) must
+    /// return None — the recognizer only handles NEGOTIATE (type 1).
+    #[test]
+    fn test_bc_1_03_006_rejects_challenge_messagetype() {
+        // MessageType = 2 (CHALLENGE)
+        let blob = negotiate_blob([0x02, 0x00, 0x00, 0x00], [0x00, 0x02, 0x08, 0x00]);
+        let result = recognize_ntlm_negotiate(&blob);
+        assert!(
+            result.is_none(),
+            "NTLMSSP CHALLENGE (type 2) must not be recognized as NEGOTIATE"
+        );
+    }
+
+    /// EC-002: valid NTLMSSP signature but MessageType = 3 (AUTHENTICATE)
+    /// must return None.
+    #[test]
+    fn test_bc_1_03_006_rejects_authenticate_messagetype() {
+        // MessageType = 3 (AUTHENTICATE)
+        let blob = negotiate_blob([0x03, 0x00, 0x00, 0x00], [0x00, 0x02, 0x08, 0x00]);
+        let result = recognize_ntlm_negotiate(&blob);
+        assert!(
+            result.is_none(),
+            "NTLMSSP AUTHENTICATE (type 3) must not be recognized as NEGOTIATE"
+        );
+    }
+
+    /// Defensive: payload shorter than 16 bytes (missing flags field) must
+    /// return None without panicking.
+    #[test]
+    fn test_bc_1_03_006_rejects_truncated_payload() {
+        // Only the first 10 bytes — signature is present but MessageType and
+        // flags are cut off.
+        let truncated: Vec<u8> = b"NTLMSSP\0\x01\x00".to_vec();
+        let result = recognize_ntlm_negotiate(&truncated);
+        assert!(
+            result.is_none(),
+            "truncated payload (10 bytes, missing flags) must return None"
         );
     }
 }
