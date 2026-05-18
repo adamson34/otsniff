@@ -25,6 +25,8 @@ pub const LDAP_METADATA: RuleMetadata = RuleMetadata {
 /// true`) are suppressed — the finding does NOT fire.
 ///
 /// See S-2.05 for the full acceptance criteria and edge-case table.
+/// S-2.05 stub: returns empty Vec so existing snapshot tests continue to pass.
+/// Real detector logic lands in Step 4 (implementation).
 pub fn build_findings(_obs: &Observations) -> Vec<Finding> {
-    todo!("S-2.05: LDAP creds detector landing in step 4")
+    Vec::new()
 }

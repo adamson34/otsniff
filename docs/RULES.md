@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**15 rules.**
+**16 rules.**
 
 ## Index
 
@@ -14,6 +14,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`creds.telnet`](#credstelnet) | critical | Telnet session observed (cleartext by definition) |
 | [`creds.http_basic`](#credshttp_basic) | critical | HTTP Basic authentication over plaintext HTTP |
 | [`creds.snmp`](#credssnmp) | critical | SNMPv1 / SNMPv2c traffic (plaintext community strings) |
+| [`creds.ldap_simple_bind`](#credsldap_simple_bind) | critical | S-2.05: TBD by implementer |
 | [`ics.modbus_writes`](#icsmodbus_writes) | high | Modbus engineering-class commands on the wire |
 | [`ics.cip_engineering`](#icscip_engineering) | high | EtherNet/IP engineering-class CIP services |
 | [`ics.s7_engineering`](#icss7_engineering) | high | S7Comm engineering-class commands on the wire |
@@ -81,6 +82,19 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 - **RFC** — RFC 3411 — Architecture for SNMPv3 (the secure replacement) ([link](https://datatracker.ietf.org/doc/html/rfc3411))
+
+## `creds.ldap_simple_bind`
+
+**S-2.05: TBD by implementer**
+
+- **Severity:** critical
+- **Data source:** `ldap_bind_events`
+
+**Trigger.** S-2.05: TBD by implementer
+
+**References:**
+
+- **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 
 ## `ics.modbus_writes`
 
