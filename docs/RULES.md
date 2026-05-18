@@ -208,7 +208,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **Severity:** medium
 - **Data source:** `tls_cipher_suites`
 
-**Trigger.** S-2.07: TBD by implementer
+**Trigger.** Fires when a TLS ClientHello on TCP/443 or TCP/8443 includes any of the following cipher suite codes: 0x0001 (NULL_MD5), 0x0002 (NULL_SHA), 0x0004 (RC4_128_MD5), 0x0005 (RC4_128_SHA), 0x0009 (DES_CBC_SHA), 0x000A (3DES_EDE_CBC_SHA). These suites are broken or severely weakened — RC4 has statistical biases exploitable in practice (RFC 7465), DES has a 56-bit key vulnerable to brute force, 3DES is vulnerable to Sweet32 (CVE-2016-2183), and NULL suites provide no encryption at all. Detection runs on the cipher_suites list in the TLS ClientHello handshake message regardless of which suite the server ultimately negotiates. GREASE values (RFC 8701) are skipped.
 
 **References:**
 
