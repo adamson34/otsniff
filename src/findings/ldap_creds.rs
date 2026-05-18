@@ -115,17 +115,21 @@ pub fn build_findings(obs: &Observations) -> Vec<Finding> {
             "Treat any password used in the flagged LDAP bind(s) as exposed. \
              Plan a rotation with the on-shift engineer for the corresponding \
              Active Directory or LDAP accounts, including any service accounts \
-             that may share the same credentials.".to_string(),
+             that may share the same credentials."
+                .to_string(),
             "Migrate directory clients and servers to LDAPS (tcp/636) or \
              require STARTTLS on tcp/389 before authentication. \
              Enforce the policy at the firewall level — block plaintext tcp/389 \
-             binds from reaching directory servers unless STARTTLS is confirmed.".to_string(),
+             binds from reaching directory servers unless STARTTLS is confirmed."
+                .to_string(),
             "For legacy clients that cannot negotiate STARTTLS, place them behind \
              a jump host on a hardened management VLAN and document the exception \
-             with a revocation date.".to_string(),
+             with a revocation date."
+                .to_string(),
             "Record the credentials-exposed window in the change log so future \
              investigations know which sessions to treat as compromised. \
-             Capture window: see report header.".to_string(),
+             Capture window: see report header."
+                .to_string(),
         ],
     }]
 }

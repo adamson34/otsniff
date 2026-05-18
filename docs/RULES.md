@@ -14,7 +14,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`creds.telnet`](#credstelnet) | critical | Telnet session observed (cleartext by definition) |
 | [`creds.http_basic`](#credshttp_basic) | critical | HTTP Basic authentication over plaintext HTTP |
 | [`creds.snmp`](#credssnmp) | critical | SNMPv1 / SNMPv2c traffic (plaintext community strings) |
-| [`creds.ldap_simple_bind`](#credsldap_simple_bind) | critical | S-2.05: TBD by implementer |
+| [`creds.ldap_simple_bind`](#credsldap_simple_bind) | critical | LDAP plaintext simple-bind observed |
 | [`ics.modbus_writes`](#icsmodbus_writes) | high | Modbus engineering-class commands on the wire |
 | [`ics.cip_engineering`](#icscip_engineering) | high | EtherNet/IP engineering-class CIP services |
 | [`ics.s7_engineering`](#icss7_engineering) | high | S7Comm engineering-class commands on the wire |
@@ -85,16 +85,18 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 ## `creds.ldap_simple_bind`
 
-**S-2.05: TBD by implementer**
+**LDAP plaintext simple-bind observed**
 
 - **Severity:** critical
 - **Data source:** `ldap_bind_events`
 
-**Trigger.** S-2.05: TBD by implementer
+**Trigger.** Fires when at least one LDAPv3 BindRequest with SimpleAuthentication (tag 0x80) is observed on tcp/389 or tcp/3268 without a prior successful STARTTLS exchange on the same flow. The username and password are transmitted in cleartext; any host on a SPAN port of the same VLAN can capture them. Anonymous binds (empty DN + empty password) are not flagged — they carry no credential.
 
 **References:**
 
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
+- **RFC** — RFC 4511 — Lightweight Directory Access Protocol (LDAP): The Protocol ([link](https://datatracker.ietf.org/doc/html/rfc4511))
+- **RFC** — RFC 4513 — LDAP Authentication Methods and Security Mechanisms (STARTTLS) ([link](https://datatracker.ietf.org/doc/html/rfc4513))
 
 ## `ics.modbus_writes`
 

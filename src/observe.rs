@@ -1031,7 +1031,7 @@ mod tests {
     ///       0x04 LL <dn>    name OctetString
     ///       0x80 LL <pw>    simple [0] IMPLICIT OctetString
     fn make_bind_payload(dn: &[u8], pw: &[u8]) -> Vec<u8> {
-        let version_tlv = vec![0x02u8, 0x01, 0x03];
+        let version_tlv: &[u8] = &[0x02u8, 0x01, 0x03];
         let name_tlv = {
             let mut v = vec![0x04, dn.len() as u8];
             v.extend_from_slice(dn);
@@ -1053,14 +1053,19 @@ mod tests {
             v.extend_from_slice(&bind_body);
             v
         };
-        let msg_id = vec![0x02u8, 0x01, 0x01];
+        let msg_id: &[u8] = &[0x02u8, 0x01, 0x01];
         let ldap_body: Vec<u8> = msg_id.iter().chain(bind_req.iter()).copied().collect();
         let mut msg = vec![0x30u8, ldap_body.len() as u8];
         msg.extend_from_slice(&ldap_body);
         msg
     }
 
-    fn make_ldap_packet(src_ip: &str, dst_ip: &str, dst_port: u16, payload: Vec<u8>) -> crate::pcap::Packet {
+    fn make_ldap_packet(
+        src_ip: &str,
+        dst_ip: &str,
+        dst_port: u16,
+        payload: Vec<u8>,
+    ) -> crate::pcap::Packet {
         use crate::pcap::{Packet, Transport};
         Packet {
             ts: fixed_ts(),
@@ -1078,7 +1083,7 @@ mod tests {
     /// AC-001 (BC-1.03.005): Observer must append an LdapBindEvent when
     /// it receives a TCP packet on port 389 carrying a valid BindRequest.
     #[test]
-    fn test_BC_1_03_005_ingests_ldap_bind_on_port_389() {
+    fn test_bc_1_03_005_ingests_ldap_bind_on_port_389() {
         let payload = make_bind_payload(b"cn=admin,dc=example,dc=com", b"hunter2");
         let pkt = make_ldap_packet("10.0.0.1", "10.0.0.2", 389, payload);
 
@@ -1094,13 +1099,16 @@ mod tests {
         let ev = &obs.ldap_bind_events[0];
         assert_eq!(ev.dst_port, 389);
         assert_eq!(ev.version, 3);
-        assert!(!ev.used_starttls, "AC-003: used_starttls must be false when no STARTTLS preceded the bind");
+        assert!(
+            !ev.used_starttls,
+            "AC-003: used_starttls must be false when no STARTTLS preceded the bind"
+        );
     }
 
     /// EC-001: LDAP BindRequest on port 3268 (Global Catalog) must also be
     /// recognized and recorded.
     #[test]
-    fn test_BC_1_03_005_ingests_ldap_bind_on_port_3268() {
+    fn test_bc_1_03_005_ingests_ldap_bind_on_port_3268() {
         let payload = make_bind_payload(b"cn=admin,dc=corp,dc=local", b"secret");
         let pkt = make_ldap_packet("10.0.0.1", "10.0.0.2", 3268, payload);
 
@@ -1114,8 +1122,7 @@ mod tests {
             "EC-001: observer must append one LdapBindEvent for a tcp/3268 BindRequest"
         );
         assert_eq!(
-            obs.ldap_bind_events[0].dst_port,
-            3268,
+            obs.ldap_bind_events[0].dst_port, 3268,
             "EC-001: event must record the actual destination port"
         );
     }

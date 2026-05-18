@@ -1,9 +1,8 @@
-//! Minimal LDAP parser stub.
+//! Minimal LDAP parser.
 //!
-//! v0.1 only needs to recognise a BER-encoded `BindRequest` (tag 0x30 envelope
-//! + ProtocolOp tag 0x60) on tcp/389 so the `ldap_creds` finding can flag
-//! plaintext simple-bind traffic. No full ASN.1/BER walk is implemented here
-//! yet — see S-2.05.
+//! Recognises a BER-encoded `BindRequest` (tag 0x30 envelope + ProtocolOp tag
+//! 0x60) on tcp/389 or tcp/3268 so the `ldap_creds` finding can flag plaintext
+//! simple-bind traffic (S-2.05).
 
 /// Primary port for unencrypted LDAP. The recogniser also accepts LDAP on
 /// other ports (e.g., 3268 for the Global Catalog) — the caller decides
@@ -155,7 +154,7 @@ mod tests {
     /// pw_bytes: raw octets for the SimpleAuthentication password
     fn make_bind_request(dn_bytes: &[u8], pw_bytes: &[u8]) -> Vec<u8> {
         // Inner BindRequest body: version + name + simple-auth
-        let version_tlv = vec![0x02, 0x01, 0x03]; // INTEGER 3
+        let version_tlv: &[u8] = &[0x02, 0x01, 0x03]; // INTEGER 3
         let name_tlv = {
             let mut v = vec![0x04, dn_bytes.len() as u8];
             v.extend_from_slice(dn_bytes);
@@ -181,14 +180,10 @@ mod tests {
         };
 
         // messageID INTEGER 1 (tag 0x02)
-        let msg_id = vec![0x02, 0x01, 0x01];
+        let msg_id: &[u8] = &[0x02, 0x01, 0x01];
 
         // LDAPMessage SEQUENCE (tag 0x30)
-        let ldap_body: Vec<u8> = msg_id
-            .iter()
-            .chain(bind_req.iter())
-            .copied()
-            .collect();
+        let ldap_body: Vec<u8> = msg_id.iter().chain(bind_req.iter()).copied().collect();
         let mut msg = vec![0x30, ldap_body.len() as u8];
         msg.extend_from_slice(&ldap_body);
         msg
@@ -197,7 +192,7 @@ mod tests {
     // AC-001 (BC-1.03.005): recogniser must return Some for a standard
     // LDAPv3 simple-bind with a non-empty DN and non-empty password.
     #[test]
-    fn test_BC_1_03_005_recognizes_v3_simple_bind_with_password() {
+    fn test_bc_1_03_005_recognizes_v3_simple_bind_with_password() {
         let dn = b"cn=admin,dc=example,dc=com";
         let pw = b"hunter2";
         let bytes = make_bind_request(dn, pw);
@@ -216,7 +211,7 @@ mod tests {
     // AC-001 / EC-003 (BC-1.03.005): recogniser must surface anonymous flag
     // for empty DN + empty password; suppression is the finding layer's job.
     #[test]
-    fn test_BC_1_03_005_recognizes_anonymous_bind_empty_password() {
+    fn test_bc_1_03_005_recognizes_anonymous_bind_empty_password() {
         let bytes = make_bind_request(b"", b"");
         let result = recognize_bind_request(&bytes);
         assert_eq!(
@@ -232,7 +227,7 @@ mod tests {
 
     // Negative: random bytes that are not a valid LDAP BER envelope.
     #[test]
-    fn test_BC_1_03_005_rejects_non_ldap_payload() {
+    fn test_bc_1_03_005_rejects_non_ldap_payload() {
         let bytes: &[u8] = &[0xff, 0x00, 0x01];
         assert_eq!(
             recognize_bind_request(bytes),
@@ -244,15 +239,11 @@ mod tests {
     // Negative: valid LDAPMessage outer envelope but ProtocolOp tag 0x42
     // (UnbindRequest) instead of BindRequest (0x60). RFC 4511 §4.3.
     #[test]
-    fn test_BC_1_03_005_rejects_ldap_unbind() {
+    fn test_bc_1_03_005_rejects_ldap_unbind() {
         // Build an LDAPMessage with an UnbindRequest (tag 0x42, NULL body)
         let msg_id = [0x02u8, 0x01, 0x02]; // messageID 2
         let unbind_req = [0x42u8, 0x00]; // UnbindRequest APPLICATION 2, empty
-        let ldap_body: Vec<u8> = msg_id
-            .iter()
-            .chain(unbind_req.iter())
-            .copied()
-            .collect();
+        let ldap_body: Vec<u8> = msg_id.iter().chain(unbind_req.iter()).copied().collect();
         let mut bytes = vec![0x30u8, ldap_body.len() as u8];
         bytes.extend_from_slice(&ldap_body);
         assert_eq!(
@@ -265,7 +256,7 @@ mod tests {
     // Defensive: LDAPMessage with declared outer length > buffer length.
     // The parser must not panic and must return None.
     #[test]
-    fn test_BC_1_03_005_rejects_oversized_length() {
+    fn test_bc_1_03_005_rejects_oversized_length() {
         // Construct a real BindRequest but then lie about the outer SEQUENCE length.
         let inner = make_bind_request(b"cn=admin", b"pass");
         // Replace the outer length byte (index 1) with 0xff (255),

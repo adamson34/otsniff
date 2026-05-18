@@ -54,7 +54,7 @@ fn fixture_with_anonymous_bind() -> otsniff::observe::Observations {
 /// exactly one finding at severity Critical with rule id
 /// `creds.ldap_simple_bind`.
 #[test]
-fn test_BC_3_01_005_positive_plaintext_bind_emits_critical_finding() {
+fn test_bc_3_01_005_positive_plaintext_bind_emits_critical_finding() {
     let obs = fixture_with_bind();
     let findings = otsniff::findings::ldap_creds::build_findings(&obs);
     assert_eq!(
@@ -68,8 +68,7 @@ fn test_BC_3_01_005_positive_plaintext_bind_emits_critical_finding() {
         "AC-002: finding severity must be Critical"
     );
     assert!(
-        findings[0].id == "creds.ldap_simple_bind"
-            || findings[0].id.ends_with("ldap_simple_bind"),
+        findings[0].id == "creds.ldap_simple_bind" || findings[0].id.ends_with("ldap_simple_bind"),
         "AC-002: finding rule_id must be 'creds.ldap_simple_bind', got '{}'",
         findings[0].id
     );
@@ -82,7 +81,7 @@ fn test_BC_3_01_005_positive_plaintext_bind_emits_critical_finding() {
 /// AC-003 negative: when a successful STARTTLS exchange preceded the bind
 /// on the same flow (`used_starttls == true`), the finding must NOT fire.
 #[test]
-fn test_BC_3_01_005_negative_post_starttls_bind_suppresses_finding() {
+fn test_bc_3_01_005_negative_post_starttls_bind_suppresses_finding() {
     let obs = fixture_with_starttls_then_bind();
     let findings = otsniff::findings::ldap_creds::build_findings(&obs);
     assert!(
@@ -100,7 +99,7 @@ fn test_BC_3_01_005_negative_post_starttls_bind_suppresses_finding() {
 /// is a well-known LDAP pattern, not a credential leak. The finding must
 /// not fire.
 #[test]
-fn test_BC_1_03_005_anonymous_bind_suppressed() {
+fn test_bc_1_03_005_anonymous_bind_suppressed() {
     let obs = fixture_with_anonymous_bind();
     let findings = otsniff::findings::ldap_creds::build_findings(&obs);
     assert!(
