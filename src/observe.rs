@@ -283,6 +283,15 @@ pub struct Observations {
     /// count. legacy_version is the on-the-wire u16 (0x0301 = TLS 1.0,
     /// 0x0302 = TLS 1.1, 0x0303 = TLS 1.2 / 1.3).
     pub tls_client_hellos: HashMap<(IpAddr, IpAddr, u16, u16), u64>,
+    /// Map of (src, dst, dst_port) → cipher suite codes advertised in
+    /// TLS ClientHellos on that flow (S-2.07, BC-1.04.003). Each
+    /// ClientHello's cipher_suites list is appended; duplicates are
+    /// expected when the same flow sends multiple hellos. The detector
+    /// (`weak_tls_cipher`) reads this to identify RC4 / DES / NULL
+    /// suites. Populated by the implementer in Step 4; initialized empty
+    /// here so snapshot tests and all existing consumers compile without
+    /// change.
+    pub tls_cipher_suites: HashMap<(IpAddr, IpAddr, u16), Vec<u16>>,
     /// IP → hostname, populated from passive sources (DHCP option 12 today;
     /// mDNS / NetBIOS planned). Last-write-wins if multiple sources name
     /// the same IP, but in practice DHCP is the only source for now.
@@ -614,6 +623,36 @@ impl Observer {
             let legacy_version = u16::from_be_bytes([payload[9], payload[10]]);
             let key = (pkt.src_ip, pkt.dst_ip, pkt.dst_port, legacy_version);
             *self.obs.tls_client_hellos.entry(key).or_insert(0) += 1;
+
+            // BC-1.04.003 (S-2.07): extract cipher_suites from the ClientHello.
+            // The ClientHello body starts at payload[9]:
+            //   [9..11]  legacy_version (already read above)
+            //   [11..43] random (32 bytes)
+            //   [43]     session_id_len
+            //   [44..44+session_id_len]  session_id
+            //   [44+session_id_len..]    cipher_suites_len (u16 BE) + suite codes
+            if payload.len() >= 44 {
+                let session_id_len = payload[43] as usize;
+                let cs_offset = 44 + session_id_len;
+                if payload.len() >= cs_offset + 2 {
+                    let cs_len =
+                        u16::from_be_bytes([payload[cs_offset], payload[cs_offset + 1]]) as usize;
+                    // cs_len is in bytes; must be even (each suite is 2 bytes)
+                    if cs_len % 2 == 0 && payload.len() >= cs_offset + 2 + cs_len {
+                        let cs_data = &payload[cs_offset + 2..cs_offset + 2 + cs_len];
+                        let suites: Vec<u16> = cs_data
+                            .chunks_exact(2)
+                            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+                            .collect();
+                        let flow_key = (pkt.src_ip, pkt.dst_ip, pkt.dst_port);
+                        self.obs
+                            .tls_cipher_suites
+                            .entry(flow_key)
+                            .or_default()
+                            .extend(suites);
+                    }
+                }
+            }
         }
 
         // NTLMSSP NEGOTIATE detection.
@@ -1423,5 +1462,190 @@ mod ntlm_tests {
             result.is_none(),
             "truncated payload (10 bytes, missing flags) must return None"
         );
+    }
+}
+
+// -------------------------------------------------------------------------
+// S-2.07 / BC-1.04.003: TLS ClientHello cipher_suites observer tests
+// -------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tls_cipher_tests {
+    use super::Observer;
+    use crate::pcap::{Packet, Transport};
+    use chrono::{TimeZone, Utc};
+    use std::net::IpAddr;
+
+    fn fixed_ts() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap()
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    /// Build a minimal TLS record carrying a ClientHello with the given fields.
+    ///
+    /// Layout (TLS 1.0/1.1/1.2 outer shape):
+    ///   [0]     content_type = 0x16 (handshake)
+    ///   [1..3]  legacy_record_version (big-endian u16)
+    ///   [3..5]  record_length (big-endian u16, computed)
+    ///   [5]     handshake_type = 0x01 (ClientHello)
+    ///   [6..9]  handshake_length (big-endian u24, computed)
+    ///   [9..11] client_version = legacy_version (big-endian u16)
+    ///   [11..43] random (32 zero bytes)
+    ///   [43]    session_id_length = len(session_id)
+    ///   [44..]  session_id bytes
+    ///   [...]   cipher_suites_length (big-endian u16, 2 * count)
+    ///   [...]   cipher_suites (sequence of big-endian u16)
+    ///   [...]   compression_methods_length = 0x01
+    ///   [...]   compression_methods = 0x00 (null)
+    ///   [...]   extensions_length = 0x0000
+    fn build_client_hello(
+        legacy_version: u16,
+        session_id: &[u8],
+        cipher_suites: &[u16],
+    ) -> Vec<u8> {
+        let mut handshake_body: Vec<u8> = Vec::new();
+
+        // client_version (2 bytes)
+        handshake_body.extend_from_slice(&legacy_version.to_be_bytes());
+
+        // random (32 zero bytes)
+        handshake_body.extend_from_slice(&[0u8; 32]);
+
+        // session_id: length byte + data
+        handshake_body.push(session_id.len() as u8);
+        handshake_body.extend_from_slice(session_id);
+
+        // cipher_suites: 2-byte count (in bytes) + suite codes
+        let cs_byte_len = (cipher_suites.len() * 2) as u16;
+        handshake_body.extend_from_slice(&cs_byte_len.to_be_bytes());
+        for &suite in cipher_suites {
+            handshake_body.extend_from_slice(&suite.to_be_bytes());
+        }
+
+        // compression_methods: count=1, method=null(0)
+        handshake_body.push(0x01);
+        handshake_body.push(0x00);
+
+        // extensions: empty (length=0)
+        handshake_body.extend_from_slice(&0u16.to_be_bytes());
+
+        // Handshake header: type(1) + length(3)
+        let hs_len = handshake_body.len() as u32;
+        let mut handshake: Vec<u8> = vec![
+            0x01, // ClientHello
+            ((hs_len >> 16) & 0xFF) as u8,
+            ((hs_len >> 8) & 0xFF) as u8,
+            (hs_len & 0xFF) as u8,
+        ];
+        handshake.extend_from_slice(&handshake_body);
+
+        // TLS record header: content_type(1) + record_version(2) + length(2)
+        let record_len = handshake.len() as u16;
+        let mut record: Vec<u8> = Vec::new();
+        record.push(0x16); // content_type = handshake
+        record.extend_from_slice(&0x0303u16.to_be_bytes()); // record version TLS 1.2
+        record.extend_from_slice(&record_len.to_be_bytes());
+        record.extend_from_slice(&handshake);
+
+        record
+    }
+
+    fn make_tls_packet(src: &str, dst: &str, dst_port: u16, payload: Vec<u8>) -> Packet {
+        Packet {
+            ts: fixed_ts(),
+            src_mac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01],
+            dst_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+            src_ip: ip(src),
+            dst_ip: ip(dst),
+            transport: Transport::Tcp,
+            src_port: 54321,
+            dst_port,
+            payload,
+        }
+    }
+
+    /// AC-001 (BC-1.04.003): observer must capture cipher_suites from a
+    /// TLS ClientHello and store them keyed by (src, dst, dst_port).
+    ///
+    /// Sends a ClientHello with cipher_suites = [0x0035, 0x002F, 0x0005]
+    /// (AES-256-SHA, AES-128-SHA, RC4-128-SHA). The observer must store
+    /// exactly those codes in tls_cipher_suites[(src, dst, 443)].
+    #[test]
+    fn test_bc_1_04_003_tls_client_hello_captures_cipher_suites() {
+        let cipher_suites: &[u16] = &[0x0035, 0x002F, 0x0005];
+        let payload = build_client_hello(0x0303, &[], cipher_suites);
+
+        let src: IpAddr = ip("10.0.0.1");
+        let dst: IpAddr = ip("10.0.0.2");
+        let pkt = make_tls_packet("10.0.0.1", "10.0.0.2", 443, payload);
+
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&pkt);
+        let obs = observer.observations();
+
+        let stored = obs.tls_cipher_suites.get(&(src, dst, 443));
+        assert!(
+            stored.is_some(),
+            "BC-1.04.003: tls_cipher_suites must have an entry for (src, dst, 443) \
+             after observing a ClientHello on tcp/443"
+        );
+        assert_eq!(
+            stored.unwrap(),
+            &vec![0x0035u16, 0x002F, 0x0005],
+            "BC-1.04.003: stored cipher_suites must exactly match the ClientHello payload"
+        );
+    }
+
+    /// Defensive (BC-1.04.003): an empty cipher_suites list must not panic
+    /// the observer. The map entry may be absent or hold an empty Vec.
+    #[test]
+    fn test_bc_1_04_003_empty_cipher_suites_list_does_not_panic() {
+        let payload = build_client_hello(0x0303, &[], &[]);
+        let pkt = make_tls_packet("10.0.0.1", "10.0.0.2", 443, payload);
+
+        let mut observer = Observer::new(vec![]);
+        // Must not panic.
+        observer.observe(&pkt);
+        let obs = observer.observations();
+
+        // Either no entry or an empty Vec is acceptable.
+        let entry = obs
+            .tls_cipher_suites
+            .get(&(ip("10.0.0.1"), ip("10.0.0.2"), 443));
+        if let Some(suites) = entry {
+            assert!(
+                suites.is_empty(),
+                "BC-1.04.003: empty cipher_suites in ClientHello must yield an empty Vec \
+                 (or no entry), not garbage"
+            );
+        }
+        // No panic → test passes.
+    }
+
+    /// Defensive (BC-1.04.003): a payload truncated mid-way through the
+    /// cipher_suites field must not panic. The observer must either skip the
+    /// entry entirely or accumulate only the validly-decoded prefix.
+    #[test]
+    fn test_bc_1_04_003_truncated_payload_no_panic() {
+        // Build a full ClientHello then lop off enough bytes to land us in the
+        // middle of the cipher_suites array. We include two suites (4 bytes of
+        // suite data), then truncate to drop the final 2 bytes so the second
+        // suite is missing.
+        let cipher_suites: &[u16] = &[0x0035, 0x002F];
+        let full_payload = build_client_hello(0x0303, &[], cipher_suites);
+
+        // Drop the last 2 bytes → truncates mid-cipher_suites.
+        let truncated = &full_payload[..full_payload.len().saturating_sub(2)];
+
+        let pkt = make_tls_packet("10.0.0.1", "10.0.0.2", 443, truncated.to_vec());
+
+        let mut observer = Observer::new(vec![]);
+        // Must not panic.
+        observer.observe(&pkt);
+        // If we got here without a panic the invariant is satisfied.
+        // We don't assert on the map contents — partial decode is acceptable.
     }
 }

@@ -202,6 +202,7 @@ fn build_fixture() -> Observations {
             m.insert((ip("10.10.0.5"), ip("10.10.0.20"), 443, 0x0301), 4);
             m
         },
+        tls_cipher_suites: HashMap::new(),
         hostnames: {
             let mut m = std::collections::BTreeMap::new();
             m.insert(ip("10.10.0.5"), "ENG-WS-01".to_string());
@@ -2378,5 +2379,33 @@ fn ntp_external_flags_multicast_destination() {
         "boundary.ntp_external must fire for OT host → multicast NTP (224.0.1.1) \
          because multicast is outside the OT subnet (EC-003); got {} findings",
         ntp_findings.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// S-2.07 / BC-3.04.005 — compat.weak_tls_cipher wiring regression guard
+// ---------------------------------------------------------------------------
+
+/// Regression guard: when tls_cipher_suites contains a weak cipher code,
+/// run_all must include a finding with id `compat.weak_tls_cipher`. Mirrors
+/// the compat_ntlmv1_wired_into_run_all pattern — catches the case where the
+/// stub's empty-Vec return persists into production or the detector is
+/// accidentally removed from run_all.
+#[test]
+fn compat_weak_tls_cipher_wired_into_run_all() {
+    let mut obs = Observations::default();
+    let src = ip("10.0.0.1");
+    let dst = ip("10.0.0.2");
+    // 0x0005 = TLS_RSA_WITH_RC4_128_SHA — should trigger the detector.
+    obs.tls_cipher_suites.insert((src, dst, 443), vec![0x0005]);
+
+    let subnets = ot_subnets();
+    let findings = run_all(&obs, &subnets);
+
+    let weak_finding = findings.iter().find(|f| f.id == "compat.weak_tls_cipher");
+    assert!(
+        weak_finding.is_some(),
+        "run_all must include compat.weak_tls_cipher when tls_cipher_suites \
+         contains a weak cipher code (RC4_128_SHA 0x0005)"
     );
 }

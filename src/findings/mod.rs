@@ -16,6 +16,7 @@ pub mod recon_scan;
 mod smbv1;
 mod stale_tls;
 mod unexpected_protocols;
+pub mod weak_tls_cipher;
 
 use std::net::IpAddr;
 
@@ -153,6 +154,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         dnp3_engineering::METADATA,
         smbv1::METADATA,
         stale_tls::METADATA,
+        weak_tls_cipher::WEAK_TLS_CIPHER_METADATA,
         internet_egress::METADATA,
         dns_resolver::METADATA,
         ntp_external::METADATA,
@@ -180,6 +182,7 @@ pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     out.extend(unexpected_protocols::detect(obs, ot_subnets));
     out.extend(smbv1::detect(obs));
     out.extend(stale_tls::detect(obs));
+    out.extend(weak_tls_cipher::build_findings(obs));
     out.extend(dns_resolver::detect(obs, ot_subnets));
     out.extend(ntp_external::detect(obs, ot_subnets));
     out.extend(recon_scan::detect(obs, ot_subnets));
