@@ -1,9 +1,9 @@
 ---
 artifact_type: behavioral-contract-index
 project: otsniff
-generated: 2026-05-14
+generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 85  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007
+total_bcs: 87  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -16,7 +16,7 @@ deviations:
 
 # Behavioral Contracts — Master Index
 
-85 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
+87 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
 named `BC-AUDIT-NNN` contracts (Phase 0 brownfield audit) were
 promoted to first-class numbered BCs in S-1.05 (v0.4.0); the legacy
 IDs survive as aliases at the bottom of this file for traceability
@@ -49,6 +49,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-1.03.002 Telnet session observation (HIGH)
 - BC-1.03.003 HTTP Basic credential observation (HIGH)
 - BC-1.03.004 SNMPv1/v2c credential observation (HIGH)
+- BC-1.03.005 LDAP simple-bind observation: BER-encoded BindRequest on tcp/389 or tcp/3268 with version 3 and SimpleAuthentication choice (tag 0x80); `anonymous: bool` set when DN + password are both empty (EC-003); STARTTLS state tracked per flow by observer (HIGH, added S-2.05 v0.4.0)
 - BC-1.03.007 `cred_events` deduplicated at observation time by `(src, dst, dst_port, kind)`; duplicate increments `count: u32` (saturating); entry not appended (HIGH, added S-2.02 v0.4.0)
 - BC-1.04.001 SMBv1 packet observation (HIGH)
 - BC-1.04.002 TLS ClientHello version capture (HIGH)
@@ -65,6 +66,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-3.01.001 `creds.ftp` fires on FtpAuth events (HIGH)
 - BC-3.01.002 `creds.{telnet,http_basic,snmp}` fire analogously (HIGH)
 - BC-3.01.003 Credential findings dedupe across destinations (HIGH)
+- BC-3.01.005 `creds.ldap_simple_bind` fires at Critical for plaintext LDAP bind; suppressed by prior STARTTLS on the same flow (`used_starttls == true`) or anonymous bind (`anonymous == true`); rolls up by `(src, dst)` pair (HIGH, added S-2.05 v0.4.0)
 - BC-3.02.001 `egress.ot_to_internet` fires on non-empty external_flows (HIGH)
 - BC-3.02.002 `internet_egress` playbook branches on flow categories: appends category-specific guidance paragraphs when external flows include DNS (53), NTP (123), or tunnel ports (1194, 4500, 500, 51820) (HIGH, promoted from BC-AUDIT-010 in S-1.05)
 - BC-3.03.001 `ics.modbus_writes` fires on engineering-class modbus events (HIGH)
@@ -177,16 +179,16 @@ numbered space (their HIGH tags are now inline).
 
 | Bucket | Count |
 |---|---:|
-| Numbered BCs, HIGH    | 83 |
+| Numbered BCs, HIGH    | 85 |
 | Numbered BCs, MEDIUM  | 2 |
 | Numbered BCs, LOW     | 0 |
-| **Grand total**       | **85** |
+| **Grand total**       | **87** |
 
-**Verification:** `grep -cE '\(HIGH[,)]' BC-INDEX.md` must equal 83;
+**Verification:** `grep -cE '\(HIGH[,)]' BC-INDEX.md` must equal 85;
 `grep -cE '\(MEDIUM[,)]' BC-INDEX.md` must equal 2;
 `grep -c '^- BC-AUDIT-' BC-INDEX.md` must equal 0 (legacy IDs live
 in the alias table, never as numbered-list bullets);
-`grep -cE '^- BC-[0-9]\.' BC-INDEX.md` must equal 85.
+`grep -cE '^- BC-[0-9]\.' BC-INDEX.md` must equal 87.
 
 ## Open Question BCs (coverage gaps, not yet specified)
 
