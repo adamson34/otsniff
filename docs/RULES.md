@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**17 rules.**
+**18 rules.**
 
 ## Index
 
@@ -22,6 +22,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`ics.dnp3_engineering`](#icsdnp3_engineering) | high | DNP3 engineering-class commands on the wire |
 | [`compat.smbv1`](#compatsmbv1) | high | SMBv1 traffic observed |
 | [`compat.stale_tls`](#compatstale_tls) | medium | Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1) |
+| [`compat.weak_tls_cipher`](#compatweak_tls_cipher) | medium | Weak TLS cipher suites advertised (RC4 / DES / 3DES / NULL) |
 | [`egress.ot_to_internet`](#egressot_to_internet) | critical | Internet-bound traffic from OT subnets |
 | [`boundary.dns_resolver`](#boundarydns_resolver) | medium | DNS queries from OT to an out-of-zone resolver |
 | [`boundary.ntp_external`](#boundaryntp_external) | medium | OT host syncing time to public NTP |
@@ -198,6 +199,20 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 **References:**
 
 - **RFC** — RFC 8996 — Deprecating TLS 1.0 and TLS 1.1 ([link](https://datatracker.ietf.org/doc/html/rfc8996))
+- **CWE** — CWE-326 — Inadequate Encryption Strength ([link](https://cwe.mitre.org/data/definitions/326.html))
+
+## `compat.weak_tls_cipher`
+
+**Weak TLS cipher suites advertised (RC4 / DES / 3DES / NULL)**
+
+- **Severity:** medium
+- **Data source:** `tls_cipher_suites`
+
+**Trigger.** S-2.07: TBD by implementer
+
+**References:**
+
+- **RFC** — RFC 7465 — Prohibiting RC4 Cipher Suites ([link](https://datatracker.ietf.org/doc/html/rfc7465))
 - **CWE** — CWE-326 — Inadequate Encryption Strength ([link](https://cwe.mitre.org/data/definitions/326.html))
 
 ## `egress.ot_to_internet`

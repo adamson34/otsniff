@@ -202,6 +202,7 @@ fn build_fixture() -> Observations {
             m.insert((ip("10.10.0.5"), ip("10.10.0.20"), 443, 0x0301), 4);
             m
         },
+        tls_cipher_suites: HashMap::new(),
         hostnames: {
             let mut m = std::collections::BTreeMap::new();
             m.insert(ip("10.10.0.5"), "ENG-WS-01".to_string());

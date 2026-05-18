@@ -283,6 +283,15 @@ pub struct Observations {
     /// count. legacy_version is the on-the-wire u16 (0x0301 = TLS 1.0,
     /// 0x0302 = TLS 1.1, 0x0303 = TLS 1.2 / 1.3).
     pub tls_client_hellos: HashMap<(IpAddr, IpAddr, u16, u16), u64>,
+    /// Map of (src, dst, dst_port) → cipher suite codes advertised in
+    /// TLS ClientHellos on that flow (S-2.07, BC-1.04.003). Each
+    /// ClientHello's cipher_suites list is appended; duplicates are
+    /// expected when the same flow sends multiple hellos. The detector
+    /// (`weak_tls_cipher`) reads this to identify RC4 / DES / NULL
+    /// suites. Populated by the implementer in Step 4; initialized empty
+    /// here so snapshot tests and all existing consumers compile without
+    /// change.
+    pub tls_cipher_suites: HashMap<(IpAddr, IpAddr, u16), Vec<u16>>,
     /// IP → hostname, populated from passive sources (DHCP option 12 today;
     /// mDNS / NetBIOS planned). Last-write-wins if multiple sources name
     /// the same IP, but in practice DHCP is the only source for now.
