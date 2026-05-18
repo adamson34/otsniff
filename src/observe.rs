@@ -135,6 +135,24 @@ pub enum CredKind {
     Snmpv1v2c,
 }
 
+/// One LDAP `BindRequest` with `SimpleAuthentication` observed on the wire.
+///
+/// Populated by `Observer::observe_tcp` for tcp/389 (and non-standard LDAP
+/// ports). The `used_starttls` flag is set by the caller after inspecting the
+/// flow's STARTTLS exchange history — see AC-003 (S-2.05).
+#[derive(Debug, Clone, Serialize)]
+pub struct LdapBindEvent {
+    pub ts: DateTime<Utc>,
+    pub src: IpAddr,
+    pub dst: IpAddr,
+    pub dst_port: u16,
+    /// LDAP version declared in the `BindRequest` (usually 3).
+    pub version: u8,
+    /// `true` when a successful STARTTLS exchange preceded this bind on the
+    /// same flow — the finding suppressor reads this field (AC-003).
+    pub used_starttls: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ExternalFlow {
     pub src: IpAddr,
@@ -153,6 +171,7 @@ pub struct Observations {
     pub enip_events: Vec<EnipEvent>,
     pub s7_events: Vec<S7Event>,
     pub dnp3_events: Vec<Dnp3Event>,
+    pub ldap_bind_events: Vec<LdapBindEvent>,
     pub cred_events: Vec<CredEvent>,
     /// Dedup index for `cred_events`. Maps `(src, dst, dst_port, kind)` to the
     /// index into `cred_events`. Populated and maintained exclusively by
