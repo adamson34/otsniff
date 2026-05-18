@@ -106,7 +106,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **Severity:** high
 - **Data source:** `ntlm_events`
 
-**Trigger.** S-2.06: TBD by implementer
+**Trigger.** Fires when at least one NTLMSSP NEGOTIATE_MESSAGE is observed in a TCP payload (ports 445, 139, 80, 443, 8080, 135) with NTLMSSP_NEGOTIATE_NTLM (bit 9, 0x00000200) set and NTLMSSP_NEGOTIATE_NTLM2_KEY (bit 19, 0x00080000) unset. NTLMv1 challenges are trivially crackable with off-the-shelf tools (e.g. hashcat, Responder) and should not appear on OT networks. NTLMv2 events are excluded — a separate rule covers those.
 
 **References:**
 

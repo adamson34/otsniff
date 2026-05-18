@@ -190,8 +190,39 @@ pub(crate) struct NtlmNegotiateRecognized {
 ///
 /// Returns `None` for any other payload (wrong signature, wrong message type,
 /// truncated, or flags indicate neither V1 nor V2). See EC-002.
-pub(crate) fn recognize_ntlm_negotiate(_payload: &[u8]) -> Option<NtlmNegotiateRecognized> {
-    todo!("S-2.06 Step 4: implement NTLM NEGOTIATE recognizer")
+pub(crate) fn recognize_ntlm_negotiate(payload: &[u8]) -> Option<NtlmNegotiateRecognized> {
+    // Need at least 16 bytes: 8-byte signature + 4-byte MessageType + 4-byte flags.
+    if payload.len() < 16 {
+        return None;
+    }
+    // Check NTLMSSP signature: bytes 0-7 == b"NTLMSSP\0".
+    if &payload[0..8] != b"NTLMSSP\0" {
+        return None;
+    }
+    // MessageType must be 1 (NEGOTIATE). Bytes 8-11, little-endian u32.
+    let msg_type = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    if msg_type != 1 {
+        return None;
+    }
+    // NegotiateFlags at bytes 12-15, little-endian u32.
+    let flags = u32::from_le_bytes(payload[12..16].try_into().unwrap());
+
+    // Classify version from flags (MS-NLMP §2.2.2.5 / §2.2.1.1).
+    //   NTLMSSP_NEGOTIATE_NTLM2_KEY (bit 19) = 0x00080000 → V2
+    //   NTLMSSP_NEGOTIATE_NTLM      (bit 9)  = 0x00000200 → V1 (NTLM2_KEY unset)
+    const NTLM2_KEY: u32 = 0x0008_0000;
+    const NTLM: u32 = 0x0000_0200;
+
+    let version = if (flags & NTLM2_KEY) != 0 {
+        NtlmVersion::V2
+    } else if (flags & NTLM) != 0 {
+        NtlmVersion::V1
+    } else {
+        // Neither NTLM bit is set — not a genuine NTLM auth attempt.
+        return None;
+    };
+
+    Some(NtlmNegotiateRecognized { version })
 }
 
 /// One LDAP `BindRequest` with `SimpleAuthentication` observed on the wire.
@@ -585,6 +616,31 @@ impl Observer {
             *self.obs.tls_client_hellos.entry(key).or_insert(0) += 1;
         }
 
+        // NTLMSSP NEGOTIATE detection.
+        // The signature `NTLMSSP\0` can appear at any offset inside SMB2 session
+        // setup, HTTP NTLM, or RPC payloads, so we scan the full payload rather
+        // than checking a fixed offset. The recognizer validates the message-type
+        // and flags fields, so false positives from accidental 8-byte matches are
+        // extremely unlikely.
+        //
+        // Port scope: 445 (SMB/CIFS), 139 (NetBIOS session), 80/443/8080 (HTTP
+        // NTLM auth), 135 (MSRPC endpoint mapper). All carry NTLM negotiate msgs.
+        let ntlm_port = matches!(pkt.dst_port, 445 | 139 | 80 | 443 | 8080 | 135)
+            || matches!(pkt.src_port, 445 | 139 | 80 | 443 | 8080 | 135);
+        if ntlm_port {
+            if let Some(offset) = find_ntlmssp_offset(payload) {
+                if let Some(recognized) = recognize_ntlm_negotiate(&payload[offset..]) {
+                    self.obs.ntlm_events.push(NtlmEvent {
+                        ts: pkt.ts,
+                        src: pkt.src_ip,
+                        dst: pkt.dst_ip,
+                        dst_port: pkt.dst_port,
+                        version: recognized.version,
+                    });
+                }
+            }
+        }
+
         // LDAP plaintext simple-bind (tcp/389 and tcp/3268 Global Catalog).
         // EC-001: port 3268 is in scope alongside the standard 389.
         //
@@ -694,6 +750,15 @@ impl Observer {
             }
         }
     }
+}
+
+/// Scan a TCP payload for the NTLMSSP signature `b"NTLMSSP\0"`.
+///
+/// Returns the byte offset of the first occurrence, or `None` if the
+/// signature is absent. The caller then slices from that offset and passes
+/// the sub-slice to `recognize_ntlm_negotiate` for full validation.
+fn find_ntlmssp_offset(payload: &[u8]) -> Option<usize> {
+    payload.windows(8).position(|w| w == b"NTLMSSP\0")
 }
 
 /// Check for the SMB1 magic bytes (`\xFF SMB`) at a given offset.
