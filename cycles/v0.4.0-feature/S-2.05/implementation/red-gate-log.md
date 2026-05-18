@@ -1,7 +1,7 @@
 ---
 document_type: red-gate-log
 level: ops
-version: "1.0"
+version: "1.1"
 status: complete
 producer: test-writer
 timestamp: 2026-05-18T00:00:00Z
@@ -15,6 +15,7 @@ traces_to: BC-1.03.005, BC-3.01.005
 stub_architect_agent: "[e8b0943]"
 stub_compile_verified: true
 test_writer_agent: "[6cfd694]"
+green_by_design_fix: "[7e3b0c6]"
 red_gate_verified: true
 ---
 
@@ -25,6 +26,24 @@ red_gate_verified: true
 | Story | Tests Written | All Fail (Red)? | Gate |
 |-------|--------------|-----------------|------|
 | S-2.05 | 10 | YES | PASSED (correctly red) |
+
+## Green-by-Design Fix (commit 7e3b0c6)
+
+The stub-architect wired `ldap_creds::build_findings` into `run_all_findings`
+with a `todo!()` body, which caused 28 pre-existing snapshot tests (and the
+`rule_catalog_matches_committed_rules_md` snapshot) to panic. This is a
+green-by-design stub regression: any stub wired into a live pipeline must
+return a benign no-op value rather than panic.
+
+Fix applied in commit `7e3b0c6`:
+- Changed `todo!("S-2.05: LDAP creds detector landing in step 4")` to `Vec::new()`
+- Added doc comment explaining stub status above the function
+- Regenerated `docs/RULES.md` (now **16 rules**, including `creds.ldap_simple_bind` stub entry)
+
+**Result after fix:**
+- 170 pre-existing tests now pass (snapshot 50/50, cli_smoke 16/16, memory_bound 1/1, lib 103/103)
+- New S-2.05 tests remain correctly red (7 lib + 1 integration = 8 failing tests)
+- `ldap_creds` integration tests: 2 of 3 now pass vacuously (suppression tests pass because `Vec::new()` suppresses everything); 1 fails via assertion — see updated table below
 
 ## Stubs Created (commit e8b0943)
 
@@ -40,9 +59,14 @@ to mark a bind event as anonymous to verify the finding layer suppresses it.
 This is a test-driven schema extension — the stub had only the fields
 declared in the AC-001 narrative; EC-003 requires the anonymity signal.
 
-## Red Gate Verification
+## Red Gate Verification (updated post green-by-design fix)
 
-All 10 new tests fail before any implementation.
+After fix commit `7e3b0c6`: 8 new S-2.05 tests fail, 2 ldap_creds integration tests pass
+vacuously (suppression/anonymous tests pass because `Vec::new()` is already empty). The
+positive detection test (`test_BC_3_01_005_positive_plaintext_bind_emits_critical_finding`)
+remains correctly red — failing via assertion, not panic.
+
+Original pre-fix: all 10 new tests failed before any implementation.
 
 ### S-2.05: Parser tests (src/parse/ldap.rs)
 
@@ -89,23 +113,23 @@ All 10 new tests fail before any implementation.
    right: 1
   ```
 
-### S-2.05: Detector tests (tests/ldap_creds.rs)
+### S-2.05: Detector tests (tests/ldap_creds.rs) — post green-by-design fix
 
-- AC-002 (BC-3.01.005): `test_BC_3_01_005_positive_plaintext_bind_emits_critical_finding` — FAIL
+- AC-002 (BC-3.01.005): `test_BC_3_01_005_positive_plaintext_bind_emits_critical_finding` — FAIL (correctly red)
   ```
-  panicked at src/findings/ldap_creds.rs:29:5:
-  not yet implemented: S-2.05: LDAP creds detector landing in step 4
+  panicked at tests/ldap_creds.rs:60:5:
+  assertion `left == right` failed: AC-002: must fire exactly one finding on plaintext bind
+    left: 0
+   right: 1
   ```
-- AC-003 negative: `test_BC_3_01_005_negative_post_starttls_bind_suppresses_finding` — FAIL
-  ```
-  panicked at src/findings/ldap_creds.rs:29:5:
-  not yet implemented: S-2.05: LDAP creds detector landing in step 4
-  ```
-- EC-003: `test_BC_1_03_005_anonymous_bind_suppressed` — FAIL
-  ```
-  panicked at src/findings/ldap_creds.rs:29:5:
-  not yet implemented: S-2.05: LDAP creds detector landing in step 4
-  ```
+  Failure mode changed from `todo!()` panic to assertion failure. This is correct red-gate behaviour.
+
+- AC-003 negative: `test_BC_3_01_005_negative_post_starttls_bind_suppresses_finding` — PASS (vacuously green)
+  `Vec::new()` already suppresses all findings; the suppression test passes vacuously.
+  This is acceptable — the suppression logic will be stress-tested once the positive path exists.
+
+- EC-003: `test_BC_1_03_005_anonymous_bind_suppressed` — PASS (vacuously green)
+  Same reason as above.
 
 ## Regression Check
 
@@ -114,13 +138,14 @@ All 10 new tests fail before any implementation.
 | 103 lib unit tests (pre-S-2.05) | all pass |
 | 16 cli_smoke integration tests | all pass |
 | 1 memory_bound integration test | pass |
-| 22 snapshot tests not exercising run_all | pass |
-| 28 snapshot tests exercising run_all | pre-existing FAIL (todo!() in stub commit e8b0943 — not caused by test-writer changes) |
+| 50 snapshot tests (incl. rule_catalog) | all pass (after RULES.md regen in 7e3b0c6) |
 
-Note: The 28 snapshot failures are pre-existing and were present in stub commit
-`e8b0943` before any test-writer changes. They fail because `run_all` calls
-`ldap_creds::build_findings` which is `todo!()`. This is expected — the
-implementer must resolve them.
+**All 170 pre-existing tests pass** after the green-by-design fix in commit `7e3b0c6`.
+
+Note: `docs/RULES.md` was regenerated as part of the fix commit because the
+stub introduced a new rule (`creds.ldap_simple_bind`), changing the catalog from
+15 to 16 rules. The `rule_catalog_matches_committed_rules_md` snapshot enforces
+that `docs/RULES.md` matches the live catalog output.
 
 ## Hand-Off to Implementer
 
