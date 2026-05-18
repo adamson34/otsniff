@@ -92,10 +92,14 @@ stories:
     pr: 47
     completed_at: 2026-05-12T16:24:47Z
   S-2.05:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-2.05-ldap-simple-bind
     worktree: null
+    merge_sha: 31e827b
+    pr: 68
+    merged_at: 2026-05-18T20:58:12Z
+    notes: "5 NITPICK findings logged during review (non-blocking)."
   S-2.06:
     status: pending
     wave: 1

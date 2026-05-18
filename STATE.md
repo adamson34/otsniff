@@ -111,3 +111,4 @@ Human approval gate. After approval:
 |---|---|---|---|---|
 | S-3.06 macOS CI flake fix | #66 | e425733 | 2026-05-15T17:12:47Z | AC-001/003 PASS; AC-002 1/5 (deferred) |
 | S-2.02 Cap cred_events dedup (BC-1.03.007) | #67 | 19ee8b0 | 2026-05-15T18:41:00Z | 170/170 tests pass; 3 NITPICKs deferred (cosmetic) |
+| S-2.05 `creds.ldap_simple_bind` (BC-1.03.005 + BC-3.01.005) | #68 | 31e827b | 2026-05-18T20:58:12Z | 5 NITPICKs logged (non-blocking); BCs registered at 03226af |
