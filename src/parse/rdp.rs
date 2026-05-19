@@ -265,6 +265,158 @@ mod tests {
         );
     }
 
+    // ── Group C: targeted mutant-killing tests ────────────────────────────────
+
+    // ── Line 54: `payload[0] != 0x03 || payload[1] != 0x00` ─────────────────
+    //
+    // The condition rejects the payload when EITHER byte is wrong.
+    // A `||` → `&&` mutant would only reject when BOTH bytes are wrong,
+    // allowing payloads that have the wrong version (payload[0] != 0x03)
+    // but the correct reserved byte, or vice versa.
+    //
+    // Test: valid reserved byte (0x00) but wrong TPKT version (not 0x03).
+    // Original: || triggers → None.  Mutant (&&): one branch false → Some.
+
+    /// TPKT version 0x04 with correct reserved byte 0x00 must return None.
+    /// Kills the `||` → `&&` mutant on line 54.
+    #[test]
+    fn test_rdp_line54_wrong_version_correct_reserved_is_rejected() {
+        let mut payload = build_x224_cc(0x00000000);
+        payload[0] = 0x04; // wrong TPKT version; payload[1] stays 0x00
+        let result = recognize_connection_confirm(&payload);
+        assert!(
+            result.is_none(),
+            "TPKT version 0x04 must be rejected even when reserved byte is correct (got {:?})",
+            result
+        );
+    }
+
+    /// Correct TPKT version 0x03 with wrong reserved byte 0x01 must return None.
+    /// Kills the `||` → `&&` mutant on line 54 from the other branch.
+    #[test]
+    fn test_rdp_line54_correct_version_wrong_reserved_is_rejected() {
+        let mut payload = build_x224_cc(0x00000000);
+        // payload[0] stays 0x03 (correct version)
+        payload[1] = 0x01; // reserved byte must be 0x00; 0x01 must be rejected
+        let result = recognize_connection_confirm(&payload);
+        assert!(
+            result.is_none(),
+            "reserved byte 0x01 must be rejected even when version is correct (got {:?})",
+            result
+        );
+    }
+
+    // ── Line 66: `payload[5] & 0xF0 != 0xD0` ────────────────────────────────
+    //
+    // The upper nibble of payload[5] must be 0xD (Connection Confirm).
+    // A `&` → `|` mutant would change the bitmask operation so that
+    // bytes with the wrong upper nibble could still match.
+    // A `&` → `^` mutant similarly.
+    //
+    // Strategy: use a PDU type byte whose upper nibble is NOT 0xD but whose
+    // full byte OR or XOR with 0xF0 might still equal 0xD0.
+    //
+    // payload[5] = 0xE0: upper nibble = 0xE ≠ 0xD.
+    //   0xE0 & 0xF0 = 0xE0 ≠ 0xD0 → None (correct).
+    //   0xE0 | 0xF0 = 0xF0 ≠ 0xD0 → None (same result — doesn't distinguish).
+    //   0xE0 ^ 0xF0 = 0x10 ≠ 0xD0 → None.
+    //
+    // payload[5] = 0xDF: upper nibble = 0xD, lower nibble = 0xF.
+    //   0xDF & 0xF0 = 0xD0 == 0xD0 → Some (correct — CDT may be any value).
+    //   0xDF | 0xF0 = 0xFF ≠ 0xD0 → None (wrong).
+    //   0xDF ^ 0xF0 = 0x2F ≠ 0xD0 → None (wrong).
+    //
+    // The second case distinguishes `&` from `|` and `^`.
+
+    /// PDU type 0xDF (upper nibble 0xD, lower nibble 0xF) must be accepted.
+    /// Any lower-nibble (CDT) value is permitted; only the upper nibble matters.
+    /// Kills `&` → `|` and `&` → `^` mutants on line 66.
+    #[test]
+    fn test_rdp_line66_connection_confirm_with_nonzero_cdt_is_accepted() {
+        let mut payload = build_x224_cc(0x00000002);
+        payload[5] = 0xDF; // upper nibble 0xD = CC; lower nibble 0xF = CDT field
+        let result = recognize_connection_confirm(&payload);
+        assert!(
+            result.is_some(),
+            "PDU type 0xDF (CC with CDT=0xF) must be accepted by the & mask check (got {:?})",
+            result
+        );
+        assert_eq!(
+            result.unwrap().selected_protocol,
+            2,
+            "selectedProtocol must be decoded correctly even with CDT bits set"
+        );
+    }
+
+    /// PDU type 0xC0 (upper nibble 0xC — not Connection Confirm) must be rejected.
+    /// Kills `&` → `|` mutant: 0xC0 | 0xF0 = 0xF0 ≠ 0xD0, so still None.
+    /// But 0xC0 & 0xF0 = 0xC0 ≠ 0xD0, original also None — this confirms
+    /// the mask behaviour for a near-miss nibble.
+    #[test]
+    fn test_rdp_line66_wrong_upper_nibble_c_is_rejected() {
+        let mut payload = build_x224_cc(0x00000000);
+        payload[5] = 0xC0; // upper nibble 0xC — CR-like; not a CC
+        let result = recognize_connection_confirm(&payload);
+        assert!(
+            result.is_none(),
+            "PDU type 0xC0 must be rejected (upper nibble is not 0xD) (got {:?})",
+            result
+        );
+    }
+
+    // ── Line 72: `payload[11] != 0x02` ───────────────────────────────────────
+    //
+    // Only RDP_NEG_RSP (type 0x02) is accepted. Type 0x03 is RDP_NEG_FAILURE.
+    // A `!=` → `==` mutant would invert the check:
+    //   Original: reject when type ≠ 0x02 (i.e., accept only 0x02).
+    //   Mutant:   reject when type == 0x02 (i.e., accept everything EXCEPT 0x02).
+    //
+    // Two tests: one where type=0x02 is accepted, one where type=0x03 is rejected.
+
+    /// RDP_NEG_RSP type 0x02 must be accepted.
+    /// Kills `!=` → `==` mutant on line 72 (mutant would reject 0x02 → None).
+    #[test]
+    fn test_rdp_line72_neg_rsp_type_0x02_is_accepted() {
+        let payload = build_x224_cc(0x00000001); // type byte at [11] is 0x02 by construction
+        assert_eq!(
+            payload[11], 0x02,
+            "sanity: build_x224_cc must set type=0x02"
+        );
+        let result = recognize_connection_confirm(&payload);
+        assert!(
+            result.is_some(),
+            "RDP_NEG_RSP type 0x02 must be accepted (got {:?})",
+            result
+        );
+    }
+
+    /// RDP_NEG_FAILURE type 0x03 must be rejected (treated as inconclusive).
+    /// Also kills the `!=` → `==` mutant: mutant would accept 0x03 → Some.
+    #[test]
+    fn test_rdp_line72_neg_failure_type_0x03_is_rejected() {
+        let mut payload = build_x224_cc(0x00000000);
+        payload[11] = 0x03; // RDP_NEG_FAILURE — EC-001
+        let result = recognize_connection_confirm(&payload);
+        assert!(
+            result.is_none(),
+            "RDP_NEG_FAILURE (type 0x03) must return None (got {:?})",
+            result
+        );
+    }
+
+    /// RDP_NEG_REQ type 0x01 (request, not response) must also be rejected.
+    #[test]
+    fn test_rdp_line72_neg_req_type_0x01_is_rejected() {
+        let mut payload = build_x224_cc(0x00000000);
+        payload[11] = 0x01; // RDP_NEG_REQ — not a response
+        let result = recognize_connection_confirm(&payload);
+        assert!(
+            result.is_none(),
+            "RDP_NEG_REQ (type 0x01) must return None (got {:?})",
+            result
+        );
+    }
+
     // -------------------------------------------------------------------------
     // BC-1.04.004: observer-level integration (Observer::observe via Packet)
     // -------------------------------------------------------------------------
