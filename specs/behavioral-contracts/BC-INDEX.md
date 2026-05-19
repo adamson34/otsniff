@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 98  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005
+total_bcs: 99  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -16,7 +16,7 @@ deviations:
 
 # Behavioral Contracts — Master Index
 
-97 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
+98 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
 named `BC-AUDIT-NNN` contracts (Phase 0 brownfield audit) were
 promoted to first-class numbered BCs in S-1.05 (v0.4.0); the legacy
 IDs survive as aliases at the bottom of this file for traceability
@@ -111,6 +111,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-5.02.001 Leak detector regex covers IPv4/IPv6/MAC (HIGH)
 - BC-5.02.002 Map-value check catches hostname leaks regex can't (HIGH)
 - BC-5.02.003 Privacy invariant: combined check on AI-bound bytes (HIGH)
+- BC-5.03.001 `merge_map(baseline, &obs)` preserves baseline pseudonyms for known real values; assigns fresh pseudonyms to new real values continuing from `baseline.max_index + 1` per family (host_/mac_/name_ independent); preserves baseline-only entries (EC-003); stamps `created_at` to merge time; `ScrubMap::validate()` rejects empty-string pseudonym keys or empty real values (EC-001); round-trip exact via scrub/unscrub; leak detector passes after merge (HIGH, added S-6.01 v0.4.0)
 
 ### S.6 — AI orchestration (`src/ai/*`)
 - BC-6.01.001 AI markdown rendering strips raw HTML events (HIGH)
