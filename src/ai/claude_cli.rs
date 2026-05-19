@@ -7,15 +7,14 @@
 //!
 //! ## S-5.02 heartbeat surface
 //!
-//! [`run_with_heartbeat`] is the stub for the background-thread heartbeat
-//! introduced in S-5.02. It is `pub(crate)` so unit tests in this module
-//! (and integration tests under `tests/`) can construct test doubles and
-//! assert on the heartbeat protocol without going through `analyze`.
+//! [`run_with_heartbeat`] drives the background-thread heartbeat introduced
+//! in S-5.02. It is `pub(crate)` so unit tests in this module (and integration
+//! tests under `tests/`) can construct test doubles and assert on the heartbeat
+//! protocol without going through `analyze`.
 //!
 //! Visibility choice: `pub(crate)` (not `pub`) because the heartbeat
 //! mechanism is an implementation detail of the AI subsystem and no
-//! external crate consumer should call it directly. The implementer can
-//! call it from `analyze` in Step 4 once the real body lands.
+//! external crate consumer should call it directly.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -45,7 +44,7 @@ pub struct ClaudeCliProvider {
     /// is also covered. The field is kept separate from the TTY check so that
     /// unit tests can assert on verbose=true/false behaviour without needing a
     /// real terminal attached.
-    pub verbose: bool,
+    pub(crate) verbose: bool,
 }
 
 impl ClaudeCliProvider {
