@@ -230,10 +230,14 @@ stories:
     merged_at: 2026-05-19T20:00:57Z
     notes: "Second Kani formal-verification story. 3 harnesses (leak_regex_ipv4 4-digit symbolic; leak_regex_ipv6 narrowed to ::1; leak_regex_mac 12-nibble symbolic) in src/ai/leak_detector.rs. BC-5.02.001 pre-existing. cargo-kani not installed locally; proof verification deferred to CI workflow_dispatch."
   S-4.03:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-4.03-kani-map-value-substring
     worktree: null
+    merge_sha: 31619ea
+    pr: 82
+    merged_at: 2026-05-19T20:15:02Z
+    notes: "Third/final Kani formal-verification story. map_value_substring harness in src/ai/leak_detector.rs proves bidirectional iff invariant. Bounds N=16/K=1/value≤8 narrowed from spec ≤32/≤4 for tractable CBMC paths. BC-5.02.002 pre-existing. cargo-kani not installed locally; proof deferred to CI. Wave 1 detector backlog now closed at 32/32 of detector-stories; remaining S-4.04 (composed privacy invariant) is in Wave 2."
   S-5.01:
     status: completed
     wave: 1

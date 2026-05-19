@@ -40,7 +40,7 @@ status: draft
 | S-3.04 | Fuzz harnesses for parsers | E-3 | 2 | 5 | draft | S-2.04 | S.1 |
 | S-4.01 | Kani: scrub round-trip | E-4 | 1 | 5 | completed (#80, fde249d) | — | S.5 |
 | S-4.02 | Kani: leak-detector regex | E-4 | 1 | 5 | completed (#81, 827d5b6) | — | S.5 |
-| S-4.03 | Kani: map-value substring | E-4 | 1 | 3 | ready | — | S.5 |
+| S-4.03 | Kani: map-value substring | E-4 | 1 | 3 | completed (#82, 31619ea) | — | S.5 |
 | S-4.04 | Kani: composed privacy invariant | E-4 | 2 | 5 | draft | S-4.01, S-4.02, S-4.03 | S.5 |
 | S-5.01 | Parse progress feedback | E-5 | 1 | 2 | completed (#73, 7556939) | — | S.0, S.9 |
 | S-5.02 | Claude heartbeat | E-5 | 1 | 2 | completed (#74, 62c937d) | — | S.6 |
