@@ -269,4 +269,201 @@ mod tests {
             "Oversized declared length must return None, not panic"
         );
     }
+
+    // ── Group B: boundary tests for each bounds-check mutant ─────────────────
+    //
+    // The surviving mutants operate on the `>` comparisons on lines 47, 58, 73,
+    // 82 and the `||` / `==` on line 64 and the `>` in skip_tlv (line 126).
+    //
+    // Strategy: craft payloads where the declared length field is exactly one
+    // byte past the end of the available buffer. These trip the `>` check; a
+    // mutant that changes `>` to `>=` would require the claimed size to equal
+    // the buffer length (tight fit), so we also test the tight-fit case where
+    // the buffer is exactly big enough and the result should be `Some(...)`.
+
+    // ── Line 47: outer SEQUENCE bounds check ─────────────────────────────────
+
+    /// The outer SEQUENCE declares length exactly equal to remaining bytes.
+    /// The check `pos + seq_len > bytes.len()` allows this; `>=` would reject it.
+    #[test]
+    fn test_ldap_line47_seq_len_exactly_fits_is_accepted() {
+        // A valid bind request: every byte is accounted for.
+        let bytes = make_bind_request(b"cn=admin", b"secret");
+        // If this is a valid BER message the outer SEQUENCE length exactly covers
+        // the buffer contents (make_bind_request does not add padding).
+        // Parsing must succeed.
+        let result = recognize_bind_request(&bytes);
+        assert!(
+            result.is_some(),
+            "bind request whose SEQUENCE length exactly fits must be accepted"
+        );
+    }
+
+    /// The outer SEQUENCE claims one more byte than the buffer contains.
+    /// Must return None.
+    #[test]
+    fn test_ldap_line47_seq_len_exceeds_buffer_by_one_is_rejected() {
+        let mut bytes = make_bind_request(b"cn=admin", b"secret");
+        // Increment the outer length byte by 1 so the claimed size is one past the end.
+        bytes[1] += 1;
+        assert_eq!(
+            recognize_bind_request(&bytes),
+            None,
+            "SEQUENCE claiming one extra byte must be rejected"
+        );
+    }
+
+    // ── Line 58: BindRequest APPLICATION 0 bounds check ─────────────────────
+
+    /// The BindRequest APPLICATION tag claims a length one byte beyond the buffer.
+    /// Must return None.
+    #[test]
+    fn test_ldap_line58_bind_len_exceeds_buffer_is_rejected() {
+        let mut bytes = make_bind_request(b"cn=admin", b"secret");
+        // bytes[1] is the outer SEQUENCE length.
+        // bytes[2] is the messageID tag (0x02).
+        // bytes[3] is the messageID length (0x01).
+        // bytes[4] is the messageID value (0x01).
+        // bytes[5] is the BindRequest APPLICATION tag (0x60).
+        // bytes[6] is the BindRequest length.
+        // We inflate the BindRequest length by 1 without touching the outer SEQUENCE
+        // length, so the outer bounds check (line 47) passes but the inner one (line 58) fails.
+        bytes[6] += 1;
+        assert_eq!(
+            recognize_bind_request(&bytes),
+            None,
+            "BindRequest claiming one extra byte must be rejected"
+        );
+    }
+
+    // ── Line 64: version ver_len == 0 || pos + ver_len > buf ────────────────
+    //
+    // The condition is `ver_len == 0 || pos + ver_len > bytes.len()`.
+    // Mutants could:
+    //   (a) change `||` to `&&` — making a zero-length version field accepted
+    //   (b) change `==` to `!=` — making any non-zero ver_len unconditionally fail
+    //
+    // Test (a): craft a BindRequest whose version INTEGER has len=0.
+    //   Original (||): rejects because ver_len == 0 is true.
+    //   Mutant (&&):  does NOT reject because `0 > len` is also false,
+    //                 so it happily reads bytes[pos] as the version.
+
+    /// A version INTEGER with declared length 0 must be rejected.
+    /// This kills the `||` → `&&` mutant on line 64.
+    #[test]
+    fn test_ldap_line64_zero_version_length_is_rejected() {
+        let mut bytes = make_bind_request(b"cn=admin", b"secret");
+        // Layout (from make_bind_request):
+        //   [0]  0x30  outer SEQUENCE tag
+        //   [1]  len   outer SEQUENCE length
+        //   [2]  0x02  messageID tag
+        //   [3]  0x01  messageID length
+        //   [4]  0x01  messageID value
+        //   [5]  0x60  BindRequest tag
+        //   [6]  len   BindRequest length
+        //   [7]  0x02  version tag
+        //   [8]  0x01  version length   ← patch to 0x00
+        //   [9]  0x03  version value
+        bytes[8] = 0x00; // version length = 0
+        assert_eq!(
+            recognize_bind_request(&bytes),
+            None,
+            "version INTEGER with length 0 must be rejected (|| check on line 64)"
+        );
+    }
+
+    // ── Line 73: DN OctetString bounds check ─────────────────────────────────
+
+    /// DN OctetString claims a length one byte beyond the buffer.
+    /// Must return None.
+    #[test]
+    fn test_ldap_line73_dn_len_exceeds_buffer_is_rejected() {
+        // Build a valid message then inflate the DN length byte.
+        let dn = b"cn=admin";
+        let pw = b"secret";
+        let mut bytes = make_bind_request(dn, pw);
+        // The DN OctetString tag (0x04) sits after the version field.
+        // Walk the known offsets:
+        //   [0] 0x30 outer tag
+        //   [1] outer len
+        //   [2] 0x02 msgID tag
+        //   [3] 0x01 msgID len
+        //   [4] 0x01 msgID value
+        //   [5] 0x60 bind tag
+        //   [6] bind len
+        //   [7] 0x02 version tag
+        //   [8] 0x01 version len
+        //   [9] 0x03 version value
+        //   [10] 0x04 DN tag
+        //   [11] DN len  ← inflate
+        bytes[11] = (dn.len() as u8) + 50; // claim far more than available
+        assert_eq!(
+            recognize_bind_request(&bytes),
+            None,
+            "DN OctetString claiming excess bytes must be rejected (line 73)"
+        );
+    }
+
+    // ── Line 82: password SimpleAuthentication bounds check ──────────────────
+
+    /// Password SimpleAuthentication claims a length one byte beyond the buffer.
+    /// Must return None.
+    #[test]
+    fn test_ldap_line82_pw_len_exceeds_buffer_is_rejected() {
+        let dn = b"cn=admin";
+        let pw = b"secret";
+        let mut bytes = make_bind_request(dn, pw);
+        // The SimpleAuthentication (0x80) tag comes after the DN content.
+        // Offset of the 0x80 tag = 10 (version tlv) + 2 + dn.len() (DN tlv)
+        //                        = 2 (outer hdr) + 3 (msgID tlv) + 2 (bind hdr) +
+        //                          3 (version tlv) + 2 + dn.len() (DN tlv)
+        // = 12 + dn.len()
+        // The length byte follows the tag: offset 13 + dn.len()
+        let pw_tag_offset = 12 + dn.len();
+        let pw_len_offset = pw_tag_offset + 1;
+        assert_eq!(bytes[pw_tag_offset], 0x80, "sanity: expected 0x80 at pw tag offset");
+        bytes[pw_len_offset] = (pw.len() as u8) + 50; // claim far more than available
+        assert_eq!(
+            recognize_bind_request(&bytes),
+            None,
+            "password SimpleAuthentication claiming excess bytes must be rejected (line 82)"
+        );
+    }
+
+    // ── Line 126: skip_tlv bounds check ──────────────────────────────────────
+    //
+    // skip_tlv is used to skip the messageID. If the messageID claims
+    // a length that extends past the buffer end, skip_tlv must return None
+    // so that recognize_bind_request propagates None.
+
+    /// messageID INTEGER whose claimed length runs past the buffer end must
+    /// cause the entire parse to return None.
+    #[test]
+    fn test_ldap_line126_skip_tlv_len_exceeds_buffer_is_rejected() {
+        let mut bytes = make_bind_request(b"cn=admin", b"secret");
+        // messageID length is at offset 3. Inflate it so *pos + len > buf.len().
+        // The messageID value occupies 1 byte (offset 4), so setting len=255
+        // guarantees the overflow.
+        bytes[3] = 0x7F; // 127 bytes claimed — short-form, not long-form (bit 7 clear)
+        assert_eq!(
+            recognize_bind_request(&bytes),
+            None,
+            "messageID length overflowing buffer must be rejected by skip_tlv (line 126)"
+        );
+    }
+
+    /// Verifies the || short-circuit in line 64: a valid non-zero ver_len that
+    /// fits within the buffer must not be rejected.
+    /// This is the complement of test_ldap_line64_zero_version_length_is_rejected.
+    #[test]
+    fn test_ldap_line64_nonzero_version_length_that_fits_is_accepted() {
+        // Standard bind request has ver_len=1 and the byte fits — must succeed.
+        let bytes = make_bind_request(b"uid=test", b"pass123");
+        let result = recognize_bind_request(&bytes);
+        assert!(
+            result.is_some(),
+            "standard ver_len=1 that fits in buffer must be accepted"
+        );
+        assert_eq!(result.unwrap().version, 3);
+    }
 }

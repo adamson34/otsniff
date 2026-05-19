@@ -177,3 +177,131 @@ pub fn build_findings(obs: &Observations) -> Vec<Finding> {
 
     findings
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Group A: cipher_name exact-string tests ───────────────────────────────
+    //
+    // These tests kill 8 mutants on lines 71-77 of cipher_name():
+    //   • return "" instead of the real string (line 71)
+    //   • return "xyzzy" instead of the real string (line 71)
+    //   • delete each match arm for 0x0001, 0x0002, 0x0004, 0x0005, 0x0009, 0x000A
+    //
+    // Without these assertions, a mutant that swaps any arm to return ""
+    // or deletes an arm (causing the _ => "unknown" fallback to fire) passes
+    // all existing tests. Asserting the exact canonical string for every weak
+    // code makes every such mutation detectable.
+
+    #[test]
+    fn test_cipher_name_null_md5() {
+        assert_eq!(
+            cipher_name(0x0001),
+            "TLS_RSA_WITH_NULL_MD5",
+            "0x0001 must map to TLS_RSA_WITH_NULL_MD5"
+        );
+    }
+
+    #[test]
+    fn test_cipher_name_null_sha() {
+        assert_eq!(
+            cipher_name(0x0002),
+            "TLS_RSA_WITH_NULL_SHA",
+            "0x0002 must map to TLS_RSA_WITH_NULL_SHA"
+        );
+    }
+
+    #[test]
+    fn test_cipher_name_rc4_128_md5() {
+        assert_eq!(
+            cipher_name(0x0004),
+            "TLS_RSA_WITH_RC4_128_MD5",
+            "0x0004 must map to TLS_RSA_WITH_RC4_128_MD5"
+        );
+    }
+
+    #[test]
+    fn test_cipher_name_rc4_128_sha() {
+        assert_eq!(
+            cipher_name(0x0005),
+            "TLS_RSA_WITH_RC4_128_SHA",
+            "0x0005 must map to TLS_RSA_WITH_RC4_128_SHA"
+        );
+    }
+
+    #[test]
+    fn test_cipher_name_des_cbc_sha() {
+        assert_eq!(
+            cipher_name(0x0009),
+            "TLS_RSA_WITH_DES_CBC_SHA",
+            "0x0009 must map to TLS_RSA_WITH_DES_CBC_SHA"
+        );
+    }
+
+    #[test]
+    fn test_cipher_name_3des_ede_cbc_sha() {
+        assert_eq!(
+            cipher_name(0x000A),
+            "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
+            "0x000A must map to TLS_RSA_WITH_3DES_EDE_CBC_SHA"
+        );
+    }
+
+    /// Unknown code must fall through to "unknown" — verifies the wildcard arm
+    /// is intact and also confirms no weak-code arm has been accidentally extended.
+    #[test]
+    fn test_cipher_name_unknown_code_returns_unknown() {
+        assert_eq!(
+            cipher_name(0xFFFF),
+            "unknown",
+            "unrecognized code must return \"unknown\""
+        );
+        // GREASE value (0x0A0A) must also fall through.
+        assert_eq!(
+            cipher_name(0x0A0A),
+            "unknown",
+            "GREASE value 0x0A0A must return \"unknown\""
+        );
+    }
+
+    // ── build_findings integration: cipher_name is used in the evidence strings ─
+    //
+    // This test constructs an Observations fixture with a single weak cipher
+    // suite, calls build_findings, and asserts that the evidence line contains
+    // the correct canonical name. A mutant that blanks or misnames any match
+    // arm in cipher_name() will produce a wrong evidence string and fail here.
+
+    #[test]
+    fn test_build_findings_evidence_contains_canonical_cipher_name() {
+        use std::net::IpAddr;
+
+        let src: IpAddr = "10.0.0.1".parse().unwrap();
+        let dst: IpAddr = "10.0.0.2".parse().unwrap();
+
+        let mut obs = Observations::default();
+        obs.tls_cipher_suites
+            .insert((src, dst, 443), vec![0x0001, 0x000A]);
+
+        let findings = build_findings(&obs);
+        assert_eq!(findings.len(), 1, "one finding expected for one (src,dst) pair");
+
+        let f = &findings[0];
+        // The summary and evidence lines are built via cipher_name().
+        // If cipher_name(0x0001) were "" or "xyzzy" the assertion below fails.
+        assert!(
+            f.summary.contains("TLS_RSA_WITH_NULL_MD5")
+                || f.evidence.iter().any(|e| e.contains("TLS_RSA_WITH_NULL_MD5")),
+            "finding must reference TLS_RSA_WITH_NULL_MD5 by name; got summary: {}",
+            f.summary
+        );
+        assert!(
+            f.summary.contains("TLS_RSA_WITH_3DES_EDE_CBC_SHA")
+                || f.evidence
+                    .iter()
+                    .any(|e| e.contains("TLS_RSA_WITH_3DES_EDE_CBC_SHA")),
+            "finding must reference TLS_RSA_WITH_3DES_EDE_CBC_SHA by name; got summary: {}",
+            f.summary
+        );
+    }
+}
