@@ -90,6 +90,19 @@ expression: html
     margin: 0.75rem 0;
     box-shadow: var(--shadow);
   }
+  /* Finding card collapsibility (S-5.07 / BC-8.01.005) */
+  details.finding > summary::-webkit-details-marker { display: none; }
+  details.finding > summary {
+    cursor: pointer;
+    list-style: none;
+  }
+  details.finding > summary::before {
+    content: "▾ ";
+    color: var(--muted);
+  }
+  details.finding:not([open]) > summary::before {
+    content: "▸ ";
+  }
   .finding.sev-critical { border-left-color: var(--crit); background: color-mix(in oklch, var(--crit) 8%, var(--paper)); }
   .finding.sev-high { border-left-color: var(--high); background: color-mix(in oklch, var(--high) 8%, var(--paper)); }
   .finding.sev-medium { border-left-color: var(--med); background: color-mix(in oklch, var(--med) 8%, var(--paper)); }
@@ -272,6 +285,9 @@ expression: html
       print-color-adjust: exact;
     }
     .finding { break-inside: avoid; }
+    details.finding > *:not(summary) { display: block !important; }
+    details.finding > summary::-webkit-details-marker,
+    details.finding > summary::before { display: none !important; content: "" !important; }
     details[open] summary { display: none; }
     details { margin: 0; }
     details[open] > summary.section-summary,
@@ -321,8 +337,8 @@ expression: html
 <h2>Findings</h2>
 
   
-  <div class="finding sev-critical">
-    <h3><span class="badge sev-critical">critical</span>Telnet session observed (cleartext by definition)</h3>
+  <details open class="finding sev-critical">
+    <summary><span class="badge sev-critical">critical</span>Telnet session observed (cleartext by definition)</summary>
     <div>1 Telnet packet(s) seen across 1 host(s). Credentials traversing these flows should be considered exposed.</div>
     
     <details>
@@ -347,10 +363,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>creds.telnet</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-critical">
-    <h3><span class="badge sev-critical">critical</span>Internet-bound traffic from OT subnets</h3>
+  <details open class="finding sev-critical">
+    <summary><span class="badge sev-critical">critical</span>Internet-bound traffic from OT subnets</summary>
     <div>Saw 1 distinct flow(s) (600 bytes total) from hosts inside the configured OT subnets to public internet addresses. Plant networks should be egress-restricted at the IT/OT boundary.</div>
     
     <details>
@@ -375,10 +391,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>egress.ot_to_internet</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-high">
-    <h3><span class="badge sev-high">high</span>SMBv1 traffic on the wire</h3>
+  <details open class="finding sev-high">
+    <summary><span class="badge sev-high">high</span>SMBv1 traffic on the wire</summary>
     <div>12 SMBv1 packet(s) seen across 1 host pair(s). SMBv1 is deprecated, blocked by default in modern Windows, and a known exploitation surface (WannaCry / EternalBlue). Its presence indicates legacy clients, legacy servers, or both.</div>
     
     <details>
@@ -403,10 +419,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>compat.smbv1</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-high">
-    <h3><span class="badge sev-high">high</span>EtherNet/IP CIP engineering-class services observed</h3>
+  <details open class="finding sev-high">
+    <summary><span class="badge sev-high">high</span>EtherNet/IP CIP engineering-class services observed</summary>
     <div>1 CIP engineering-class request(s) (Set/Reset/Start/Stop/Forward Open with config) seen across 1 pair(s). These services change controller configuration or run state.</div>
     
     <details>
@@ -431,10 +447,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.cip_engineering</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-high">
-    <h3><span class="badge sev-high">high</span>Modbus engineering-class commands on the wire</h3>
+  <details open class="finding sev-high">
+    <summary><span class="badge sev-high">high</span>Modbus engineering-class commands on the wire</summary>
     <div>1 write/diagnostic Modbus call(s) observed across 1 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.</div>
     
     <details>
@@ -459,10 +475,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.modbus_writes</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-high">
-    <h3><span class="badge sev-high">high</span>S7Comm engineering-class commands on the wire</h3>
+  <details open class="finding sev-high">
+    <summary><span class="badge sev-high">high</span>S7Comm engineering-class commands on the wire</summary>
     <div>1 S7 engineering call(s) — 1 download op(s) across 1 client→server pair(s). S7Comm has no authentication; any host that can reach a controller on tcp/102 can read/write variables, download programs, or stop the CPU.</div>
     
     <details>
@@ -487,10 +503,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.s7_engineering</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-medium">
-    <h3><span class="badge sev-medium">medium</span>DNS queries to a non-OT resolver</h3>
+  <details open class="finding sev-medium">
+    <summary><span class="badge sev-medium">medium</span>DNS queries to a non-OT resolver</summary>
     <div>1 OT host(s) sending DNS queries to resolvers outside the configured OT subnets (100 total query packet(s)). Cross-zone DNS leaks query patterns to the IT side and trusts an external resolver&#x27;s answers. Both belong on the OT side under change control.</div>
     
     <details>
@@ -515,10 +531,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>boundary.dns_resolver</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-medium">
-    <h3><span class="badge sev-medium">medium</span>Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1)</h3>
+  <details open class="finding sev-medium">
+    <summary><span class="badge sev-medium">medium</span>Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1)</summary>
     <div>4 ClientHello(s) using deprecated TLS versions seen across 1 host pair(s): TLS 1.0 (4 hello(s)). These versions are deprecated and blocked by default in modern Windows / browsers. Their presence indicates legacy clients (older Java runtimes, embedded devices) or legacy services.</div>
     
     <details>
@@ -543,7 +559,7 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>compat.stale_tls</code></div>
-  </div>
+  </details>
   
 
 

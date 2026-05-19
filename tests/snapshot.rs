@@ -2482,3 +2482,140 @@ fn ics_modbus_unit_id_sweep_wired_into_run_all() {
          contains a (src, dst) pair with ≥ 5 distinct unit IDs (BC-3.03.006)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BC-8.01.005 — S-5.07: Collapsible finding cards
+//
+// All five tests render the same fixture through render_html and assert
+// structural markers that the template does NOT yet contain. They must all
+// fail (red gate) while the template still uses <div class="finding sev-...">.
+// ---------------------------------------------------------------------------
+
+fn render_report_html() -> String {
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+    render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+/// AC-001 (BC-8.01.005): every finding card must be wrapped in
+/// `<details open class="finding sev-...">` rather than a plain `<div>`.
+#[test]
+fn test_bc_8_01_005_finding_cards_wrap_in_details_open() {
+    let report = render_report_html();
+
+    // At least one finding card must open with the new element.
+    assert!(
+        report.contains("<details open class=\"finding sev-"),
+        "AC-001: finding cards must wrap in <details open class=\"finding sev-...\">"
+    );
+
+    // The total count of `class="finding sev-` occurrences must equal the
+    // count of `<details open class="finding sev-` occurrences, i.e. every
+    // card is a <details open> — none are plain <div>s.
+    let total = report.matches("class=\"finding sev-").count();
+    let details = report.matches("<details open class=\"finding sev-").count();
+    assert_eq!(
+        total, details,
+        "AC-001: every finding card must be a <details open> \
+         (found {total} class=\"finding sev-\" occurrences but only {details} \
+         were <details open class=\"finding sev-\">)"
+    );
+}
+
+/// AC-002 (BC-8.01.005): the default browser triangle marker must be suppressed
+/// for `details.finding > summary` via a `::-webkit-details-marker` CSS rule.
+#[test]
+fn test_bc_8_01_005_summary_marker_suppressed() {
+    let report = render_report_html();
+
+    assert!(
+        report.contains("details.finding > summary::-webkit-details-marker { display: none"),
+        "AC-002: default browser triangle must be suppressed for finding summaries \
+         via `details.finding > summary::-webkit-details-marker {{ display: none }}`"
+    );
+}
+
+/// AC-003 (BC-8.01.005): all finding cards must default to open; zero may render
+/// without the `open` attribute (i.e., closed by default).
+///
+/// The test first asserts at least one `<details open class="finding sev-` exists
+/// (so it fails on the current div-based template), then additionally verifies
+/// that none lack the `open` attribute.
+#[test]
+fn test_bc_8_01_005_default_state_is_open() {
+    let report = render_report_html();
+
+    // The outer card element must be present — this fails while the template
+    // still uses <div class="finding sev-..."> instead of <details open ...>.
+    assert!(
+        report.contains("<details open class=\"finding sev-"),
+        "AC-003: finding cards must use <details open class=\"finding sev-...\"> \
+         so they default to open (currently the template uses <div> — this test \
+         correctly fails until the implementer switches the element)"
+    );
+
+    // Additionally: no card may be a closed <details> (without `open`).
+    let closed_by_default = report.matches("<details class=\"finding ").count();
+    assert_eq!(
+        closed_by_default, 0,
+        "AC-003: no finding card may default to closed \
+         ({closed_by_default} cards found with <details class=\"finding \" without `open`)"
+    );
+}
+
+/// AC-004 (BC-8.01.005): nested `<details>` for evidence and the playbook must
+/// remain present and be nested INSIDE the new outer `<details class="finding ...">` card.
+///
+/// The test verifies that the outer card element exists (so it fails on the current
+/// div-based template) and that the evidence and playbook nested blocks are present.
+#[test]
+fn test_bc_8_01_005_nested_evidence_still_present() {
+    let report = render_report_html();
+
+    // The outer card element must be present — this fails while the template
+    // still uses <div class="finding sev-..."> rather than <details open ...>.
+    // Without this guard the test passes vacuously on the old template because
+    // the nested <details> blocks already exist; the guard binds correctness
+    // to the structural change required by AC-001.
+    assert!(
+        report.contains("<details open class=\"finding sev-"),
+        "AC-004: outer finding card must use <details open class=\"finding sev-...\"> \
+         before we can assert that nested evidence/playbook blocks are contained within it"
+    );
+
+    // The nested evidence block must still be present inside the card.
+    assert!(
+        report.contains("<details>") && report.contains("<summary>Evidence"),
+        "AC-004: nested evidence <details> must still be present inside the finding card"
+    );
+
+    // The investigation playbook must remain default-open (S-5.05 pattern).
+    assert!(
+        report.contains("<details open>") && report.contains("<summary>Investigation playbook"),
+        "AC-004: investigation playbook <details open> must remain default-open"
+    );
+}
+
+/// AC-005 (BC-8.01.005): `@media print` must include forced-expansion rules that
+/// target `details.finding` so collapsed cards print fully expanded.
+#[test]
+fn test_bc_8_01_005_print_mode_forces_open() {
+    let report = render_report_html();
+
+    assert!(
+        report.contains("@media print") && report.contains("details.finding"),
+        "AC-005: @media print must include forced-expansion rules targeting \
+         details.finding (both `@media print` and `details.finding` must appear \
+         in the rendered CSS)"
+    );
+}
