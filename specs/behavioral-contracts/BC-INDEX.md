@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 93  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006
+total_bcs: 95  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -16,7 +16,7 @@ deviations:
 
 # Behavioral Contracts — Master Index
 
-93 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
+95 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
 named `BC-AUDIT-NNN` contracts (Phase 0 brownfield audit) were
 promoted to first-class numbered BCs in S-1.05 (v0.4.0); the legacy
 IDs survive as aliases at the bottom of this file for traceability
@@ -56,6 +56,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-1.04.002 TLS ClientHello version capture (HIGH)
 - BC-1.04.003 TLS ClientHello cipher_suites captured by observer; bounds-checked variable-offset walk (session_id_len at payload[43], cs_offset = 44 + session_id_len); appended across multiple ClientHellos on the same (src, dst, dst_port) flow (HIGH, added S-2.07 v0.4.0)
 - BC-1.04.004 RDP X.224 Connection Confirm recognized on tcp/3389 with TPKT header + PDU type 0xD0 + optional RDP_NEG_RSP at offset 11; selectedProtocol read as little-endian u32 at offset 15; bounds-checked; TPKT length must match payload length (HIGH, added S-2.08 v0.4.0)
+- BC-1.02.009 Modbus per-(src, dst) unit-id aggregation: observer accumulates pdu.unit_id into modbus_flow_summary keyed by (src, dst); BTreeSet dedupes within flow; unit IDs 0 (broadcast) and 0xFF (gateway) are counted (HIGH, added S-2.11 v0.4.0)
 - BC-1.05.001 External egress aggregation (HIGH)
 - BC-1.05.002 Default OT subnets = RFC1918 (HIGH)
 - BC-1.05.004 Distinct-dst counting per (src, dst_port, proto) group for port-scan recognition (HIGH, added S-2.10 v0.4.0)
@@ -77,6 +78,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-3.03.003 `ics.s7_engineering` fires (HIGH)
 - BC-3.03.004 `engineering_commands` rolls up by (src, dst) pair across protocols (Modbus/ENIP/S7/DNP3): one finding row per source-destination pair carries the per-pair count plus top-N function codes seen (HIGH, promoted from BC-AUDIT-012 in S-1.05)
 - BC-3.03.005 `ics.dnp3_engineering` fires on engineering-class DNP3 events (HIGH, added S-2.04 v0.4.0)
+- BC-3.03.006 `ics.modbus_unit_id_sweep` fires at Medium when modbus_flow_summary[src,dst].unit_ids.len() >= 5; escalates to High at >= 50; evidence lists count + first 10 unit IDs sorted ascending (HIGH, added S-2.11 v0.4.0)
 - BC-3.04.001 `compat.smbv1` fires on SMBv1 observations (HIGH)
 - BC-3.04.002 `compat.stale_tls` filters by legacy_version (HIGH)
 - BC-3.04.003 `stale_tls::is_stale` inclusive range is exactly 0x0300..=0x0302; 0x0303 (TLS 1.2) and 0x0304 (TLS 1.3) explicitly pass the filter (HIGH, promoted from BC-AUDIT-011 in S-1.05)
