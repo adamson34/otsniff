@@ -48,7 +48,7 @@ status: draft
 | S-5.04 | Harden `--ai` invocation (disallow-tools + review-scrub) | E-5 | 1 | 3 | merged (#45, 5a1fe21) | — | S.6, S.9 |
 | S-5.05 | Report HTML visual polish (hero band + severity-tinted cards + dark mode + collapsible tables) | E-5 | 1 | 3 | merged (#51, b3de579) | — | S.8 |
 | S-5.06 | Brand handoff application (sniff-trail mark + ink/paper/accent palette + JetBrains Mono + inline favicon) | E-5 | 1 | 5 | merged (#52, d0f2fb0) | S-5.05 | S.8 + docs |
-| S-5.07 | Per-finding card collapsibility via `<details>` | E-5 | 1 | 2 | draft | S-5.06 | S.8 |
+| S-5.07 | Per-finding card collapsibility via `<details>` | E-5 | 1 | 2 | ready | S-5.06 | S.8 |
 | S-6.01 | Scrub map merge | E-6 | 1 | 5 | draft | — | S.5 |
 | S-6.02 | `diff` subcommand core | E-6 | 2 | 5 | draft | S-6.01 | S.9 + new |
 | S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | draft | S-6.02 | S.8 |
