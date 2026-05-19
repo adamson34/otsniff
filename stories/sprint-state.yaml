@@ -215,10 +215,14 @@ stories:
     branch: null
     worktree: null
   S-5.01:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-5.01-parse-progress-feedback
     worktree: null
+    merge_sha: 7556939
+    pr: 73
+    merged_at: 2026-05-19T16:17:44Z
+    notes: "2 NITPICKs deferred (stale `#[allow(unused_imports)] use crate::progress::ProgressReporter;` block in src/pcap.rs; doc-comment nit on analyze() type-parameter genericity)."
   S-5.02:
     status: pending
     wave: 1
