@@ -8,7 +8,7 @@
 //! on the captured bytes without touching real stderr.
 
 use std::io;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Emit a progress line every N packets.
 pub const PROGRESS_PACKET_INTERVAL: u64 = 100_000;
@@ -18,6 +18,41 @@ pub const PROGRESS_BYTE_INTERVAL: u64 = 10 * 1024 * 1024; // 10 MB
 
 /// Minimum wall-clock gap between successive emissions (rate-limit).
 pub const PROGRESS_MIN_INTERVAL_SECS: u64 = 2;
+
+const PACKET_THRESHOLD: u64 = PROGRESS_PACKET_INTERVAL;
+const BYTE_THRESHOLD: u64 = PROGRESS_BYTE_INTERVAL;
+const RATE_LIMIT: Duration = Duration::from_secs(PROGRESS_MIN_INTERVAL_SECS);
+
+/// Format `n` with comma thousands separators.
+fn format_count(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len + (len - 1) / 3);
+    for (i, &b) in bytes.iter().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(b as char);
+    }
+    out
+}
+
+/// Format `n` bytes as a human-readable string (KB / MB / GB, 1 decimal).
+fn format_bytes(n: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * 1024 * 1024;
+    if n >= GB {
+        format!("{:.1} GB", n as f64 / GB as f64)
+    } else if n >= MB {
+        format!("{:.1} MB", n as f64 / MB as f64)
+    } else if n >= KB {
+        format!("{:.1} KB", n as f64 / KB as f64)
+    } else {
+        format!("{} B", n)
+    }
+}
 
 /// Abstraction over a time source so tests can control the clock without
 /// sleeping.  The production path uses [`SystemClock`]; tests use a
@@ -45,11 +80,6 @@ impl Clock for SystemClock {
 ///
 /// [`record_packet`]: ProgressReporter::record_packet
 /// [`finish`]: ProgressReporter::finish
-// Fields are populated by `new` / `new_with_clock` and read by
-// `record_packet` / `finish`.  Until those bodies are implemented the
-// compiler warns about reads; suppress at struct level so clippy stays
-// clean once real logic is present and the allow can be dropped.
-#[allow(dead_code)]
 pub struct ProgressReporter<W: io::Write> {
     writer: W,
     verbose: bool,
@@ -78,7 +108,13 @@ impl<W: io::Write> ProgressReporter<W> {
     /// Pass a [`Box<dyn Clock>`] — typically a `MockClock` defined in
     /// the test module.
     pub fn new_with_clock(writer: W, verbose: bool, clock: Box<dyn Clock>) -> Self {
-        let start = clock.now();
+        // Subtract RATE_LIMIT from the initial time so that the very first
+        // threshold crossing is not suppressed by the rate-limit gate.
+        let now = clock.now();
+        // Instant::checked_sub returns None on underflow (near epoch); fall
+        // back to `now` in that case (suppresses only the very first emission
+        // which is acceptable during startup on constrained platforms).
+        let last_emit_time = now.checked_sub(RATE_LIMIT).unwrap_or(now);
         Self {
             writer,
             verbose,
@@ -86,7 +122,7 @@ impl<W: io::Write> ProgressReporter<W> {
             bytes: 0,
             last_emit_packets: 0,
             last_emit_bytes: 0,
-            last_emit_time: start,
+            last_emit_time,
             clock,
         }
     }
@@ -95,14 +131,50 @@ impl<W: io::Write> ProgressReporter<W> {
     /// progress line if either the packet-count or byte-count threshold
     /// has been crossed since the last emission, subject to the
     /// wall-clock rate-limit.
-    pub fn record_packet(&mut self, _packet_size: usize) {
-        todo!()
+    pub fn record_packet(&mut self, packet_size: usize) {
+        self.packets += 1;
+        self.bytes += packet_size as u64;
+
+        if !self.verbose {
+            return;
+        }
+
+        let packet_threshold_crossed = self.packets - self.last_emit_packets >= PACKET_THRESHOLD;
+        let byte_threshold_crossed = self.bytes - self.last_emit_bytes >= BYTE_THRESHOLD;
+
+        if !(packet_threshold_crossed || byte_threshold_crossed) {
+            return;
+        }
+
+        let now = self.clock.now();
+        if now.duration_since(self.last_emit_time) < RATE_LIMIT {
+            return;
+        }
+
+        let _ = writeln!(
+            self.writer,
+            "[parse] processed {} packets / {}",
+            format_count(self.packets),
+            format_bytes(self.bytes),
+        );
+
+        self.last_emit_packets = self.packets;
+        self.last_emit_bytes = self.bytes;
+        self.last_emit_time = now;
     }
 
     /// Emit the final summary line (always emitted when `verbose` is
     /// `true`, regardless of thresholds).
     pub fn finish(&mut self) {
-        todo!()
+        if !self.verbose {
+            return;
+        }
+        let _ = writeln!(
+            self.writer,
+            "[parse] processed {} packets / {}",
+            format_count(self.packets),
+            format_bytes(self.bytes),
+        );
     }
 }
 
@@ -170,8 +242,7 @@ mod tests {
         // Advance past the rate-limit gate so the first emission is not
         // suppressed.
         advance(&offset, Duration::from_secs(3));
-        let mut reporter =
-            ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
+        let mut reporter = ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
 
         for _ in 0..100_000 {
             reporter.record_packet(64);
@@ -196,8 +267,7 @@ mod tests {
     fn test_bc_9_04_001_emits_after_10mb_bytes() {
         let (mock, offset) = MockClock::new();
         advance(&offset, Duration::from_secs(3));
-        let mut reporter =
-            ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
+        let mut reporter = ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
 
         // 100 packets × 105,000 bytes = 10,500,000 bytes (>10 MB), well
         // below the 100k-packet threshold.
@@ -262,8 +332,7 @@ mod tests {
         let (mock, offset) = MockClock::new();
         // Start past the gate so the very first threshold crossing fires.
         advance(&offset, Duration::from_secs(3));
-        let mut reporter =
-            ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
+        let mut reporter = ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
 
         // First 100k — should produce exactly 1 emission.
         for _ in 0..100_000 {
@@ -304,8 +373,7 @@ mod tests {
     #[test]
     fn test_bc_9_04_001_finish_emits_summary_even_if_no_progress() {
         let (mock, _offset) = MockClock::new();
-        let mut reporter =
-            ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
+        let mut reporter = ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
 
         for _ in 0..50 {
             reporter.record_packet(64);
@@ -339,18 +407,14 @@ mod tests {
     fn test_bc_9_04_001_format_includes_count_and_bytes() {
         let (mock, offset) = MockClock::new();
         advance(&offset, Duration::from_secs(3));
-        let mut reporter =
-            ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
+        let mut reporter = ProgressReporter::new_with_clock(Vec::<u8>::new(), true, Box::new(mock));
 
         for _ in 0..100_000 {
             reporter.record_packet(64);
         }
 
         let output = captured_output(&reporter);
-        let progress_lines: Vec<&str> = output
-            .lines()
-            .filter(|l| l.contains("[parse]"))
-            .collect();
+        let progress_lines: Vec<&str> = output.lines().filter(|l| l.contains("[parse]")).collect();
 
         assert!(
             !progress_lines.is_empty(),

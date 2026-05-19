@@ -334,8 +334,7 @@ fn recon_port_scan_4sics_22_caps_at_20_findings() {
 /// `src/progress.rs` are the load-bearing cadence tests.
 #[test]
 fn test_bc_9_04_001_verbose_mode_emits_progress_to_stderr() {
-    let pcap =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
     if !pcap.exists() {
         eprintln!(
             "skipping test_bc_9_04_001_verbose_mode_emits_progress_to_stderr: \
@@ -373,8 +372,7 @@ fn test_bc_9_04_001_verbose_mode_emits_progress_to_stderr() {
 /// after implementation.
 #[test]
 fn test_bc_9_04_001_no_verbose_no_progress_lines() {
-    let pcap =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
     if !pcap.exists() {
         eprintln!(
             "skipping test_bc_9_04_001_no_verbose_no_progress_lines: \
