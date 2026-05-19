@@ -183,6 +183,89 @@ fn scrub_round_trip_via_pcap() {
     assert!(final_text.contains("host_999")); // unmapped pseudonym left as-is
 }
 
+// ── Group A2: S-6.01 --baseline-map flag (BC-5.03.001 AC-003) ────────────────
+
+/// BC-5.03.001 AC-003 / CLI: `scrub --baseline-map` must produce a new map
+/// that strictly extends the baseline.  Specifically:
+///
+/// 1. The baseline entry (host_001 → 192.168.1.1) must appear verbatim in the
+///    new map even when 192.168.1.1 is NOT present in the fixture capture
+///    (EC-003 preservation).
+/// 2. Any IPs discovered in the fixture must receive fresh pseudonyms with
+///    numeric suffixes strictly greater than the baseline maximum (here 1).
+///
+/// Fixture dependency: this test guards against false-passes by skipping
+/// gracefully if `tests/fixtures/Modbus.pcap` is absent (same pattern as
+/// other fixture-dependent tests in this file).
+#[test]
+fn test_bc_5_03_001_baseline_map_flag_extends_pseudonyms() {
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    if !pcap.exists() {
+        eprintln!("skipping: tests/fixtures/Modbus.pcap not present");
+        return;
+    }
+
+    let tmp = TempDir::new().unwrap();
+
+    // Write a minimal baseline map JSON with a single known entry.
+    // 192.168.1.1 is deliberately chosen to NOT appear in Modbus.pcap so we
+    // exercise the EC-003 (preserve-even-when-absent) path.
+    let baseline_map_path = tmp.path().join("baseline.map.json");
+    let baseline_json = serde_json::json!({
+        "version": 1,
+        "created_at": "2026-01-01T00:00:00Z",
+        "ips":  { "host_001": "192.168.1.1" },
+        "macs": {},
+        "names": {}
+    });
+    std::fs::write(&baseline_map_path, baseline_json.to_string()).unwrap();
+
+    let report_md = tmp.path().join("scrubbed.md");
+    let new_map_path = tmp.path().join("new.map.json");
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["scrub"])
+        .arg(&pcap)
+        .arg("--baseline-map")
+        .arg(&baseline_map_path)
+        .arg("-o")
+        .arg(&report_md)
+        .arg("--map")
+        .arg(&new_map_path)
+        .assert()
+        .success();
+
+    let new_map_text = std::fs::read_to_string(&new_map_path).unwrap();
+    let new_map: serde_json::Value =
+        serde_json::from_str(&new_map_text).expect("new map must be valid JSON");
+
+    let ips = new_map["ips"].as_object().expect("ips must be an object");
+
+    // EC-003: baseline entry must be preserved even though 192.168.1.1 is not
+    // in the capture.
+    assert_eq!(
+        ips.get("host_001").and_then(|v| v.as_str()),
+        Some("192.168.1.1"),
+        "baseline host_001 → 192.168.1.1 must be preserved in new map (EC-003)"
+    );
+
+    // Any additional IPs discovered in the fixture must use suffixes > 1.
+    for (pseudo, _real) in ips.iter() {
+        if pseudo == "host_001" {
+            continue; // baseline entry already checked above
+        }
+        let suffix: u32 = pseudo
+            .strip_prefix("host_")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| panic!("unexpected pseudonym shape: {pseudo}"));
+        assert!(
+            suffix > 1,
+            "new pseudonym {pseudo} must have suffix > 1 (baseline max was 1)"
+        );
+    }
+}
+
 // ── Group B: S-5.04 --review-scrub gate (BC-9.06.001) ─────────────────────────
 
 /// BC-9.06.001: --review-scrub must be a documented flag in the analyze

@@ -50,6 +50,43 @@ impl ScrubMap {
         self.ips.is_empty() && self.macs.is_empty() && self.names.is_empty()
     }
 
+    /// Validate the map's internal consistency.
+    ///
+    /// Returns `Err` if any pseudonym key is an empty string (EC-001) or any
+    /// other structural invariant is violated.
+    ///
+    /// # Contract (BC-5.03.001 EC-001)
+    ///
+    /// Must be called by the CLI when loading a baseline map from disk so that
+    /// a corrupted map is rejected with a descriptive `OtError` rather than
+    /// producing silent incorrect output.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        for (pseudo, real) in self
+            .ips
+            .iter()
+            .chain(self.macs.iter())
+            .chain(self.names.iter())
+        {
+            if pseudo.is_empty() {
+                return Err(crate::error::OtError::Parse(format!(
+                    "scrub map has empty pseudonym key for real value '{}'; \
+                     the map is corrupted (EC-001). \
+                     Regenerate the map with `otsniff scrub`.",
+                    real
+                )));
+            }
+            if real.is_empty() {
+                return Err(crate::error::OtError::Parse(format!(
+                    "scrub map has empty real value for pseudonym '{}'; \
+                     the map is corrupted (EC-001). \
+                     Regenerate the map with `otsniff scrub`.",
+                    pseudo
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Iterate every real value in the map. Used by the leak detector to
     /// verify that the post-scrub payload doesn't contain any of them.
     pub fn real_values(&self) -> impl Iterator<Item = &str> {
@@ -74,6 +111,108 @@ impl ScrubMap {
         }
         out
     }
+}
+
+/// Merge a baseline `ScrubMap` with identifiers from a new capture.
+///
+/// # Contract (BC-5.03.001)
+///
+/// - Every real identifier already in `baseline` reuses its existing pseudonym.
+/// - New identifiers in `current` that are not in `baseline` are appended with
+///   fresh pseudonyms; the counter resumes at `baseline.max_index() + 1`.
+/// - Returns a merged map containing all identifiers from both sources.
+/// - If the same pseudonym name would be assigned to two different real values,
+///   the implementation must panic (EC-002 from S-6.01: impossible if invariant
+///   holds; indicates a bug).
+///
+/// # Ownership
+///
+/// Takes `baseline` by value (consuming it), and `current` by shared reference.
+/// The returned `ScrubMap` is the merged result; the caller should serialize it
+/// to the `--map` output path.
+/// Parse the numeric suffix from a pseudonym such as `host_003` → `3`.
+/// Returns `None` if the pseudonym doesn't start with `prefix` or the
+/// suffix isn't a valid decimal integer.
+fn parse_pseudonym_index(p: &str, prefix: &str) -> Option<u32> {
+    p.strip_prefix(prefix).and_then(|n| n.parse().ok())
+}
+
+/// Highest numeric index currently present in `map` for the given prefix,
+/// or `0` if the map is empty / no matching key exists.
+fn max_index(map: &BTreeMap<String, String>, prefix: &str) -> u32 {
+    map.keys()
+        .filter_map(|k| parse_pseudonym_index(k, prefix))
+        .max()
+        .unwrap_or(0)
+}
+
+/// Merge new (pseudonym, real) pairs from `current_entries` into `baseline`
+/// in-place.
+///
+/// `current_entries` must be the entries of a freshly built map for the family
+/// (already in the canonical assignment order produced by `build_map`).  Real
+/// values already present in `baseline` (as map values) are skipped — their
+/// existing pseudonyms are preserved.  New real values are appended with fresh
+/// pseudonyms of the form `{prefix}{NNN:03}` continuing from
+/// `max_index(baseline, prefix) + 1`.
+fn merge_family(
+    baseline: &mut BTreeMap<String, String>,
+    current_entries: impl Iterator<Item = (String, String)>,
+    prefix: &str,
+) {
+    // Build the set of real values already covered by the baseline.
+    let existing_reals: std::collections::BTreeSet<&str> =
+        baseline.values().map(|s| s.as_str()).collect();
+
+    // Collect genuinely new real values in the order `build_map` produced them
+    // (i.e., already-sorted assignment order) so that the identity law
+    // `merge_map(empty, &obs) == build_map(&obs)` holds exactly.
+    let new_reals: Vec<String> = current_entries
+        .filter_map(|(_pseudo, real)| {
+            if real.is_empty() || existing_reals.contains(real.as_str()) {
+                None
+            } else {
+                Some(real)
+            }
+        })
+        .collect();
+
+    if new_reals.is_empty() {
+        return;
+    }
+
+    let start = max_index(baseline, prefix) + 1;
+    for (idx, real) in (start..).zip(new_reals) {
+        let pseudo = format!("{prefix}{idx:03}");
+        // EC-002: if this pseudonym already maps to a *different* real value
+        // that's a bug — the invariant has been violated.
+        if let Some(existing_real) = baseline.get(&pseudo) {
+            if existing_real != &real {
+                panic!(
+                    "EC-002: pseudonym collision — '{pseudo}' maps to both \
+                     '{existing_real}' (baseline) and '{real}' (current). \
+                     This is a bug; please report it."
+                );
+            }
+        }
+        baseline.insert(pseudo, real);
+    }
+}
+
+pub fn merge_map(mut baseline: ScrubMap, current: &Observations) -> ScrubMap {
+    let current_map = build_map(current);
+
+    // Merge each family independently so their suffix counters don't interfere.
+    // Pass `.into_iter()` (pseudonym-key order, which is the canonical
+    // assignment order from `build_map`) so new assignments continue in the
+    // same sorted order as a fresh `build_map` call would produce.
+    merge_family(&mut baseline.ips, current_map.ips.into_iter(), "host_");
+    merge_family(&mut baseline.macs, current_map.macs.into_iter(), "mac_");
+    merge_family(&mut baseline.names, current_map.names.into_iter(), "name_");
+
+    // Stamp the merge time so the on-disk map reflects when it was last updated.
+    baseline.created_at = Utc::now();
+    baseline
 }
 
 /// Walk observations and mint stable pseudonyms for every observed IP and MAC.
@@ -214,6 +353,67 @@ mod tests {
         IpAddr::V4(s.parse::<Ipv4Addr>().unwrap())
     }
 
+    /// Build an empty ScrubMap (no entries, version 1).
+    fn empty_scrub_map() -> ScrubMap {
+        ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: BTreeMap::new(),
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        }
+    }
+
+    /// Build a ScrubMap from raw (pseudonym, real) pairs for each category.
+    fn scrub_map_from(
+        ips: &[(&str, &str)],
+        macs: &[(&str, &str)],
+        names: &[(&str, &str)],
+    ) -> ScrubMap {
+        ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: ips
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            macs: macs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            names: names
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    /// Build a one-IP Observations fixture for a single host with no MAC and
+    /// no hostname. Useful as a minimal, controllable input to merge_map.
+    fn obs_with_ips(ip_strs: &[&str]) -> Observations {
+        let mut hosts = HashMap::new();
+        for &addr in ip_strs {
+            let a = ip(addr);
+            hosts.insert(
+                a,
+                HostObs {
+                    ip: a,
+                    macs: vec![],
+                    protocols: HashSet::new(),
+                    first_seen: Utc::now(),
+                    last_seen: Utc::now(),
+                    packets: 1,
+                    bytes: 1,
+                    in_ot_zone: true,
+                },
+            );
+        }
+        Observations {
+            hosts,
+            ..Default::default()
+        }
+    }
+
     fn fixture() -> Observations {
         let mut hosts = HashMap::new();
         hosts.insert(
@@ -333,5 +533,353 @@ mod tests {
         // 3 pseudonyms in the scrubbed text: name_001, host_001, name_002.
         assert_eq!(replaced, 3);
         assert!(unmapped.is_empty());
+    }
+
+    // ── BC-5.03.001 tests (S-6.01) ────────────────────────────────────────────
+
+    /// AC-001 / identity law: merging an empty baseline with current
+    /// observations must produce the same map as calling build_map directly.
+    ///
+    /// Both maps are compared observationally (same real-value sets and same
+    /// pseudonym-assignment order), because `created_at` timestamps will differ
+    /// between the two calls.
+    #[test]
+    fn test_bc_5_03_001_merge_empty_baseline_is_identity_to_current() {
+        // Two hosts, one MAC each. No hostnames. The all-zero MAC is skipped by
+        // build_map, so use real MACs here.
+        let obs = fixture(); // 10.10.0.5 (mac AA:BB:CC:DD:EE:01) and 10.10.0.20
+
+        let baseline = empty_scrub_map();
+        let merged = merge_map(baseline, &obs);
+        let fresh = build_map(&obs);
+
+        // Same IP entries (pseudonym → real).
+        assert_eq!(
+            merged.ips, fresh.ips,
+            "ips map should equal build_map result"
+        );
+        // Same MAC entries.
+        assert_eq!(
+            merged.macs, fresh.macs,
+            "macs map should equal build_map result"
+        );
+        // Same name entries (both empty here).
+        assert_eq!(
+            merged.names, fresh.names,
+            "names map should equal build_map result"
+        );
+    }
+
+    /// AC-001 / preservation: when baseline already contains a real IP, the
+    /// merged map must reuse the baseline pseudonym — never reassign it.
+    ///
+    /// Also tests EC-003: identifiers in baseline but absent from current are
+    /// preserved in the output map.
+    #[test]
+    fn test_bc_5_03_001_merge_preserves_baseline_pseudonyms() {
+        let baseline = scrub_map_from(
+            &[("host_001", "10.0.0.1"), ("host_002", "10.0.0.2")],
+            &[],
+            &[],
+        );
+        // current has 10.0.0.1 (already in baseline) and 10.0.0.99 (new).
+        // 10.0.0.2 is NOT in current — EC-003 scenario.
+        let obs = obs_with_ips(&["10.0.0.1", "10.0.0.99"]);
+
+        let merged = merge_map(baseline, &obs);
+
+        // Baseline pseudonym for 10.0.0.1 must be preserved.
+        assert_eq!(
+            merged.ips.get("host_001").map(String::as_str),
+            Some("10.0.0.1"),
+            "baseline pseudonym host_001 must be preserved"
+        );
+
+        // host_002 → 10.0.0.2 must be preserved (EC-003: not in current).
+        assert_eq!(
+            merged.ips.get("host_002").map(String::as_str),
+            Some("10.0.0.2"),
+            "baseline entry not in current must be preserved (EC-003)"
+        );
+
+        // 10.0.0.99 must get a fresh pseudonym with suffix >= 3.
+        let entry_for_99 = merged.ips.iter().find(|(_k, v)| v.as_str() == "10.0.0.99");
+        assert!(
+            entry_for_99.is_some(),
+            "new IP 10.0.0.99 must appear in merged map"
+        );
+        let (new_pseudo, _) = entry_for_99.unwrap();
+        let suffix: u32 = new_pseudo
+            .strip_prefix("host_")
+            .and_then(|s| s.parse().ok())
+            .expect("new pseudonym must be host_NNN shaped");
+        assert!(
+            suffix >= 3,
+            "new pseudonym suffix must be >= 3 (baseline max was 2), got {suffix}"
+        );
+
+        // The new pseudonym must not collide with any baseline pseudonym.
+        assert_ne!(
+            new_pseudo, "host_001",
+            "must not reuse baseline pseudonym host_001"
+        );
+        assert_ne!(
+            new_pseudo, "host_002",
+            "must not reuse baseline pseudonym host_002"
+        );
+    }
+
+    /// AC-001 / counter continuity: new IPs get pseudonyms continuing from
+    /// `baseline.max_index + 1`, not restarting at 1.
+    #[test]
+    fn test_bc_5_03_001_new_identifiers_get_fresh_pseudonyms_from_max_plus_one() {
+        // Baseline saturates host_001 through host_005.
+        let baseline = scrub_map_from(
+            &[
+                ("host_001", "10.1.0.1"),
+                ("host_002", "10.1.0.2"),
+                ("host_003", "10.1.0.3"),
+                ("host_004", "10.1.0.4"),
+                ("host_005", "10.1.0.5"),
+            ],
+            &[],
+            &[],
+        );
+        // Three brand-new IPs not in baseline.
+        let obs = obs_with_ips(&["10.2.0.1", "10.2.0.2", "10.2.0.3"]);
+
+        let merged = merge_map(baseline, &obs);
+
+        // Collect pseudonym suffixes for the three new IPs.
+        let mut new_suffixes: Vec<u32> = ["10.2.0.1", "10.2.0.2", "10.2.0.3"]
+            .iter()
+            .map(|addr| {
+                let (pseudo, _) = merged
+                    .ips
+                    .iter()
+                    .find(|(_, v)| v.as_str() == *addr)
+                    .unwrap_or_else(|| panic!("new IP {addr} missing from merged map"));
+                pseudo
+                    .strip_prefix("host_")
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .expect("new pseudonym must be host_NNN shaped")
+            })
+            .collect();
+        new_suffixes.sort_unstable();
+
+        assert_eq!(
+            new_suffixes,
+            vec![6, 7, 8],
+            "new pseudonyms must be host_006, host_007, host_008 (baseline max was 5)"
+        );
+    }
+
+    /// AC-001 / chained merges: applying merge twice in sequence is consistent.
+    /// Given a baseline b1 and obs that produce b2, then merging b2 with a
+    /// further obs that adds a third IP must honour all prior pseudonyms.
+    #[test]
+    fn test_bc_5_03_001_chained_merges_respect_accumulated_baseline() {
+        // Step 1: b1 has host_001 → IP_A.
+        let b1 = scrub_map_from(&[("host_001", "10.0.0.1")], &[], &[]);
+
+        // Step 2: merge b1 with obs containing IP_A and IP_B.
+        let obs_step2 = obs_with_ips(&["10.0.0.1", "10.0.0.2"]);
+        let b2 = merge_map(b1, &obs_step2);
+
+        // After step 2: host_001 → 10.0.0.1 preserved; 10.0.0.2 gets host_002.
+        assert_eq!(b2.ips.get("host_001").map(String::as_str), Some("10.0.0.1"));
+        let pseudo_ip2 = b2
+            .ips
+            .iter()
+            .find(|(_, v)| v.as_str() == "10.0.0.2")
+            .map(|(k, _)| k.clone())
+            .expect("10.0.0.2 must be in b2");
+        assert_eq!(pseudo_ip2, "host_002");
+
+        // Step 3: merge b2 with obs containing IP_B and IP_C.
+        let obs_step3 = obs_with_ips(&["10.0.0.2", "10.0.0.3"]);
+        let b3 = merge_map(b2, &obs_step3);
+
+        // All three identities must be stable and non-colliding.
+        assert_eq!(b3.ips.get("host_001").map(String::as_str), Some("10.0.0.1"));
+        assert_eq!(b3.ips.get("host_002").map(String::as_str), Some("10.0.0.2"));
+        let pseudo_ip3 = b3
+            .ips
+            .iter()
+            .find(|(_, v)| v.as_str() == "10.0.0.3")
+            .map(|(k, _)| k.clone())
+            .expect("10.0.0.3 must be in b3");
+        assert_eq!(pseudo_ip3, "host_003");
+    }
+
+    /// AC-001 / independent counters: the suffix counters for `host_`, `mac_`,
+    /// and `name_` are tracked independently; overflow from one prefix must not
+    /// infect another.
+    #[test]
+    fn test_bc_5_03_001_separate_counters_for_ips_macs_names() {
+        let baseline = scrub_map_from(
+            &[
+                ("host_001", "10.0.0.1"),
+                ("host_002", "10.0.0.2"),
+                ("host_003", "10.0.0.3"),
+                ("host_004", "10.0.0.4"),
+                ("host_005", "10.0.0.5"),
+            ],
+            &[
+                ("mac_001", "AA:BB:CC:DD:EE:01"),
+                ("mac_002", "AA:BB:CC:DD:EE:02"),
+            ],
+            &[
+                ("name_001", "PLC-ALPHA"),
+                ("name_002", "PLC-BETA"),
+                ("name_003", "HMI-EAST"),
+            ],
+        );
+
+        // current introduces one new IP, one new MAC, and one new hostname.
+        let mut obs = obs_with_ips(&["10.0.0.99"]);
+        // Add the new host with a real MAC.
+        let new_ip = ip("10.0.0.99");
+        obs.hosts.get_mut(&new_ip).unwrap().macs = vec![[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x99]];
+        obs.hostnames.insert(new_ip, "HMI-WEST".to_string());
+
+        let merged = merge_map(baseline, &obs);
+
+        // New IP must get host_006.
+        assert_eq!(
+            merged.ips.get("host_006").map(String::as_str),
+            Some("10.0.0.99"),
+            "new IP must get host_006 (IP counter: baseline max was 5)"
+        );
+
+        // New MAC must get mac_003 (MAC counter: baseline max was 2).
+        assert_eq!(
+            merged.macs.get("mac_003").map(String::as_str),
+            Some("AA:BB:CC:DD:EE:99"),
+            "new MAC must get mac_003 (MAC counter: baseline max was 2)"
+        );
+
+        // New hostname must get name_004 (name counter: baseline max was 3).
+        assert_eq!(
+            merged.names.get("name_004").map(String::as_str),
+            Some("HMI-WEST"),
+            "new hostname must get name_004 (name counter: baseline max was 3)"
+        );
+    }
+
+    /// AC-002 / round-trip: text containing BOTH a baseline-known IP and a
+    /// newly-introduced IP must scrub and unscrub cleanly through the merged map.
+    #[test]
+    fn test_bc_5_03_001_round_trip_after_merge_uses_baseline_pseudonyms() {
+        let baseline = scrub_map_from(
+            &[("host_001", "10.0.0.1"), ("host_002", "10.0.0.2")],
+            &[],
+            &[],
+        );
+        let obs = obs_with_ips(&["10.0.0.1", "10.0.0.99"]);
+
+        let merged = merge_map(baseline, &obs);
+
+        // Build a text that contains both the baseline real IP and the new one.
+        let text = "Baseline host 10.0.0.1 communicated with new host 10.0.0.99 on port 502.";
+
+        let scrubbed = scrub_text(text, &merged);
+
+        // The baseline pseudonym host_001 must appear for 10.0.0.1.
+        assert!(
+            scrubbed.contains("host_001"),
+            "scrubbed text must contain baseline pseudonym host_001"
+        );
+        // No real IPs must remain.
+        assert!(
+            !scrubbed.contains("10.0.0.1"),
+            "real IP 10.0.0.1 must not appear in scrubbed text"
+        );
+        assert!(
+            !scrubbed.contains("10.0.0.99"),
+            "real IP 10.0.0.99 must not appear in scrubbed text"
+        );
+
+        // The new IP must have been replaced by some host_NNN pseudonym.
+        let pseudo_for_99 = merged
+            .ips
+            .iter()
+            .find(|(_, v)| v.as_str() == "10.0.0.99")
+            .map(|(k, _)| k.clone())
+            .expect("10.0.0.99 must be in merged map");
+        assert!(
+            scrubbed.contains(pseudo_for_99.as_str()),
+            "scrubbed text must contain fresh pseudonym {pseudo_for_99} for 10.0.0.99"
+        );
+
+        // Full round-trip must be exact.
+        let (unscrubbed, _replaced, unmapped) = unscrub_text(&scrubbed, &merged);
+        assert!(
+            unmapped.is_empty(),
+            "no unmapped tokens expected: {unmapped:?}"
+        );
+        assert_eq!(
+            unscrubbed, text,
+            "unscrub(scrub(text, merged), merged) must equal original text"
+        );
+    }
+
+    /// EC-001 / corrupted map: a ScrubMap with an empty-string pseudonym key
+    /// must be rejected by a validation function (BC-5.03.001 EC-001).
+    ///
+    /// The implementation is expected to provide a `ScrubMap::validate` method
+    /// (or equivalent) that returns `Err(OtError::...)` for malformed maps.
+    /// Until that exists this test will fail to compile OR panic at the call
+    /// site — both count as red-state failures.
+    #[test]
+    fn test_bc_5_03_001_load_rejects_map_with_empty_pseudonym() {
+        // Construct a map that has an empty-string key in ips — this is the
+        // "corrupted pseudonym" scenario from EC-001.
+        let mut bad_ips = BTreeMap::new();
+        bad_ips.insert("".to_string(), "10.0.0.1".to_string());
+        let bad_map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: bad_ips,
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+
+        // The implementer must add ScrubMap::validate(&self) -> crate::error::Result<()>.
+        // It should return Err for empty-string pseudonym keys.
+        let result = bad_map.validate();
+        assert!(
+            result.is_err(),
+            "validate() must return Err for a map with an empty pseudonym key"
+        );
+    }
+
+    /// AC-004 / leak detector: text scrubbed through a merged map must pass
+    /// both the regex leak check and the map-value check with no leaks.
+    ///
+    /// Uses `crate::ai::leak_detector::ensure_clean` (regex scan) and
+    /// `crate::ai::leak_detector::ensure_no_map_values` (map-value check).
+    #[test]
+    fn test_bc_5_03_001_leak_detector_passes_after_merge() {
+        use crate::ai::leak_detector;
+
+        let baseline = scrub_map_from(
+            &[("host_001", "10.0.0.1"), ("host_002", "10.0.0.2")],
+            &[("mac_001", "AA:BB:CC:DD:EE:01")],
+            &[("name_001", "PLC-NORTH")],
+        );
+        let obs = obs_with_ips(&["10.0.0.1", "10.0.0.99"]);
+
+        let merged = merge_map(baseline, &obs);
+
+        // Text that references both a baseline IP and the new IP.
+        let text = "PLC-NORTH at 10.0.0.1 (AA:BB:CC:DD:EE:01) reached 10.0.0.99.";
+        let scrubbed = scrub_text(text, &merged);
+
+        // Neither regex-pattern nor map-value leak must be present.
+        leak_detector::ensure_clean(&scrubbed)
+            .expect("regex leak check must pass after scrub with merged map");
+        leak_detector::ensure_no_map_values(&scrubbed, &merged)
+            .expect("map-value leak check must pass after scrub with merged map");
     }
 }
