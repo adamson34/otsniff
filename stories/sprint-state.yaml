@@ -224,10 +224,14 @@ stories:
     merged_at: 2026-05-19T16:17:44Z
     notes: "2 NITPICKs deferred (stale `#[allow(unused_imports)] use crate::progress::ProgressReporter;` block in src/pcap.rs; doc-comment nit on analyze() type-parameter genericity)."
   S-5.02:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-5.02-claude-heartbeat
     worktree: null
+    merge_sha: 62c937d
+    pr: 74
+    merged_at: 2026-05-19T16:44:25Z
+    notes: "2-cycle review convergence: cycle 1 had 2 findings fixed in 7f80af0 (stale scaffold doc removal, narrowed verbose field visibility), 1 accepted, 1 F-004 retracted as false-positive."
   S-5.05:
     status: completed
     wave: 1
