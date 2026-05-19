@@ -239,4 +239,45 @@ mod tests {
             "5 unit IDs must be Medium severity"
         );
     }
+
+    // ── Line 82: `count > 10` evidence display threshold ────────────────────
+    //
+    // Kills 2 mutants:
+    //   `replace > with ==`: fires "+N more" only at count==10, not at count>10
+    //   `replace > with >=`: fires "+N more" at count>=10, even for count==10
+    //
+    // Test: exactly 10 unit IDs → no "+N more" suffix (original: 10 > 10 is false).
+    // Mutant `>=`: 10 >= 10 is true → evidence would contain "(+0 more)" — wrong.
+    // Test: exactly 11 unit IDs → evidence contains "(+1 more)".
+    // Mutant `==`: 11 == 10 is false → no extra suffix — wrong.
+
+    #[test]
+    fn test_evidence_10_unit_ids_has_no_extra_suffix() {
+        let src: IpAddr = "10.0.0.1".parse().unwrap();
+        let dst: IpAddr = "10.0.0.2".parse().unwrap();
+        // Exactly 10 unit IDs — at the threshold, no overflow suffix expected.
+        let obs = make_obs_with_unit_ids(src, dst, 0u8..10);
+        let findings = build_findings(&obs);
+        assert_eq!(findings.len(), 1);
+        let evidence = &findings[0].evidence[0];
+        assert!(
+            !evidence.contains("more"),
+            "10 unit IDs must not produce a '(+N more)' suffix; got: {evidence}"
+        );
+    }
+
+    #[test]
+    fn test_evidence_11_unit_ids_has_extra_suffix() {
+        let src: IpAddr = "10.0.0.1".parse().unwrap();
+        let dst: IpAddr = "10.0.0.2".parse().unwrap();
+        // 11 unit IDs: count > 10, so "(+1 more)" must appear.
+        let obs = make_obs_with_unit_ids(src, dst, 0u8..11);
+        let findings = build_findings(&obs);
+        assert_eq!(findings.len(), 1);
+        let evidence = &findings[0].evidence[0];
+        assert!(
+            evidence.contains("(+1 more)"),
+            "11 unit IDs must produce '(+1 more)' suffix; got: {evidence}"
+        );
+    }
 }

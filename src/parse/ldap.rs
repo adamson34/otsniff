@@ -466,4 +466,132 @@ mod tests {
         );
         assert_eq!(result.unwrap().version, 3);
     }
+
+    // ── Tight-fit boundary tests: distinguish `>` from `>=` and `==` ─────────
+    //
+    // For bounds checks of the form `pos + len > buf.len()`:
+    //   Original (`>`):  accepts when pos+len == buf.len() (exact fit)
+    //   Mutant (`>=`):   rejects when pos+len == buf.len() (exact fit)
+    //   Mutant (`==`):   only rejects when pos+len == buf.len() (tight equals)
+    //
+    // The password field (last field) is special: when `pos + pw_len == bytes.len()`
+    // exactly, the original code accepts it and the parse succeeds. The `>=` mutant
+    // would reject it. The `==` mutant would also reject it. Both fail this test.
+    //
+    // For lines 64, 73, 126 the `>` vs `>=` distinction similarly:
+    //   - line 64 (ver): ver content is not the last byte; a tight fit here means
+    //     subsequent fields won't fit — both original and mutant return None.
+    //   - line 73 (dn): same; tight fit here still works if pw can fit after.
+    //   - line 126 (skip_tlv): msgID exact fit still leaves the rest of the buffer.
+    //
+    // For line 82 (pw), the password IS the last field, so tight fit is valid.
+
+    /// Password field that exactly reaches the end of the buffer (pos + pw_len ==
+    /// bytes.len()) must be accepted by the original `>` check.
+    ///
+    /// Kills `replace > with >=` and `replace > with ==` mutants on line 82.
+    #[test]
+    fn test_ldap_line82_pw_exact_fit_to_end_is_accepted() {
+        // make_bind_request constructs a correctly-framed message where the
+        // password bytes are the final content in the buffer (no padding after).
+        // So pos + pw_len == bytes.len() holds exactly at the password check.
+        let pw = b"exactpw";
+        let bytes = make_bind_request(b"cn=admin", pw);
+        // Sanity: verify the message parses correctly (no inflation).
+        let result = recognize_bind_request(&bytes);
+        assert!(
+            result.is_some(),
+            "tight-fit password (exactly fills buffer) must be accepted; got None"
+        );
+        assert_eq!(result.unwrap().anonymous, false);
+    }
+
+    /// Password of length 0 at exact end of buffer (anonymous bind tight fit).
+    /// Still exactly fits. Kills `>=` mutant: 0-length pw still has pos == len.
+    #[test]
+    fn test_ldap_line82_empty_pw_exact_fit_is_accepted() {
+        let bytes = make_bind_request(b"cn=admin", b"");
+        let result = recognize_bind_request(&bytes);
+        assert!(
+            result.is_some(),
+            "anonymous bind (empty pw, exact fit) must be accepted; got None"
+        );
+        assert_eq!(result.unwrap().anonymous, true);
+    }
+
+    // ── Line 73: dn tight-fit where pw still has room ────────────────────────
+    //
+    // If we make the DN empty, pos + dn_len (= pos + 0 = pos) does NOT equal
+    // buf.len() — the rest of the message (pw field) follows. This won't help.
+    // The tight fit for dn (pos + dn_len == bytes.len()) would mean no pw field,
+    // which is malformed. So a `>=` mutant and original both return None.
+    //
+    // However, we can kill `replace > with ==` on line 73: with the mutant,
+    // `pos + dn_len == bytes.len()` rejects, but `pos + dn_len < bytes.len()`
+    // would accept — a normally sized DN with plenty of room after it.
+    // The standard make_bind_request already exercises this (dn_len << buf.len()),
+    // so existing positive tests kill the `==` mutant... but the mutant still
+    // survived. That means the existing tests exercise dn+pw together and
+    // the mutant still returns Some. Let me think again:
+    //
+    // `replace > with ==` on line 73: `if pos + dn_len == bytes.len() { return None }`
+    // For a normal bind request, pos + dn_len < bytes.len() (pw field follows),
+    // so the mutant condition is false — does NOT return None → parse continues → Some.
+    // This is the same result as the original. So the mutant is equivalent here!
+    // (We can't kill it without the pw field filling exactly to the end right after DN.)
+    //
+    // These remaining mutants on lines 64 and 73 may be equivalent mutants.
+    // Document them as suspected equivalent below.
+    //
+    // Line 64 `replace > with >=` on `pos + ver_len > bytes.len()`:
+    //   ver_len=1, pos is small (~9), bytes.len() ~= 30+. So pos + ver_len << len.
+    //   `>=` mutant: `pos + ver_len >= bytes.len()` → 10 >= 30 → false → same result.
+    // These are equivalent mutants: the guard triggers only when we've crafted a
+    // specially-truncated buffer that ends right at the ver/dn boundary.
+    //
+    // For completeness, add tests with truncated buffers that stop right at each
+    // field boundary.
+
+    /// Buffer truncated to end exactly at the version value byte (just after ver tag+len).
+    /// Original: `pos + ver_len > bytes.len()` → 1 > 0 → true → None.
+    /// Mutant (`>=`): `pos + ver_len >= bytes.len()` → 1 >= 0 → true → None. Same.
+    /// So this cannot distinguish the two. Document as suspected equivalent.
+    ///
+    /// Instead: buffer where ver field fits but DN tag is missing (truncation
+    /// after version value). This tests the parse continuation, not line 64's guard.
+    #[test]
+    fn test_ldap_truncated_after_version_returns_none() {
+        // Build a full message then truncate it just after the version value byte.
+        // Full layout (small dn/pw):
+        //   [0]  0x30 outer SEQUENCE tag
+        //   [1]  total_inner_len
+        //   [2]  0x02 msgID tag, [3] 0x01 len, [4] 0x01 value
+        //   [5]  0x60 bind tag, [6] bind_inner_len
+        //   [7]  0x02 version tag, [8] 0x01 ver_len, [9] 0x03 version value ← truncate here
+        let full = make_bind_request(b"", b"");
+        let truncated = &full[..10]; // include version value at [9] but no DN tag
+        let result = recognize_bind_request(truncated);
+        assert!(
+            result.is_none(),
+            "buffer truncated after version value must return None"
+        );
+    }
+
+    /// Buffer truncated to end exactly after the DN content, with no room for
+    /// the password tag. Tests that skip past DN fails gracefully.
+    #[test]
+    fn test_ldap_truncated_after_dn_returns_none() {
+        let dn = b"cn=x";
+        let full = make_bind_request(dn, b"secret");
+        // Offset of pw tag: 2 (outer) + 3 (msgID) + 2 (bind hdr) + 3 (version) + 2 + dn.len()
+        // = 12 + dn.len() = 16
+        let pw_tag_offset = 12 + dn.len();
+        // Truncate to end right after the DN content (no pw tag/len/value).
+        let truncated = &full[..pw_tag_offset];
+        let result = recognize_bind_request(truncated);
+        assert!(
+            result.is_none(),
+            "buffer truncated after DN content (no pw tag) must return None"
+        );
+    }
 }
