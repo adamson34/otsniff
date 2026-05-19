@@ -1,0 +1,23 @@
+name: perf
+
+on:
+  schedule:
+    - cron: "0 12 * * 0"
+  pull_request:
+    types: [labeled]
+
+jobs:
+  bench:
+    name: bench (compile-only stub)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compile benchmarks (no-run)
+        # Stub: compile-only. Implementer replaces --no-run with a real
+        # criterion run + hyperfine end-to-end timing job and regression
+        # threshold alerting per AC-002 / AC-003.
+        run: cargo bench --no-run
