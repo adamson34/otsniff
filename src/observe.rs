@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{dhcp, dnp3, enip, ldap, modbus, s7comm};
+use crate::parse::{dhcp, dnp3, enip, ldap, modbus, rdp, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -225,6 +225,21 @@ pub(crate) fn recognize_ntlm_negotiate(payload: &[u8]) -> Option<NtlmNegotiateRe
     Some(NtlmNegotiateRecognized { version })
 }
 
+/// One RDP Connection Confirm PDU (X.224 type 0xD0) observed on tcp/3389.
+///
+/// Populated by `Observer::observe_tcp` when `parse::rdp::recognize_connection_confirm`
+/// succeeds on the payload. `selected_protocol` carries the value from the
+/// `RDP_NEG_RSP` block; `selected_protocol & 0x01 == 0` means no NLA/SSL was
+/// negotiated — see S-2.08 AC-001 (BC-1.04.004).
+#[derive(Debug, Clone, Serialize)]
+pub struct RdpEvent {
+    pub ts: DateTime<Utc>,
+    pub src: IpAddr,
+    pub dst: IpAddr,
+    pub dst_port: u16,
+    pub selected_protocol: u32,
+}
+
 /// One LDAP `BindRequest` with `SimpleAuthentication` observed on the wire.
 ///
 /// Populated by `Observer::observe_tcp` for tcp/389 (and non-standard LDAP
@@ -267,6 +282,10 @@ pub struct Observations {
     pub dnp3_events: Vec<Dnp3Event>,
     pub ntlm_events: Vec<NtlmEvent>,
     pub ldap_bind_events: Vec<LdapBindEvent>,
+    /// RDP Connection Confirm events observed on tcp/3389. Populated by the
+    /// implementer in Step 4 (S-2.08); initialized empty here so snapshot
+    /// tests and all existing consumers compile without change.
+    pub rdp_events: Vec<RdpEvent>,
     pub cred_events: Vec<CredEvent>,
     /// Dedup index for `cred_events`. Maps `(src, dst, dst_port, kind)` to the
     /// index into `cred_events`. Populated and maintained exclusively by
@@ -677,6 +696,21 @@ impl Observer {
                         version: recognized.version,
                     });
                 }
+            }
+        }
+
+        // RDP Connection Confirm (tcp/3389) — S-2.08, BC-1.04.004.
+        // Only fire on dst_port 3389; the server sends the CC back to the client
+        // (EC-003: ignore traffic on any other port even if payload looks like RDP).
+        if pkt.dst_port == rdp::PORT {
+            if let Some(recognized) = rdp::recognize_connection_confirm(payload) {
+                self.obs.rdp_events.push(RdpEvent {
+                    ts: pkt.ts,
+                    src: pkt.src_ip,
+                    dst: pkt.dst_ip,
+                    dst_port: pkt.dst_port,
+                    selected_protocol: recognized.selected_protocol,
+                });
             }
         }
 

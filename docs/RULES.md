@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**18 rules.**
+**19 rules.**
 
 ## Index
 
@@ -23,6 +23,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`compat.smbv1`](#compatsmbv1) | high | SMBv1 traffic observed |
 | [`compat.stale_tls`](#compatstale_tls) | medium | Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1) |
 | [`compat.weak_tls_cipher`](#compatweak_tls_cipher) | medium | Weak TLS cipher suites advertised (RC4 / DES / 3DES / NULL) |
+| [`creds.rdp_no_nla`](#credsrdp_no_nla) | critical | RDP connection without Network Level Authentication (NLA) |
 | [`egress.ot_to_internet`](#egressot_to_internet) | critical | Internet-bound traffic from OT subnets |
 | [`boundary.dns_resolver`](#boundarydns_resolver) | medium | DNS queries from OT to an out-of-zone resolver |
 | [`boundary.ntp_external`](#boundaryntp_external) | medium | OT host syncing time to public NTP |
@@ -214,6 +215,21 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **RFC** — RFC 7465 — Prohibiting RC4 Cipher Suites ([link](https://datatracker.ietf.org/doc/html/rfc7465))
 - **CWE** — CWE-326 — Inadequate Encryption Strength ([link](https://cwe.mitre.org/data/definitions/326.html))
+
+## `creds.rdp_no_nla`
+
+**RDP connection without Network Level Authentication (NLA)**
+
+- **Severity:** critical
+- **Data source:** `rdp_events`
+
+**Trigger.** Fires when an X.224 Connection Confirm PDU on tcp/3389 contains an RDP_NEG_RSP block whose selectedProtocol field has bit 0 clear (PROTOCOL_RDP = 0x00000000). This means the server accepted a connection with no SSL/TLS wrapping and no CredSSP pre-authentication (NLA). Without NLA the Windows logon screen is rendered before authentication, enabling credential-harvesting attacks and exposing the session to passive capture on the local network segment.
+
+**References:**
+
+- **MITRE ATT&CK for ICS** — T0822 — External Remote Services ([link](https://attack.mitre.org/techniques/T0822/))
+- **CWE** — CWE-308 — Use of Single-factor Authentication ([link](https://cwe.mitre.org/data/definitions/308.html))
+- **Spec** — MS-RDPBCGR §2.2.1.2 — RDP Negotiation Response (RDP_NEG_RSP) ([link](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/b2975bdc-6d56-49ee-9c57-f2ff3a0b6817))
 
 ## `egress.ot_to_internet`
 
