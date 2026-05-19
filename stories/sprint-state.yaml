@@ -212,10 +212,14 @@ stories:
         - {pr: 64, hypothesis: "revert pr-62 to restore rerun-clears-it workaround", outcome: "success", state: merged}
       root_cause: "Swatinem/rust-cache@v2 cache restore replaces ALL binaries in $HOME/.cargo/bin/ with rustup-init bytes on macOS. No in-band repair possible — the tools needed to fix it are themselves corrupted."
   S-4.01:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-4.01-kani-scrub-round-trip
     worktree: null
+    merge_sha: fde249d
+    pr: 80
+    merged_at: 2026-05-19T19:44:05Z
+    notes: "First of 3 Kani formal-verification stories. Kani harness in src/scrub.rs #[cfg(kani)] block (N=8, K=1 bounds). CI workflow .github/workflows/kani.yml on weekly cron + manual dispatch. cargo-kani not installed locally; proof verification deferred to first CI workflow_dispatch (per story Task #1, L-P3-002). BC-5.01.003 pre-existing."
   S-4.02:
     status: pending
     wave: 1
