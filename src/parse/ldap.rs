@@ -385,10 +385,10 @@ mod tests {
         // ldap body (from [2]): msgID TLV (0x02,0x01,0x01) + bind TLV (0x60,10,...) = 3 + 12 = 15
         // outer SEQUENCE len = 15
         let mut buf = vec![
-            0x30, 15,       // LDAPMessage SEQUENCE, len=15
+            0x30, 15, // LDAPMessage SEQUENCE, len=15
             0x02, 0x01, 0x01, // messageID = 1
-            0x60, 10,       // BindRequest APPLICATION 0, len=10
-            0x02, 0x00,     // version INTEGER, len=0  ← the trigger
+            0x60, 10, // BindRequest APPLICATION 0, len=10
+            0x02, 0x00, // version INTEGER, len=0  ← the trigger
             0x04, 0x02, b'a', b'b', // name OctetString, len=2, value="ab"
             0x80, 0x02, b'x', b'y', // simple [0], len=2, value="xy"
         ];
@@ -403,12 +403,12 @@ mod tests {
         );
 
         // Sanity: patch ver_len back to 0x01 and the same message parses successfully.
-        buf[8] = 0x01;   // ver_len = 1 (one byte: 0x04 is not a valid LDAP version but parse continues)
-        // Note: with ver_len=1, version = bytes[9] = 0x04. Then pos advances past it.
-        // Then DN tag at bytes[10]=0x02 (INTEGER tag, not OctetString tag 0x04) → fails.
-        // So we just confirm it returns None too (for different reason). The key test
-        // is the original above where ver_len=0 triggers the || branch.
-        // The important assertion is the one above — do not weaken it.
+        buf[8] = 0x01; // ver_len = 1 (one byte: 0x04 is not a valid LDAP version but parse continues)
+                       // Note: with ver_len=1, version = bytes[9] = 0x04. Then pos advances past it.
+                       // Then DN tag at bytes[10]=0x02 (INTEGER tag, not OctetString tag 0x04) → fails.
+                       // So we just confirm it returns None too (for different reason). The key test
+                       // is the original above where ver_len=0 triggers the || branch.
+                       // The important assertion is the one above — do not weaken it.
     }
 
     // ── Line 73: DN OctetString bounds check ─────────────────────────────────
@@ -460,7 +460,10 @@ mod tests {
         // The length byte follows the tag: offset 13 + dn.len()
         let pw_tag_offset = 12 + dn.len();
         let pw_len_offset = pw_tag_offset + 1;
-        assert_eq!(bytes[pw_tag_offset], 0x80, "sanity: expected 0x80 at pw tag offset");
+        assert_eq!(
+            bytes[pw_tag_offset], 0x80,
+            "sanity: expected 0x80 at pw tag offset"
+        );
         bytes[pw_len_offset] = (pw.len() as u8) + 50; // claim far more than available
         assert_eq!(
             recognize_bind_request(&bytes),

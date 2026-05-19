@@ -378,7 +378,10 @@ mod tests {
     #[test]
     fn test_rdp_line72_neg_rsp_type_0x02_is_accepted() {
         let payload = build_x224_cc(0x00000001); // type byte at [11] is 0x02 by construction
-        assert_eq!(payload[11], 0x02, "sanity: build_x224_cc must set type=0x02");
+        assert_eq!(
+            payload[11], 0x02,
+            "sanity: build_x224_cc must set type=0x02"
+        );
         let result = recognize_connection_confirm(&payload);
         assert!(
             result.is_some(),

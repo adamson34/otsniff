@@ -173,7 +173,11 @@ mod tests {
         // 49 distinct unit IDs (0..49) — below the High threshold.
         let obs = make_obs_with_unit_ids(src, dst, 0u8..49);
         let findings = build_findings(&obs);
-        assert_eq!(findings.len(), 1, "49 unit IDs must produce exactly one finding");
+        assert_eq!(
+            findings.len(),
+            1,
+            "49 unit IDs must produce exactly one finding"
+        );
         assert_eq!(
             findings[0].severity,
             Severity::Medium,
@@ -189,7 +193,11 @@ mod tests {
         // Kills the `>` mutant (50 > 50 = false → Medium, wrong).
         let obs = make_obs_with_unit_ids(src, dst, 0u8..50);
         let findings = build_findings(&obs);
-        assert_eq!(findings.len(), 1, "50 unit IDs must produce exactly one finding");
+        assert_eq!(
+            findings.len(),
+            1,
+            "50 unit IDs must produce exactly one finding"
+        );
         assert_eq!(
             findings[0].severity,
             Severity::High,
@@ -204,7 +212,11 @@ mod tests {
         // 51 unit IDs — kills the `==` mutant (51 == 50 = false → Medium, wrong).
         let obs = make_obs_with_unit_ids(src, dst, 0u8..51);
         let findings = build_findings(&obs);
-        assert_eq!(findings.len(), 1, "51 unit IDs must produce exactly one finding");
+        assert_eq!(
+            findings.len(),
+            1,
+            "51 unit IDs must produce exactly one finding"
+        );
         assert_eq!(
             findings[0].severity,
             Severity::High,
@@ -232,7 +244,11 @@ mod tests {
         // Exactly 5 unit IDs — lowest count that fires, must be Medium.
         let obs = make_obs_with_unit_ids(src, dst, 0u8..5);
         let findings = build_findings(&obs);
-        assert_eq!(findings.len(), 1, "5 unit IDs must produce exactly one finding");
+        assert_eq!(
+            findings.len(),
+            1,
+            "5 unit IDs must produce exactly one finding"
+        );
         assert_eq!(
             findings[0].severity,
             Severity::Medium,

@@ -284,14 +284,20 @@ mod tests {
             .insert((src, dst, 443), vec![0x0001, 0x000A]);
 
         let findings = build_findings(&obs);
-        assert_eq!(findings.len(), 1, "one finding expected for one (src,dst) pair");
+        assert_eq!(
+            findings.len(),
+            1,
+            "one finding expected for one (src,dst) pair"
+        );
 
         let f = &findings[0];
         // The summary and evidence lines are built via cipher_name().
         // If cipher_name(0x0001) were "" or "xyzzy" the assertion below fails.
         assert!(
             f.summary.contains("TLS_RSA_WITH_NULL_MD5")
-                || f.evidence.iter().any(|e| e.contains("TLS_RSA_WITH_NULL_MD5")),
+                || f.evidence
+                    .iter()
+                    .any(|e| e.contains("TLS_RSA_WITH_NULL_MD5")),
             "finding must reference TLS_RSA_WITH_NULL_MD5 by name; got summary: {}",
             f.summary
         );
