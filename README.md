@@ -18,6 +18,7 @@
   <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?include_prereleases&label=pre-release&color=b87325" alt="Pre-release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/MSRV-1.85-blue" alt="MSRV 1.85">
+  <a href="https://codecov.io/gh/adamson34/otsniff"><img src="https://codecov.io/gh/adamson34/otsniff/graph/badge.svg" alt="codecov"></a>
 </p>
 
 ```sh
