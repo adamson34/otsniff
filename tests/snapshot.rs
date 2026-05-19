@@ -2410,3 +2410,37 @@ fn compat_weak_tls_cipher_wired_into_run_all() {
          contains a weak cipher code (RC4_128_SHA 0x0005)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// S-2.08 / BC-3.04.006 — creds.rdp_no_nla wiring regression guard
+// ---------------------------------------------------------------------------
+
+/// Regression guard: when an RdpEvent with selected_protocol=0 (PROTOCOL_RDP)
+/// is present, run_all must include a finding with id `creds.rdp_no_nla`.
+/// Mirrors the compat_ntlmv1_wired_into_run_all and
+/// compat_weak_tls_cipher_wired_into_run_all patterns — catches the case where
+/// the stub's empty-Vec return persists into production or the rdp_legacy
+/// detector is accidentally removed from run_all.
+#[test]
+fn creds_rdp_no_nla_wired_into_run_all() {
+    use otsniff::observe::RdpEvent;
+
+    let mut obs = Observations::default();
+    obs.rdp_events.push(RdpEvent {
+        ts: fixed_ts(),
+        src: ip("10.0.0.1"),
+        dst: ip("10.0.0.2"),
+        dst_port: 3389,
+        selected_protocol: 0x00000000,
+    });
+
+    let subnets = ot_subnets();
+    let findings = run_all(&obs, &subnets);
+
+    let rdp_finding = findings.iter().find(|f| f.id == "creds.rdp_no_nla");
+    assert!(
+        rdp_finding.is_some(),
+        "run_all must include creds.rdp_no_nla when rdp_events contains a \
+         PROTOCOL_RDP (selected_protocol=0) event"
+    );
+}
