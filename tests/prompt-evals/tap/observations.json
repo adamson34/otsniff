@@ -1,0 +1,95 @@
+{
+  "capture_source": "Tap",
+  "hosts": {
+    "host_001": {
+      "ip": "host_001",
+      "macs": [[0, 80, 86, 20, 21, 22]],
+      "protocols": ["EtherNet/IP", "TCP"],
+      "first_seen": "2024-01-17T14:00:00Z",
+      "last_seen": "2024-01-17T14:20:00Z",
+      "packets": 980,
+      "bytes": 67200,
+      "in_ot_zone": true
+    },
+    "host_002": {
+      "ip": "host_002",
+      "macs": [[0, 80, 86, 23, 24, 25]],
+      "protocols": ["EtherNet/IP", "TCP"],
+      "first_seen": "2024-01-17T14:00:00Z",
+      "last_seen": "2024-01-17T14:20:00Z",
+      "packets": 760,
+      "bytes": 41400,
+      "in_ot_zone": true
+    },
+    "host_003": {
+      "ip": "host_003",
+      "macs": [[0, 80, 86, 26, 27, 28]],
+      "protocols": ["EtherNet/IP", "TCP"],
+      "first_seen": "2024-01-17T14:02:00Z",
+      "last_seen": "2024-01-17T14:19:00Z",
+      "packets": 540,
+      "bytes": 29800,
+      "in_ot_zone": true
+    }
+  },
+  "flows": {
+    "host_001->host_002:44818/tcp": {
+      "key": {
+        "src": "host_001",
+        "dst": "host_002",
+        "dst_port": 44818,
+        "proto": 6
+      },
+      "packets": 760,
+      "bytes": 41400,
+      "first_seen": "2024-01-17T14:00:05Z",
+      "last_seen": "2024-01-17T14:19:58Z",
+      "label": "EtherNet/IP",
+      "unique_src_ports": [60001, 60002]
+    },
+    "host_003->host_002:44818/tcp": {
+      "key": {
+        "src": "host_003",
+        "dst": "host_002",
+        "dst_port": 44818,
+        "proto": 6
+      },
+      "packets": 540,
+      "bytes": 29800,
+      "first_seen": "2024-01-17T14:02:10Z",
+      "last_seen": "2024-01-17T14:18:50Z",
+      "label": "EtherNet/IP",
+      "unique_src_ports": [60100]
+    }
+  },
+  "modbus_events": [],
+  "enip_events": [
+    {
+      "ts": "2024-01-17T14:00:10Z",
+      "src": "host_001",
+      "dst": "host_002",
+      "command": 101,
+      "command_label": "SendRRData",
+      "cip_service": "Download",
+      "engineering_class": true
+    }
+  ],
+  "s7_events": [],
+  "dnp3_events": [],
+  "ntlm_events": [],
+  "ldap_bind_events": [],
+  "rdp_events": [],
+  "cred_events": [],
+  "external_flows": {},
+  "smbv1_packets": {},
+  "tls_client_hellos": {},
+  "tls_cipher_suites": {},
+  "hostnames": {},
+  "first_ts": "2024-01-17T14:00:00Z",
+  "last_ts": "2024-01-17T14:20:00Z",
+  "total_packets": 2280,
+  "total_bytes": 138400,
+  "mac_frame_counts": {},
+  "broadcast_frames": 18,
+  "modbus_flow_summary": {}
+}
