@@ -2,11 +2,12 @@
 **/*.rs.bk
 Cargo.lock.bak
 
-# Test fixtures (large PCAPs not committed)
+# Test fixtures (large PCAPs not committed — except the synthetic benchmark fixture)
 tests/fixtures/*.pcap
 tests/fixtures/*.pcapng
 tests/fixtures/*.json
 tests/fixtures/*.html
+!tests/fixtures/synthetic-1mb.pcap
 
 # Pending insta snapshots (must be reviewed, not committed)
 *.snap.new
