@@ -9,6 +9,7 @@ mod dns_resolver;
 mod engineering_commands;
 mod internet_egress;
 pub mod ldap_creds;
+pub mod modbus_recon;
 pub mod ntlmv1;
 mod ntp_external;
 mod plaintext_creds;
@@ -157,6 +158,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         stale_tls::METADATA,
         weak_tls_cipher::WEAK_TLS_CIPHER_METADATA,
         rdp_legacy::RDP_LEGACY_METADATA,
+        modbus_recon::MODBUS_RECON_METADATA,
         internet_egress::METADATA,
         dns_resolver::METADATA,
         ntp_external::METADATA,
@@ -186,6 +188,7 @@ pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     out.extend(stale_tls::detect(obs));
     out.extend(weak_tls_cipher::build_findings(obs));
     out.extend(rdp_legacy::build_findings(obs));
+    out.extend(modbus_recon::build_findings(obs));
     out.extend(dns_resolver::detect(obs, ot_subnets));
     out.extend(ntp_external::detect(obs, ot_subnets));
     out.extend(recon_scan::detect(obs, ot_subnets));

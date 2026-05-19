@@ -147,6 +147,7 @@ fn build_fixture() -> Observations {
     Observations {
         hosts,
         flows,
+        modbus_flow_summary: std::collections::BTreeMap::new(),
         modbus_events: vec![ModbusEvent {
             ts: fixed_ts(),
             src: ip("10.10.0.5"),
@@ -2442,5 +2443,42 @@ fn creds_rdp_no_nla_wired_into_run_all() {
         rdp_finding.is_some(),
         "run_all must include creds.rdp_no_nla when rdp_events contains a \
          PROTOCOL_RDP (selected_protocol=0) event"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// S-2.11 / BC-3.03.006 — ics.modbus_unit_id_sweep wiring regression guard
+// ---------------------------------------------------------------------------
+
+/// Regression guard: when `modbus_flow_summary` contains a (src, dst) pair
+/// with ≥ 5 distinct unit IDs, `run_all` must include a finding with id
+/// `ics.modbus_unit_id_sweep`. Mirrors the `creds_rdp_no_nla_wired_into_run_all`
+/// pattern — catches the case where the stub's empty-Vec return persists into
+/// production or the modbus_recon detector is accidentally removed from run_all.
+#[test]
+fn ics_modbus_unit_id_sweep_wired_into_run_all() {
+    use otsniff::observe::ModbusFlowSummary;
+    use std::collections::BTreeSet;
+
+    let mut obs = Observations::default();
+    let src = ip("10.0.0.1");
+    let dst = ip("10.0.0.2");
+
+    // 5 distinct unit IDs — exactly the Medium threshold (AC-002, BC-3.03.006).
+    let mut unit_ids = BTreeSet::new();
+    for i in 1u8..=5 {
+        unit_ids.insert(i);
+    }
+    obs.modbus_flow_summary
+        .insert((src, dst), ModbusFlowSummary { unit_ids });
+
+    let subnets = ot_subnets();
+    let findings = run_all(&obs, &subnets);
+
+    let sweep_finding = findings.iter().find(|f| f.id == "ics.modbus_unit_id_sweep");
+    assert!(
+        sweep_finding.is_some(),
+        "run_all must include ics.modbus_unit_id_sweep when modbus_flow_summary \
+         contains a (src, dst) pair with ≥ 5 distinct unit IDs (BC-3.03.006)"
     );
 }

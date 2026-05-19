@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**19 rules.**
+**20 rules.**
 
 ## Index
 
@@ -24,6 +24,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`compat.stale_tls`](#compatstale_tls) | medium | Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1) |
 | [`compat.weak_tls_cipher`](#compatweak_tls_cipher) | medium | Weak TLS cipher suites advertised (RC4 / DES / 3DES / NULL) |
 | [`creds.rdp_no_nla`](#credsrdp_no_nla) | critical | RDP connection without Network Level Authentication (NLA) |
+| [`ics.modbus_unit_id_sweep`](#icsmodbus_unit_id_sweep) | medium | Modbus unit-ID sweep — PLC discovery or fuzzing pattern |
 | [`egress.ot_to_internet`](#egressot_to_internet) | critical | Internet-bound traffic from OT subnets |
 | [`boundary.dns_resolver`](#boundarydns_resolver) | medium | DNS queries from OT to an out-of-zone resolver |
 | [`boundary.ntp_external`](#boundaryntp_external) | medium | OT host syncing time to public NTP |
@@ -230,6 +231,21 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **MITRE ATT&CK for ICS** — T0822 — External Remote Services ([link](https://attack.mitre.org/techniques/T0822/))
 - **CWE** — CWE-308 — Use of Single-factor Authentication ([link](https://cwe.mitre.org/data/definitions/308.html))
 - **Spec** — MS-RDPBCGR §2.2.1.2 — RDP Negotiation Response (RDP_NEG_RSP) ([link](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/b2975bdc-6d56-49ee-9c57-f2ff3a0b6817))
+
+## `ics.modbus_unit_id_sweep`
+
+**Modbus unit-ID sweep — PLC discovery or fuzzing pattern**
+
+- **Severity:** medium
+- **Data source:** `modbus_flow_summary`
+
+**Trigger.** Fires when a single Modbus client (src IP) sends requests to five or more distinct unit IDs addressed to the same server (dst IP) within the capture window. The Modbus unit identifier (slave address, 0x00–0xFF) is the primary way a master selects a specific PLC or slave device on a shared serial segment. Sweeping a large range of unit IDs is a hallmark of automated discovery tools, protocol fuzzers, and unauthorized reconnaissance scripts. Severity is Medium for ≥ 5 distinct unit IDs and escalates to High at ≥ 50. Evidence lists the (src, dst) pair, the total count of distinct unit IDs observed, and the first ten unit IDs seen.
+
+**References:**
+
+- **MITRE ATT&CK for ICS** — T0846 — Remote System Discovery ([link](https://attack.mitre.org/techniques/T0846/))
+- **MITRE ATT&CK for ICS** — T0888 — Remote System Information Discovery ([link](https://attack.mitre.org/techniques/T0888/))
+- **Spec** — Modbus Application Protocol Specification V1.1b3 §4.1 — Unit Identifier ([link](https://modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf))
 
 ## `egress.ot_to_internet`
 
