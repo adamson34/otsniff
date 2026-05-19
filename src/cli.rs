@@ -37,6 +37,7 @@ impl From<SourceTypeArg> for DeclaredSource {
 }
 use crate::observe::Observer;
 use crate::pcap::iter_packets;
+use crate::progress::ProgressReporter;
 use crate::report::render_html;
 use crate::report_md::render_markdown;
 use crate::scrub::{build_map, scrub_text, unscrub_text, ScrubMap};
@@ -223,11 +224,21 @@ fn classify_with_guard(
     classification
 }
 
+/// Parse a PCAP and accumulate observations.
+///
+/// `progress` is the progress reporter surface introduced in S-5.01.  At
+/// stub stage it is accepted but not yet wired into the packet loop; the
+/// implementer will call `progress.record_packet(size)` per iteration and
+/// `progress.finish()` at exit in Step 4.
 fn analyze(
     input: &std::path::Path,
     ot_subnets: &[IpNet],
     verbose: bool,
+    progress: Option<&mut ProgressReporter<std::io::Stderr>>,
 ) -> Result<crate::observe::Observations> {
+    // `progress` is intentionally unused at stub stage.  The implementer
+    // will thread it into the loop below.
+    let _ = progress;
     let mut observer = Observer::new(ot_subnets.to_vec());
     let mut packet_count: u64 = 0;
     for pkt in iter_packets(input)? {
@@ -264,7 +275,7 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
             args.input.display()
         );
     }
-    let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let obs = analyze(&args.input, &ot_subnets, args.verbose, None)?;
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
@@ -341,7 +352,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             args.input.display()
         );
     }
-    let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let obs = analyze(&args.input, &ot_subnets, args.verbose, None)?;
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
