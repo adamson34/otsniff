@@ -34,16 +34,14 @@ fn parse_rubric(text: &str) -> Result<Vec<RubricAssertion>, String> {
 
         // Recognize numbered-list lines: `^\d+\.\s+(MUST NOT|MUST|SHOULD)\s+(.+)$`
         // Strip the leading number and dot: find the first `. ` separator.
-        let after_number = trimmed
-            .find(". ")
-            .and_then(|dot_pos| {
-                let prefix = &trimmed[..dot_pos];
-                if prefix.chars().all(|c| c.is_ascii_digit()) {
-                    Some(&trimmed[dot_pos + 2..])
-                } else {
-                    None
-                }
-            });
+        let after_number = trimmed.find(". ").and_then(|dot_pos| {
+            let prefix = &trimmed[..dot_pos];
+            if prefix.chars().all(|c| c.is_ascii_digit()) {
+                Some(&trimmed[dot_pos + 2..])
+            } else {
+                None
+            }
+        });
 
         match after_number {
             Some(rest) => {
@@ -96,10 +94,7 @@ fn test_BC_6_02_001_must_assertion() {
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].severity, AssertionSeverity::Must);
     // Pattern must contain the meaningful part; implementer decides exact split.
-    assert!(
-        !result[0].pattern.is_empty(),
-        "pattern should not be empty"
-    );
+    assert!(!result[0].pattern.is_empty(), "pattern should not be empty");
     assert!(
         result[0].pattern.contains("host_001"),
         "pattern should include the assertion text after the MUST keyword"
@@ -232,9 +227,8 @@ fn test_BC_AUDIT_013_parse_existing_rubric_files() {
         }
         let text = fs::read_to_string(&rubric_path)
             .unwrap_or_else(|e| panic!("could not read {:?}: {}", rubric_path, e));
-        let assertions = parse_rubric(&text).unwrap_or_else(|e| {
-            panic!("parse_rubric failed for {:?}: {}", rubric_path, e)
-        });
+        let assertions = parse_rubric(&text)
+            .unwrap_or_else(|e| panic!("parse_rubric failed for {:?}: {}", rubric_path, e));
         assert!(
             !assertions.is_empty(),
             "{:?} parsed to zero assertions",
