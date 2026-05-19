@@ -1,12 +1,8 @@
-name: Kani
-on:
-  schedule:
-    - cron: '0 6 * * 0'  # Sunday 06:00 UTC
-  workflow_dispatch:
+# AC-002: CI Workflow — 3 New Kani Harness Steps
 
-jobs:
-  proofs:
-    name: Kani proofs
+Source: `cat .github/workflows/kani.yml | tail -20`
+
+```yaml
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,3 +23,6 @@ jobs:
       - name: Run leak detector MAC proof
         run: cargo kani --harness leak_regex_mac
         timeout-minutes: 30
+```
+
+The three new steps (`leak_regex_ipv4`, `leak_regex_ipv6`, `leak_regex_mac`) were added by S-4.02. The pre-existing `scrub_roundtrip_bounded` step was delivered by S-4.01.
