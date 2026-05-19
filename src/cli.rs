@@ -467,17 +467,14 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     if args.verbose {
         eprintln!("  invoking claude (model: {})...", model_label);
     }
-    let provider = ClaudeCliProvider::new(args.model.clone());
+    // Pass verbose through to the provider so run_with_heartbeat knows
+    // whether to emit heartbeat lines. The provider also checks
+    // stderr.is_terminal() internally (AC-004), so explicit -v and
+    // interactive TTY use cases are both covered.
+    let provider = ClaudeCliProvider::new_verbose(args.model.clone(), args.verbose);
     let invoke_start = std::time::Instant::now();
     let scrubbed_response = provider.analyze(&system_prompt, &user_message)?;
     let elapsed = invoke_start.elapsed();
-    if args.verbose {
-        eprintln!(
-            "    done in {:.1}s, {} bytes response",
-            elapsed.as_secs_f64(),
-            scrubbed_response.len(),
-        );
-    }
 
     // 5. Unscrub the AI response on this side of the boundary.
     let (unscrubbed_response, replaced, unmapped) = unscrub_text(&scrubbed_response, &map);
