@@ -441,8 +441,8 @@ mod kani_proofs {
     fn scrub_roundtrip_bounded() {
         // ── Build symbolic input string ───────────────────────────────────────
         let (input_bytes, input_len) = symbolic_ascii_str();
-        let input = std::str::from_utf8(&input_bytes[..input_len])
-            .expect("printable ASCII is valid UTF-8");
+        let input =
+            std::str::from_utf8(&input_bytes[..input_len]).expect("printable ASCII is valid UTF-8");
 
         // ── Build symbolic real value (the value that will be scrubbed) ───────
         //
@@ -452,8 +452,8 @@ mod kani_proofs {
         // A zero-length real value would be a map entry with empty key, which
         // ScrubMap::validate() would reject.  Skip it.
         kani::assume(real_len > 0);
-        let real_value = std::str::from_utf8(&real_bytes[..real_len])
-            .expect("printable ASCII is valid UTF-8");
+        let real_value =
+            std::str::from_utf8(&real_bytes[..real_len]).expect("printable ASCII is valid UTF-8");
 
         // The real value must not already equal the pseudonym (otherwise
         // scrub would replace it with itself and the regex would eat it back).
@@ -470,8 +470,7 @@ mod kani_proofs {
         let map = ScrubMap {
             version: 1,
             // A deterministic timestamp — created_at has no effect on scrub/unscrub.
-            created_at: chrono::DateTime::from_timestamp(0, 0)
-                .expect("epoch is a valid timestamp"),
+            created_at: chrono::DateTime::from_timestamp(0, 0).expect("epoch is a valid timestamp"),
             ips,
             macs: BTreeMap::new(),
             names: BTreeMap::new(),
