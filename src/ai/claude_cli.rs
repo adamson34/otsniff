@@ -4,9 +4,23 @@
 //! stdin, captures stdout. Inherits whatever auth, billing, and model
 //! access the user has configured for Claude Code — no API key in
 //! otsniff's environment, no HTTP client, no SDK.
+//!
+//! ## S-5.02 heartbeat surface
+//!
+//! [`run_with_heartbeat`] is the stub for the background-thread heartbeat
+//! introduced in S-5.02. It is `pub(crate)` so unit tests in this module
+//! (and integration tests under `tests/`) can construct test doubles and
+//! assert on the heartbeat protocol without going through `analyze`.
+//!
+//! Visibility choice: `pub(crate)` (not `pub`) because the heartbeat
+//! mechanism is an implementation detail of the AI subsystem and no
+//! external crate consumer should call it directly. The implementer can
+//! call it from `analyze` in Step 4 once the real body lands.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
+
+use crate::progress::Clock;
 
 use crate::error::{OtError, Result};
 
@@ -82,6 +96,39 @@ impl AiProvider for ClaudeCliProvider {
         String::from_utf8(output.stdout)
             .map_err(|e| OtError::Parse(format!("claude stdout was not valid UTF-8: {e}")))
     }
+}
+
+/// Invoke `claude -p` with `model` and `system_prompt`, writing the full
+/// command's stdin from `prompt`, while emitting `[Ns] still working...`
+/// heartbeats to `writer` every ~3 seconds on the calling thread.
+///
+/// This function is the **stub target for S-5.02**. The real implementation
+/// will:
+///  1. Spawn the subprocess on a background thread (with stdin piped in).
+///  2. Drive a heartbeat loop on the calling thread until the thread joins.
+///  3. Return the captured stdout as a `Vec<u8>`.
+///
+/// AC-004: heartbeats only emit when `verbose` is `true` OR stderr is a TTY.
+/// The `verbose` flag is threaded in here so tests can assert on exactly
+/// `verbose=true` behavior without touching the real TTY.
+///
+/// Do NOT wire this into `analyze()` yet — Step 4 handles the integration
+/// so that the existing synchronous `analyze()` tests are not disturbed.
+pub(crate) fn run_with_heartbeat<W, C>(
+    prompt: &str,
+    model: Option<&str>,
+    system_prompt: &str,
+    writer: &mut W,
+    clock: &C,
+    verbose: bool,
+) -> crate::error::Result<Vec<u8>>
+where
+    W: Write + Send,
+    C: Clock + Send,
+{
+    // Silence unused-variable warnings while the body is unimplemented.
+    let _ = (prompt, model, system_prompt, writer, clock, verbose);
+    todo!("S-5.02: heartbeat thread lands in step 4")
 }
 
 fn which_claude() -> Option<std::path::PathBuf> {
