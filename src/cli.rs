@@ -300,14 +300,14 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
     //
     // S-6.01 (BC-5.03.001): when --baseline-map is supplied the merged map
     // is built via merge_map(baseline, &obs) rather than a fresh build_map.
-    // The stub wires the field reference; the implementer replaces this block
-    // with the real loading + merge call in Step 4.
-    let map = if let Some(ref _baseline_path) = args.baseline_map {
-        // Implementer Step 4: load baseline from _baseline_path, deserialize
-        // as ScrubMap, then call merge_map(baseline, &obs).
-        let _baseline_path = _baseline_path;
-        let _unused_merge_map = merge_map; // keep import live until wired
-        build_map(&obs)
+    let map = if let Some(ref baseline_path) = args.baseline_map {
+        let bytes = std::fs::read(baseline_path).map_err(|source| OtError::InputOpen {
+            path: baseline_path.clone(),
+            source,
+        })?;
+        let baseline: ScrubMap = serde_json::from_slice(&bytes)?;
+        baseline.validate()?;
+        merge_map(baseline, &obs)
     } else {
         build_map(&obs)
     };
