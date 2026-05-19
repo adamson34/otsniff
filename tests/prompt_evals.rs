@@ -21,8 +21,66 @@ enum AssertionSeverity {
     MustNot,
 }
 
-fn parse_rubric(_text: &str) -> Result<Vec<RubricAssertion>, String> {
-    todo!("S-3.02: rubric parser lands in step 4")
+fn parse_rubric(text: &str) -> Result<Vec<RubricAssertion>, String> {
+    let mut assertions = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // Skip blank lines and markdown comments.
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Recognize numbered-list lines: `^\d+\.\s+(MUST NOT|MUST|SHOULD)\s+(.+)$`
+        // Strip the leading number and dot: find the first `. ` separator.
+        let after_number = trimmed
+            .find(". ")
+            .and_then(|dot_pos| {
+                let prefix = &trimmed[..dot_pos];
+                if prefix.chars().all(|c| c.is_ascii_digit()) {
+                    Some(&trimmed[dot_pos + 2..])
+                } else {
+                    None
+                }
+            });
+
+        match after_number {
+            Some(rest) => {
+                // Check MUST NOT before MUST (order matters — MUST NOT contains MUST).
+                let (severity, pattern) = if let Some(pat) = rest.strip_prefix("MUST NOT ") {
+                    (AssertionSeverity::MustNot, pat.to_string())
+                } else if let Some(pat) = rest.strip_prefix("MUST ") {
+                    (AssertionSeverity::Must, pat.to_string())
+                } else if let Some(pat) = rest.strip_prefix("SHOULD ") {
+                    (AssertionSeverity::Should, pat.to_string())
+                } else {
+                    return Err(format!(
+                        "line does not start with a recognised severity keyword (MUST NOT / MUST / SHOULD): {:?}",
+                        trimmed
+                    ));
+                };
+
+                if pattern.is_empty() {
+                    return Err(format!("empty pattern on assertion line: {:?}", trimmed));
+                }
+
+                assertions.push(RubricAssertion { severity, pattern });
+            }
+            None => {
+                return Err(format!(
+                    "line is not a blank, comment, or numbered assertion: {:?}",
+                    trimmed
+                ));
+            }
+        }
+    }
+
+    if assertions.is_empty() {
+        return Err("rubric contains zero assertions".to_string());
+    }
+
+    Ok(assertions)
 }
 
 // ---------------------------------------------------------------------------
