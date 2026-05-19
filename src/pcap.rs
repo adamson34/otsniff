@@ -15,6 +15,11 @@ use pcap_parser::traits::PcapReaderIterator;
 use pcap_parser::{create_reader, Linktype, PcapBlockOwned, PcapError};
 
 use crate::error::{OtError, Result};
+// progress::ProgressReporter is imported here so that cli.rs can pass one
+// into the parse path (Step 4 wiring).  The type is not yet consumed by
+// iter_packets; the implementer will thread it through in Step 4.
+#[allow(unused_imports)]
+use crate::progress::ProgressReporter;
 
 #[derive(Debug, Clone)]
 pub struct Packet {

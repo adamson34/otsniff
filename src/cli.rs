@@ -37,6 +37,7 @@ impl From<SourceTypeArg> for DeclaredSource {
 }
 use crate::observe::Observer;
 use crate::pcap::iter_packets;
+use crate::progress::ProgressReporter;
 use crate::report::render_html;
 use crate::report_md::render_markdown;
 use crate::scrub::{build_map, scrub_text, unscrub_text, ScrubMap};
@@ -223,15 +224,26 @@ fn classify_with_guard(
     classification
 }
 
+/// Parse a PCAP and accumulate observations.
+///
+/// `progress` is the optional progress reporter introduced in S-5.01.
+/// When `Some`, `record_packet` is called once per decoded packet so the
+/// reporter can emit periodic progress lines.  The caller is responsible
+/// for calling `reporter.finish()` after this function returns.
 fn analyze(
     input: &std::path::Path,
     ot_subnets: &[IpNet],
     verbose: bool,
+    mut progress: Option<&mut ProgressReporter<std::io::Stderr>>,
 ) -> Result<crate::observe::Observations> {
     let mut observer = Observer::new(ot_subnets.to_vec());
     let mut packet_count: u64 = 0;
-    for pkt in iter_packets(input)? {
-        observer.observe(&pkt?);
+    for pkt_result in iter_packets(input)? {
+        let pkt = pkt_result?;
+        if let Some(reporter) = progress.as_deref_mut() {
+            reporter.record_packet(pkt.payload.len());
+        }
+        observer.observe(&pkt);
         packet_count += 1;
     }
     let obs = observer.finish();
@@ -264,7 +276,9 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
             args.input.display()
         );
     }
-    let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let mut reporter = ProgressReporter::new(std::io::stderr(), args.verbose);
+    let obs = analyze(&args.input, &ot_subnets, args.verbose, Some(&mut reporter))?;
+    reporter.finish();
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
@@ -341,7 +355,9 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             args.input.display()
         );
     }
-    let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let mut reporter = ProgressReporter::new(std::io::stderr(), args.verbose);
+    let obs = analyze(&args.input, &ot_subnets, args.verbose, Some(&mut reporter))?;
+    reporter.finish();
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);

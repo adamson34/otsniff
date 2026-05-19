@@ -319,6 +319,80 @@ fn recon_port_scan_4sics_22_caps_at_20_findings() {
     );
 }
 
+// ── Group D: S-5.01 parse-loop progress feedback (BC-9.04.001) ───────────────
+
+/// BC-9.04.001 / AC-001: running `analyze -v` must produce at least one
+/// `[parse]` line on stderr.
+///
+/// Small PCAPs (< 100k packets, < 10 MB) will not trigger a periodic emission,
+/// so this test is intentionally loose: it verifies only that the wiring is
+/// present (a `-v` run completes successfully and stderr is captured).  The
+/// cadence and rate-limit behavior are exercised by the unit tests in
+/// `src/progress.rs`.
+///
+/// If no fixture is available the test is skipped — the unit tests in
+/// `src/progress.rs` are the load-bearing cadence tests.
+#[test]
+fn test_bc_9_04_001_verbose_mode_emits_progress_to_stderr() {
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    if !pcap.exists() {
+        eprintln!(
+            "skipping test_bc_9_04_001_verbose_mode_emits_progress_to_stderr: \
+             tests/fixtures/Modbus.pcap not present"
+        );
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let out = tmp.path().join("report.html");
+    // Run with -v.  The Modbus.pcap fixture is small so we may not see a
+    // periodic `[parse]` emission, but the command must succeed and stderr
+    // must contain the verbose parse-summary line (which also starts with
+    // a recognizable prefix from the analyze wiring).
+    //
+    // Once the progress reporter is wired, a large enough fixture or a
+    // cfg(test)-lowered threshold will make this assert the `[parse]` prefix.
+    // For now the test asserts success + that `-v` produces *some* stderr
+    // output, confirming the verbose path is plumbed.
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze", "-v"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty().not());
+}
+
+/// BC-9.04.001 / AC-002: running `analyze` WITHOUT `-v` must not emit any
+/// `[parse]` progress lines to stderr.
+///
+/// This is the authoritative CLI-layer test for the "no output in quiet mode"
+/// contract.  It must pass vacuously (no `[parse]` lines) both before and
+/// after implementation.
+#[test]
+fn test_bc_9_04_001_no_verbose_no_progress_lines() {
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    if !pcap.exists() {
+        eprintln!(
+            "skipping test_bc_9_04_001_no_verbose_no_progress_lines: \
+             tests/fixtures/Modbus.pcap not present"
+        );
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let out = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("[parse]").not());
+}
+
 #[test]
 fn unscrub_strict_mode_fails_on_unknown_token() {
     let tmp = TempDir::new().unwrap();
