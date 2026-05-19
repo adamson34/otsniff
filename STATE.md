@@ -126,3 +126,18 @@ Human approval gate. After approval:
 | S-4.01 Kani scrub round-trip (BC-5.01.003 pre-existing) | #80 | fde249d | 2026-05-19T19:44:05Z | Kani harness in src/scrub.rs #[cfg(kani)] block (N=8, K=1 bounds); kani.yml CI workflow (weekly cron + manual dispatch); cargo-kani not installed locally; proof verification deferred to first CI workflow_dispatch. |
 | S-4.02 Kani leak-detector regex (BC-5.02.001 pre-existing) | #81 | 827d5b6 | 2026-05-19T20:00:57Z | 3 harnesses (leak_regex_ipv4 4-digit symbolic; leak_regex_ipv6 narrowed to ::1; leak_regex_mac 12-nibble symbolic) in src/ai/leak_detector.rs. cargo-kani not installed locally; proof verification deferred to CI workflow_dispatch. |
 | S-4.03 Kani map-value substring (BC-5.02.002 pre-existing) | #82 | 31619ea | 2026-05-19T20:15:02Z | map_value_substring harness in src/ai/leak_detector.rs proves bidirectional iff invariant. Bounds N=16/K=1/value≤8 narrowed from spec ≤32/≤4 for tractable CBMC paths. cargo-kani not installed locally; proof deferred to CI. **All 5 autopilot stories complete (S-3.01, S-3.02, S-4.01, S-4.02, S-4.03). Wave 1: 32/32 stories completed.** |
+
+## Wave-1 gate result
+
+**Wave-1 PASSED — 2026-05-19. Develop tip: dd69ff8 (post-hardening PR #83).**
+
+| Gate | Result | Notes |
+|---|---|---|
+| G-1 Test Suite | PASS | 263 tests pre-PR-83; 297 after PR #83 hardening |
+| G-2 DTU Validation | SKIP | No module-criticality.md; brownfield project, no DTU clones |
+| G-3 Adversarial Review | PASS | 0 CRITICAL; 2 HIGH filed as tech debt (F-W1-001, F-W1-002) |
+| G-4 Demo Evidence | PASS | 29/32 stories have demo; 3 docs-only (S-1.01, S-1.02, S-1.05) no-demo-applicable |
+| G-5 Holdout Evaluation | PASS | Mean 0.94, min critical 0.90; evidence at `.factory/holdout-scenarios/evaluations/wave-1-2026-05-19T20-30-07Z.md` |
+| Mutation Testing | PASSED-WITH-DISPOSITIONS | 95 caught; 65 surviving dispositioned (51 cfg(kani) B, 9 LDAP equiv B, 5 claude_cli C); effective kill rate 84.1% after PR #83 (dd69ff8) |
+
+Stories: 32/32 complete. BCs: 84 → 99 (+14 net-new during wave). New CI jobs: Coverage, Perf, Kani, Prompt-evals. Tech-debt items filed: F-W1-001..005 (see `.factory/tech-debt-register.md`).

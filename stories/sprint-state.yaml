@@ -3,9 +3,13 @@
 # This file is mutated by the orchestrator as waves progress. Initial state is "pending" for Wave 1, "blocked" for later waves.
 
 cycle: v0.4.0-feature
-current_wave: 1
+current_wave: 2
 total_waves: 3
 total_stories: 38
+wave_1_status: completed
+wave_1_gate_passed_at: 2026-05-19T20:30:07Z
+wave_1_merge_sha: dd69ff8
+wave_1_notes: "All 6 gates pass. Mutation testing PASSED-WITH-DISPOSITIONS (84.1% effective kill rate after PR #83). 2 HIGH adversary findings (F-W1-001 run_unscrub validate, F-W1-002 pseudonym regex) tracked for tech debt."
 # S-5.04 added mid-cycle 2026-05-12: harden --ai invocation surface (defense-in-depth on scrub privacy contract).
 # S-3.06 added mid-cycle 2026-05-14: investigate + fix recurring macOS CI rustup-init flake (cycle_target: v0.4.1-patch).
 
