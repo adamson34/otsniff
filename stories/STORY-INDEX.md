@@ -30,7 +30,7 @@ status: draft
 | S-2.08 | `creds.rdp_no_nla` | E-2 | 1 | 3 | completed (#71, 387b239) | — | S.1, S.3 |
 | S-2.09 | `boundary.ntp_external` | E-2 | 1 | 2 | merged (#65, 89168bd) | — | S.3 |
 | S-2.10 | `recon.port_scan` | E-2 | 1 | 3 | merged (#50, 7aea34f) | — | S.3 |
-| S-2.11 | `ics.modbus_unit_id_sweep` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
+| S-2.11 | `ics.modbus_unit_id_sweep` | E-2 | 1 | 3 | ready | — | S.1, S.3 |
 | S-2.12 | `recon.port_scan` rollup by source IP (v0.4.1 patch) | E-2 | 1 | 4 | merged (#54, 7c70ef4) | S-2.10 | S.3 |
 | S-3.01 | Criterion + hyperfine perf regression | E-3 | 1 | 3 | draft | — | S.0,1,3, build |
 | S-3.02 | Prompt eval harness | E-3 | 1 | 5 | draft | — | S.6 |
@@ -85,7 +85,7 @@ status: draft
 | BC-1.04.004 + BC-3.04.006 (RDP NLA) | S-2.08 |
 | BC-1.05.003 + BC-3.05.004 (NTP boundary) | S-2.09 |
 | BC-1.05.004 + BC-3.05.005 (port scan) | S-2.10 |
-| BC-1.02.006 + BC-3.03.006 (modbus unit-id) | S-2.11 |
+| BC-1.02.009 + BC-3.03.006 (Modbus unit-id sweep) | S-2.11 |
 | BC-5.01.003 (scrub round-trip — Kani) | S-4.01 |
 | BC-5.02.001 (leak-detector regex — Kani) | S-4.02 |
 | BC-5.02.002 (map-value substring — Kani) | S-4.03 |
