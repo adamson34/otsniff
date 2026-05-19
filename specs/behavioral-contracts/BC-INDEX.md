@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 96  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001
+total_bcs: 97  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -16,7 +16,7 @@ deviations:
 
 # Behavioral Contracts — Master Index
 
-96 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
+97 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
 named `BC-AUDIT-NNN` contracts (Phase 0 brownfield audit) were
 promoted to first-class numbered BCs in S-1.05 (v0.4.0); the legacy
 IDs survive as aliases at the bottom of this file for traceability
@@ -119,6 +119,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-6.03.001 Claude invocation via subprocess shell-out (MEDIUM)
 - BC-6.03.002 Claude invocation always passes `--disallowed-tools` (HIGH, added S-5.04 v0.4.0)
 - BC-6.03.003 `ClaudeCliProvider::analyze` pre-checks `claude` is on `PATH` before invocation and returns `OtError::Parse("claude not on PATH ...")` if absent — avoids cryptic spawn errors (HIGH, promoted from BC-AUDIT-014 in S-1.05 — shifted from suggested .002 due to existing --disallowed-tools BC)
+- BC-6.04.001 `ClaudeCliProvider::analyze` emits stderr heartbeat `[Ns] claude still working...` every 3 seconds of wall-clock time while the subprocess is alive; on completion emits `done in N.Ns, B bytes response`; both lines suppressed when `verbose=false` AND stderr is not a TTY; heartbeat interval is exactly 3 s via injected `Clock` trait so tests can control time without sleeping (HIGH, added S-5.02 v0.4.0)
 
 ### S.7 — Audit log (`src/audit.rs`)
 - BC-7.01.001 Audit log auto-derives path from `-o` (HIGH)
@@ -188,16 +189,16 @@ numbered space (their HIGH tags are now inline).
 
 | Bucket | Count |
 |---|---:|
-| Numbered BCs, HIGH    | 94 |
+| Numbered BCs, HIGH    | 95 |
 | Numbered BCs, MEDIUM  | 2 |
 | Numbered BCs, LOW     | 0 |
-| **Grand total**       | **96** |
+| **Grand total**       | **97** |
 
-**Verification:** `grep -cE '\(HIGH[,)]' BC-INDEX.md` must equal 94;
+**Verification:** `grep -cE '\(HIGH[,)]' BC-INDEX.md` must equal 95;
 `grep -cE '\(MEDIUM[,)]' BC-INDEX.md` must equal 2;
 `grep -c '^- BC-AUDIT-' BC-INDEX.md` must equal 0 (legacy IDs live
 in the alias table, never as numbered-list bullets);
-`grep -cE '^- BC-[0-9]\.' BC-INDEX.md` must equal 96.
+`grep -cE '^- BC-[0-9]\.' BC-INDEX.md` must equal 97.
 
 ## Open Question BCs (coverage gaps, not yet specified)
 
