@@ -26,7 +26,7 @@ status: draft
 | S-2.04 | DNP3 parser + detector | E-2 | 1 | 5 | merged (#47, 6de71c8) | — | S.1, S.3 |
 | S-2.05 | `creds.ldap_simple_bind` | E-2 | 1 | 3 | completed (#68, 31e827b) | — | S.1, S.3 |
 | S-2.06 | `compat.ntlmv1` | E-2 | 1 | 3 | completed (#69, 317a575) | — | S.1, S.3 |
-| S-2.07 | `compat.weak_tls_cipher` | E-2 | 1 | 2 | ready | — | S.1, S.3 |
+| S-2.07 | `compat.weak_tls_cipher` | E-2 | 1 | 2 | completed (#70, a866578) | — | S.1, S.3 |
 | S-2.08 | `creds.rdp_no_nla` | E-2 | 1 | 3 | draft | — | S.1, S.3 |
 | S-2.09 | `boundary.ntp_external` | E-2 | 1 | 2 | merged (#65, 89168bd) | — | S.3 |
 | S-2.10 | `recon.port_scan` | E-2 | 1 | 3 | merged (#50, 7aea34f) | — | S.3 |

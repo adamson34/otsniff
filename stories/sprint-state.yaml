@@ -110,10 +110,14 @@ stories:
     merged_at: 2026-05-18T21:31:15Z
     notes: "3 NITPICK findings deferred to follow-up: F-002 (single-match per packet), F-003 (src_port scan optimization), F-005 (no mid-payload offset test)."
   S-2.07:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-2.07-compat-weak-tls-cipher
     worktree: null
+    merge_sha: a866578
+    pr: 70
+    merged_at: 2026-05-18T23:58:12Z
+    notes: "1 NITPICK on trigger text wording, non-blocking, no fix required."
   S-2.08:
     status: pending
     wave: 1
