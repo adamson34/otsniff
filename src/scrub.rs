@@ -341,6 +341,40 @@ fn pseudonym_regex() -> Regex {
     Regex::new(r"\b(?:host|mac|name)_[0-9a-f]+\b").expect("valid regex")
 }
 
+/// Kani formal-verification harnesses (S-4.01).
+///
+/// These harnesses are compiled and run only when `cargo kani --harness …`
+/// is invoked.  Under normal `cargo build` / `cargo test` / `cargo check`
+/// the entire module is elided by the `#[cfg(kani)]` gate, so `todo!()`
+/// bodies here never affect the test suite.
+///
+/// See `docs/proofs/scrub-roundtrip.md` for bounds rationale and
+/// `docs/adr/` for the privacy contract this proof supports (BC-5.01.003).
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Proves: `unscrub(scrub(s, m), m) == s` for any bounded input string
+    /// and any deterministic pseudonym map.
+    ///
+    /// Bounds (initial, per AC-001):
+    ///   N = 32  — maximum input string length (bytes)
+    ///   K = 4   — maximum number of map entries
+    ///
+    /// The implementer must:
+    ///   1. Replace `todo!()` with a concrete Kani harness body that uses
+    ///      `kani::any::<...>()` to construct bounded symbolic inputs.
+    ///   2. Tune N and K until the proof completes in < 20 min (AC-001).
+    ///   3. Wire the `cargo kani --harness scrub_roundtrip_bounded` invocation
+    ///      into `.github/workflows/kani.yml` (replacing the `echo "TODO"` step).
+    ///   4. Update `docs/proofs/scrub-roundtrip.md` with the chosen bounds and
+    ///      their justification.
+    #[kani::proof]
+    fn scrub_roundtrip_bounded() {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
