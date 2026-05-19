@@ -199,8 +199,7 @@ fn scrub_round_trip_via_pcap() {
 /// other fixture-dependent tests in this file).
 #[test]
 fn test_bc_5_03_001_baseline_map_flag_extends_pseudonyms() {
-    let pcap =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
     if !pcap.exists() {
         eprintln!("skipping: tests/fixtures/Modbus.pcap not present");
         return;
