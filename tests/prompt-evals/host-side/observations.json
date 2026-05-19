@@ -1,0 +1,79 @@
+{
+  "capture_source": "HostSide",
+  "hosts": {
+    "host_001": {
+      "ip": "host_001",
+      "macs": [[0, 80, 86, 10, 11, 12]],
+      "protocols": ["Modbus/TCP", "TCP", "HTTP"],
+      "first_seen": "2024-01-16T10:00:00Z",
+      "last_seen": "2024-01-16T10:45:00Z",
+      "packets": 2100,
+      "bytes": 142800,
+      "in_ot_zone": true
+    },
+    "host_002": {
+      "ip": "host_002",
+      "macs": [[0, 80, 86, 13, 14, 15]],
+      "protocols": ["Modbus/TCP", "TCP"],
+      "first_seen": "2024-01-16T10:00:05Z",
+      "last_seen": "2024-01-16T10:44:55Z",
+      "packets": 1820,
+      "bytes": 98760,
+      "in_ot_zone": true
+    }
+  },
+  "flows": {
+    "host_001->host_002:502/tcp": {
+      "key": {
+        "src": "host_001",
+        "dst": "host_002",
+        "dst_port": 502,
+        "proto": 6
+      },
+      "packets": 1820,
+      "bytes": 98760,
+      "first_seen": "2024-01-16T10:00:05Z",
+      "last_seen": "2024-01-16T10:44:55Z",
+      "label": "Modbus/TCP",
+      "unique_src_ports": [51000, 51001]
+    }
+  },
+  "modbus_events": [
+    {
+      "ts": "2024-01-16T10:00:05Z",
+      "src": "host_001",
+      "dst": "host_002",
+      "function_code": 3,
+      "label": "Read Holding Registers",
+      "engineering_class": false
+    }
+  ],
+  "enip_events": [],
+  "s7_events": [],
+  "dnp3_events": [],
+  "ntlm_events": [],
+  "ldap_bind_events": [],
+  "rdp_events": [],
+  "cred_events": [
+    {
+      "ts": "2024-01-16T10:05:30Z",
+      "src": "host_001",
+      "dst": "host_002",
+      "dst_port": 21,
+      "kind": "FtpAuth",
+      "count": 3
+    }
+  ],
+  "external_flows": {},
+  "smbv1_packets": {},
+  "tls_client_hellos": {},
+  "tls_cipher_suites": {},
+  "hostnames": {},
+  "first_ts": "2024-01-16T10:00:00Z",
+  "last_ts": "2024-01-16T10:45:00Z",
+  "total_packets": 3920,
+  "total_bytes": 241560,
+  "mac_frame_counts": {},
+  "broadcast_frames": 2,
+  "modbus_flow_summary": {}
+}
