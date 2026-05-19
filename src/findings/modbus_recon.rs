@@ -160,8 +160,9 @@ mod tests {
         unit_ids: impl IntoIterator<Item = u8>,
     ) -> Observations {
         let mut obs = Observations::default();
-        let mut summary = ModbusFlowSummary::default();
-        summary.unit_ids = unit_ids.into_iter().collect::<BTreeSet<u8>>();
+        let summary = ModbusFlowSummary {
+            unit_ids: unit_ids.into_iter().collect::<BTreeSet<u8>>(),
+        };
         obs.modbus_flow_summary.insert((src, dst), summary);
         obs
     }
