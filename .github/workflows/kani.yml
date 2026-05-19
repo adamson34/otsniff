@@ -15,8 +15,6 @@ jobs:
         run: cargo install --locked kani-verifier
       - name: Setup kani
         run: cargo kani setup
-      # TODO (S-4.01 implementer): replace this step with the real harness invocation.
-      # After filling in scrub_roundtrip_bounded(), change this to:
-      #   run: cargo kani --harness scrub_roundtrip_bounded
-      - name: TODO — run harnesses (implementer wires in step 4)
-        run: echo "TODO"
+      - name: Run scrub round-trip proof
+        run: cargo kani --harness scrub_roundtrip_bounded
+        timeout-minutes: 30
