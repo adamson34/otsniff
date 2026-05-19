@@ -44,8 +44,41 @@ pub struct RdpNegRecognized {
 /// - Missing or non-`RDP_NEG_RSP` negotiation block (EC-001 — failure response
 ///   has type `0x03`; treat as inconclusive, do not fire)
 /// - Payload shorter than the minimum required structure
-pub fn recognize_connection_confirm(_payload: &[u8]) -> Option<RdpNegRecognized> {
-    todo!()
+pub fn recognize_connection_confirm(payload: &[u8]) -> Option<RdpNegRecognized> {
+    // Minimum: TPKT(4) + X.224 CC(7) + RDP_NEG_RSP(8) = 19 bytes.
+    if payload.len() < 19 {
+        return None;
+    }
+
+    // TPKT header: version must be 3, reserved must be 0.
+    if payload[0] != 0x03 || payload[1] != 0x00 {
+        return None;
+    }
+
+    // EC-002: TPKT declared length must match actual payload length.
+    let tpkt_len = u16::from_be_bytes([payload[2], payload[3]]) as usize;
+    if tpkt_len != payload.len() {
+        return None;
+    }
+
+    // X.224 PDU type at offset 5: upper nibble must be 0xD (Connection Confirm).
+    // Lower nibble is CDT (credit); accept any value.
+    if payload[5] & 0xF0 != 0xD0 {
+        return None;
+    }
+
+    // RDP_NEG_RSP type at offset 11 must be 0x02 (TYPE_RDP_NEG_RSP).
+    // Type 0x03 is RDP_NEG_FAILURE — treat as inconclusive (EC-001).
+    if payload[11] != 0x02 {
+        return None;
+    }
+
+    // selectedProtocol is a little-endian u32 at offset 15.
+    let sp = u32::from_le_bytes([payload[15], payload[16], payload[17], payload[18]]);
+
+    Some(RdpNegRecognized {
+        selected_protocol: sp,
+    })
 }
 
 #[cfg(test)]
@@ -100,7 +133,7 @@ mod tests {
         buf.push(0x00); // flags
         buf.push(0x08); // length lo (LE u16 = 8)
         buf.push(0x00); // length hi
-        // selectedProtocol (4 bytes, little-endian)
+                        // selectedProtocol (4 bytes, little-endian)
         buf.extend_from_slice(&selected_protocol.to_le_bytes());
         buf
     }

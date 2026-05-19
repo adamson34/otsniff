@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{dhcp, dnp3, enip, ldap, modbus, s7comm};
+use crate::parse::{dhcp, dnp3, enip, ldap, modbus, rdp, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -696,6 +696,21 @@ impl Observer {
                         version: recognized.version,
                     });
                 }
+            }
+        }
+
+        // RDP Connection Confirm (tcp/3389) — S-2.08, BC-1.04.004.
+        // Only fire on dst_port 3389; the server sends the CC back to the client
+        // (EC-003: ignore traffic on any other port even if payload looks like RDP).
+        if pkt.dst_port == rdp::PORT {
+            if let Some(recognized) = rdp::recognize_connection_confirm(payload) {
+                self.obs.rdp_events.push(RdpEvent {
+                    ts: pkt.ts,
+                    src: pkt.src_ip,
+                    dst: pkt.dst_ip,
+                    dst_port: pkt.dst_port,
+                    selected_protocol: recognized.selected_protocol,
+                });
             }
         }
 
