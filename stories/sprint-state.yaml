@@ -165,10 +165,14 @@ stories:
     cycle_target: v0.4.1-patch
     real_pcap_evidence: "4SICS-22: 26,067 → 23 recon findings (1,135× reduction)"
   S-3.01:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-3.01-criterion-benchmarks
     worktree: null
+    merge_sha: 0c64832
+    pr: 78
+    merged_at: 2026-05-19T19:02:15Z
+    notes: "6 criterion benches + procedural 1 MiB synthetic PCAP fixture (committed via !gitignore exception) + perf.yml workflow (cron + perf-labeled PR triggers) + recorded baseline timings. AC-004 satisfied by existing tests/memory_bound.rs from S-2.02."
   S-3.02:
     status: pending
     wave: 1
