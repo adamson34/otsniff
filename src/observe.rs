@@ -535,6 +535,13 @@ impl Observer {
                     label: pdu.label().to_string(),
                     engineering_class: pdu.is_engineering_class(),
                 });
+                // BC-1.02.009 (S-2.11 AC-001): accumulate per-(src, dst) unit IDs.
+                self.obs
+                    .modbus_flow_summary
+                    .entry((pkt.src_ip, pkt.dst_ip))
+                    .or_default()
+                    .unit_ids
+                    .insert(pdu.unit_id);
             }
         }
 
@@ -1700,5 +1707,184 @@ mod tls_cipher_tests {
         observer.observe(&pkt);
         // If we got here without a panic the invariant is satisfied.
         // We don't assert on the map contents — partial decode is acceptable.
+    }
+}
+
+// -------------------------------------------------------------------------
+// S-2.11 / BC-1.02.009: Observer aggregates Modbus unit IDs per (src, dst)
+// -------------------------------------------------------------------------
+
+#[cfg(test)]
+mod modbus_unit_id_tests {
+    use super::*;
+    use crate::pcap::{Packet, Transport};
+    use chrono::TimeZone;
+    use std::collections::BTreeSet;
+
+    fn fixed_ts() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap()
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    /// Construct a minimal Modbus/TCP request frame (12 bytes).
+    ///
+    /// Layout (MBAP + minimal PDU):
+    ///   [0..2]  transaction ID  = 0x0001
+    ///   [2..4]  protocol ID     = 0x0000 (Modbus)
+    ///   [4..6]  length          = 0x0006 (6 bytes follow)
+    ///   [6]     unit ID         = `unit_id` (the byte under test)
+    ///   [7]     function code   = 0x01 (Read Coils)
+    ///   [8..10] starting addr   = 0x0000
+    ///   [10..12] quantity       = 0x0001
+    fn build_modbus_request(unit_id: u8) -> Vec<u8> {
+        vec![
+            0x00, 0x01, // transaction ID
+            0x00, 0x00, // protocol ID (Modbus = 0)
+            0x00, 0x06,    // length: 6 bytes follow
+            unit_id, // unit ID — the byte under test
+            0x01,    // function code: Read Coils
+            0x00, 0x00, // starting address
+            0x00, 0x01, // quantity
+        ]
+    }
+
+    fn make_modbus_packet(src_ip: &str, dst_ip: &str, unit_id: u8) -> Packet {
+        Packet {
+            ts: fixed_ts(),
+            src_mac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01],
+            dst_mac: [0x00, 0x1B, 0x1B, 0x11, 0x22, 0x33],
+            src_ip: ip(src_ip),
+            dst_ip: ip(dst_ip),
+            transport: Transport::Tcp,
+            src_port: 54321,
+            dst_port: 502,
+            payload: build_modbus_request(unit_id),
+        }
+    }
+
+    /// BC-1.02.009 (AC-001): unit IDs accumulate across packets for the same
+    /// (src, dst) pair. Three packets with unit IDs 1, 2, 3 must produce a
+    /// `modbus_flow_summary` entry whose `unit_ids` set is exactly {1, 2, 3}.
+    #[test]
+    fn test_bc_1_02_009_unit_id_accumulates_per_src_dst() {
+        let mut observer = Observer::new(vec![]);
+        let src = ip("10.0.0.1");
+        let dst = ip("10.0.0.2");
+
+        for uid in [0x01u8, 0x02, 0x03] {
+            observer.observe(&make_modbus_packet("10.0.0.1", "10.0.0.2", uid));
+        }
+
+        let obs = observer.observations();
+        let summary = obs
+            .modbus_flow_summary
+            .get(&(src, dst))
+            .expect("BC-1.02.009: modbus_flow_summary must have an entry for (src, dst)");
+        assert_eq!(
+            summary.unit_ids,
+            BTreeSet::from([1u8, 2, 3]),
+            "BC-1.02.009: unit_ids must accumulate all three distinct IDs seen"
+        );
+    }
+
+    /// BC-1.02.009: two different (src, dst) pairs must be tracked independently
+    /// — `(srcA, dstX)` and `(srcA, dstY)` are separate entries.
+    #[test]
+    fn test_bc_1_02_009_unit_id_distinct_src_dst_pairs_isolated() {
+        let mut observer = Observer::new(vec![]);
+
+        // (srcA, dstX) → unit_id 0x01
+        observer.observe(&make_modbus_packet("10.0.0.1", "10.0.0.2", 0x01));
+        // (srcA, dstY) → unit_id 0x05
+        observer.observe(&make_modbus_packet("10.0.0.1", "10.0.0.3", 0x05));
+
+        let obs = observer.observations();
+        assert_eq!(
+            obs.modbus_flow_summary.len(),
+            2,
+            "BC-1.02.009: two distinct (src, dst) pairs must create two map entries"
+        );
+
+        let entry_xy = obs
+            .modbus_flow_summary
+            .get(&(ip("10.0.0.1"), ip("10.0.0.2")))
+            .expect("BC-1.02.009: entry for (srcA, dstX) must exist");
+        assert_eq!(
+            entry_xy.unit_ids,
+            BTreeSet::from([0x01u8]),
+            "BC-1.02.009: (srcA, dstX) entry must contain only unit_id=1"
+        );
+
+        let entry_xz = obs
+            .modbus_flow_summary
+            .get(&(ip("10.0.0.1"), ip("10.0.0.3")))
+            .expect("BC-1.02.009: entry for (srcA, dstY) must exist");
+        assert_eq!(
+            entry_xz.unit_ids,
+            BTreeSet::from([0x05u8]),
+            "BC-1.02.009: (srcA, dstY) entry must contain only unit_id=5"
+        );
+    }
+
+    /// BC-1.02.009: repeated observations of the same unit_id for a given
+    /// (src, dst) must not inflate the set — BTreeSet deduplicates naturally.
+    #[test]
+    fn test_bc_1_02_009_unit_id_dedupes_within_flow() {
+        let mut observer = Observer::new(vec![]);
+
+        // 5 packets, all same unit_id=0x01
+        for _ in 0..5 {
+            observer.observe(&make_modbus_packet("10.0.0.1", "10.0.0.2", 0x01));
+        }
+
+        let obs = observer.observations();
+        let summary = obs
+            .modbus_flow_summary
+            .get(&(ip("10.0.0.1"), ip("10.0.0.2")))
+            .expect("BC-1.02.009: modbus_flow_summary entry must exist after 5 packets");
+        assert_eq!(
+            summary.unit_ids.len(),
+            1,
+            "BC-1.02.009: 5 packets with unit_id=1 must deduplicate to a set of size 1"
+        );
+    }
+
+    /// EC-001: unit ID 0x00 (Modbus broadcast address) must be counted.
+    /// A unit-ID sweep that includes broadcast is itself suspicious.
+    #[test]
+    fn test_bc_1_02_009_unit_id_0_is_counted() {
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&make_modbus_packet("10.0.0.1", "10.0.0.2", 0x00));
+
+        let obs = observer.observations();
+        let summary = obs
+            .modbus_flow_summary
+            .get(&(ip("10.0.0.1"), ip("10.0.0.2")))
+            .expect("EC-001: modbus_flow_summary entry must exist for unit_id=0");
+        assert!(
+            summary.unit_ids.contains(&0u8),
+            "EC-001: unit_id=0x00 (broadcast) must be present in unit_ids"
+        );
+    }
+
+    /// EC-002: unit ID 0xFF (gateway / reserved) must be counted.
+    /// Sweeping to 0xFF is common in automated PLC discovery tools.
+    #[test]
+    fn test_bc_1_02_009_unit_id_ff_is_counted() {
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&make_modbus_packet("10.0.0.1", "10.0.0.2", 0xFF));
+
+        let obs = observer.observations();
+        let summary = obs
+            .modbus_flow_summary
+            .get(&(ip("10.0.0.1"), ip("10.0.0.2")))
+            .expect("EC-002: modbus_flow_summary entry must exist for unit_id=0xFF");
+        assert!(
+            summary.unit_ids.contains(&255u8),
+            "EC-002: unit_id=0xFF (gateway/reserved) must be present in unit_ids"
+        );
     }
 }
