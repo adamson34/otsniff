@@ -175,11 +175,15 @@ stories:
     branch: null
     worktree: null
   S-3.05:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-3.05-codecov-coverage-reporting
     worktree: null
+    merge_sha: 51a3faf
+    pr: 77
+    merged_at: 2026-05-19T18:32:29Z
     cycle_target: v0.4.1-patch
+    notes: "Coverage job + codecov.yml + README badge landed. AC-006 (badge URL resolves) deferred to post-merge — user must one-time sign repo into codecov.io via OAuth before first upload renders. BC-build.001 informal (not in BC-INDEX, per S-3.06 precedent)."
   S-3.06:
     status: completed
     wave: 1
