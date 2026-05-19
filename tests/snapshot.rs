@@ -147,6 +147,7 @@ fn build_fixture() -> Observations {
     Observations {
         hosts,
         flows,
+        modbus_flow_summary: std::collections::BTreeMap::new(),
         modbus_events: vec![ModbusEvent {
             ts: fixed_ts(),
             src: ip("10.10.0.5"),

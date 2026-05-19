@@ -5,7 +5,7 @@
 //! plaintext credentials, external egress). The findings layer reads this
 //! struct after iteration completes — keeps the parse loop tight.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::IpAddr;
 
 use chrono::{DateTime, Utc};
@@ -71,6 +71,19 @@ pub struct ModbusEvent {
     pub function_code: u8,
     pub label: String,
     pub engineering_class: bool,
+}
+
+/// Per-`(src, dst)` Modbus flow summary, aggregated eagerly by the observer.
+///
+/// `unit_ids` accumulates every distinct Modbus unit ID seen in requests from
+/// `src` to `dst` within the capture. Used by `findings::modbus_recon` to
+/// detect unit-ID sweep / discovery patterns (S-2.11 AC-001, BC-1.02.009).
+///
+/// Populated at the Modbus event-push site — implementer's Step 4. Initialized
+/// empty here so all snapshot tests and existing consumers compile unchanged.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModbusFlowSummary {
+    pub unit_ids: BTreeSet<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -277,6 +290,12 @@ pub struct Observations {
     pub hosts: HashMap<IpAddr, HostObs>,
     pub flows: HashMap<String, FlowObs>,
     pub modbus_events: Vec<ModbusEvent>,
+    /// Per-`(src, dst)` Modbus unit-ID accumulator. Keyed by `(src_ip, dst_ip)`;
+    /// value holds the set of distinct unit IDs seen for that pair within the
+    /// capture. Populated at the Modbus event-push site (implementer's Step 4
+    /// for S-2.11). Initialized empty so all existing consumers compile without
+    /// change.
+    pub modbus_flow_summary: BTreeMap<(IpAddr, IpAddr), ModbusFlowSummary>,
     pub enip_events: Vec<EnipEvent>,
     pub s7_events: Vec<S7Event>,
     pub dnp3_events: Vec<Dnp3Event>,
