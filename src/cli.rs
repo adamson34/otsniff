@@ -40,7 +40,7 @@ use crate::pcap::iter_packets;
 use crate::progress::ProgressReporter;
 use crate::report::render_html;
 use crate::report_md::render_markdown;
-use crate::scrub::{build_map, scrub_text, unscrub_text, ScrubMap};
+use crate::scrub::{build_map, merge_map, scrub_text, unscrub_text, ScrubMap};
 
 /// One-shot OT-aware PCAP triage.
 ///
@@ -102,6 +102,15 @@ pub struct ScrubArgs {
     /// See `--source-type` on `analyze`.
     #[arg(long = "source-type", value_name = "TYPE", value_enum)]
     pub source_type: Option<SourceTypeArg>,
+    /// Optional path to a previously saved pseudonym map to use as a
+    /// baseline. When provided, real identifiers already in the baseline
+    /// map reuse their existing pseudonyms; new identifiers are appended
+    /// with fresh pseudonyms. If omitted, the current behavior is
+    /// preserved (a brand-new map is built from this capture alone).
+    ///
+    /// See S-6.01 / BC-5.03.001 for the stability contract.
+    #[arg(long = "baseline-map", value_name = "PATH")]
+    pub baseline_map: Option<PathBuf>,
     /// Print parse summary to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
@@ -288,7 +297,20 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
     // types stay pristine) and limits substitution to values we actually
     // saw, which avoids accidentally rewriting IP-shaped substrings in
     // unrelated text.
-    let map = build_map(&obs);
+    //
+    // S-6.01 (BC-5.03.001): when --baseline-map is supplied the merged map
+    // is built via merge_map(baseline, &obs) rather than a fresh build_map.
+    // The stub wires the field reference; the implementer replaces this block
+    // with the real loading + merge call in Step 4.
+    let map = if let Some(ref _baseline_path) = args.baseline_map {
+        // Implementer Step 4: load baseline from _baseline_path, deserialize
+        // as ScrubMap, then call merge_map(baseline, &obs).
+        let _baseline_path = _baseline_path;
+        let _unused_merge_map = merge_map; // keep import live until wired
+        build_map(&obs)
+    } else {
+        build_map(&obs)
+    };
     let raw_md = render_markdown(
         &inventory,
         &findings,

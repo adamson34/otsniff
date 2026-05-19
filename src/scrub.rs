@@ -76,6 +76,27 @@ impl ScrubMap {
     }
 }
 
+/// Merge a baseline `ScrubMap` with identifiers from a new capture.
+///
+/// # Contract (BC-5.03.001)
+///
+/// - Every real identifier already in `baseline` reuses its existing pseudonym.
+/// - New identifiers in `current` that are not in `baseline` are appended with
+///   fresh pseudonyms; the counter resumes at `baseline.max_index() + 1`.
+/// - Returns a merged map containing all identifiers from both sources.
+/// - If the same pseudonym name would be assigned to two different real values,
+///   the implementation must panic (EC-002 from S-6.01: impossible if invariant
+///   holds; indicates a bug).
+///
+/// # Ownership
+///
+/// Takes `baseline` by value (consuming it), and `current` by shared reference.
+/// The returned `ScrubMap` is the merged result; the caller should serialize it
+/// to the `--map` output path.
+pub fn merge_map(_baseline: ScrubMap, _current: &Observations) -> ScrubMap {
+    todo!()
+}
+
 /// Walk observations and mint stable pseudonyms for every observed IP and MAC.
 ///
 /// Pseudonyms are assigned in sorted order of the real value so the same
