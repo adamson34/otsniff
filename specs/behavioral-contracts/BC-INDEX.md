@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 91  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005
+total_bcs: 93  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -16,7 +16,7 @@ deviations:
 
 # Behavioral Contracts — Master Index
 
-91 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
+93 numbered BCs across 10 subsystems (S.0–S.9). The 15 originally-
 named `BC-AUDIT-NNN` contracts (Phase 0 brownfield audit) were
 promoted to first-class numbered BCs in S-1.05 (v0.4.0); the legacy
 IDs survive as aliases at the bottom of this file for traceability
@@ -55,6 +55,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-1.04.001 SMBv1 packet observation (HIGH)
 - BC-1.04.002 TLS ClientHello version capture (HIGH)
 - BC-1.04.003 TLS ClientHello cipher_suites captured by observer; bounds-checked variable-offset walk (session_id_len at payload[43], cs_offset = 44 + session_id_len); appended across multiple ClientHellos on the same (src, dst, dst_port) flow (HIGH, added S-2.07 v0.4.0)
+- BC-1.04.004 RDP X.224 Connection Confirm recognized on tcp/3389 with TPKT header + PDU type 0xD0 + optional RDP_NEG_RSP at offset 11; selectedProtocol read as little-endian u32 at offset 15; bounds-checked; TPKT length must match payload length (HIGH, added S-2.08 v0.4.0)
 - BC-1.05.001 External egress aggregation (HIGH)
 - BC-1.05.002 Default OT subnets = RFC1918 (HIGH)
 - BC-1.05.004 Distinct-dst counting per (src, dst_port, proto) group for port-scan recognition (HIGH, added S-2.10 v0.4.0)
@@ -81,6 +82,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-3.04.003 `stale_tls::is_stale` inclusive range is exactly 0x0300..=0x0302; 0x0303 (TLS 1.2) and 0x0304 (TLS 1.3) explicitly pass the filter (HIGH, promoted from BC-AUDIT-011 in S-1.05)
 - BC-3.04.004 `compat.ntlmv1` fires at High for NTLMv1 events; not for V2 (EC-001); rolls up by `(src, dst)` pair; evidence capped at 5 samples per finding (HIGH, added S-2.06 v0.4.0)
 - BC-3.04.005 `compat.weak_tls_cipher` fires at Medium when any of (0x0001, 0x0002, 0x0004, 0x0005, 0x0009, 0x000A) appears in cipher_suites; GREASE values skipped (EC-001); fires alongside compat.stale_tls (AC-003 sibling-not-exclusive); rolls up by (src, dst) (HIGH, added S-2.07 v0.4.0)
+- BC-3.04.006 `creds.rdp_no_nla` fires at Critical when RdpEvent.selected_protocol == 0x00000000 (PROTOCOL_RDP, exact equality — secure variants PROTOCOL_SSL/HYBRID/HYBRID_EX do not fire); rolls up by (src, dst) pair (HIGH, added S-2.08 v0.4.0)
 - BC-3.05.001 `boundary.dns_resolver` cross-zone filter (HIGH)
 - BC-3.05.002 `ot.unexpected_protocols` no-fly list (HIGH, **B.6 corrected** — 11 labels + src OR dst predicate)
 - BC-3.05.003 `unexpected_label` port-to-label table contains exactly 11 entries: smtp, bittorrent, rtmp, apns, gcm, stun, sip, irc, openvpn, teamviewer, anydesk (HIGH, promoted from BC-AUDIT-009 in S-1.05; locked by S-2.01 regression tests)
