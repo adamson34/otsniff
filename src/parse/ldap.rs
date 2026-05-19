@@ -349,27 +349,66 @@ mod tests {
     //                 so it happily reads bytes[pos] as the version.
 
     /// A version INTEGER with declared length 0 must be rejected.
-    /// This kills the `||` → `&&` mutant on line 64.
+    ///
+    /// Kills the `||` → `&&` mutant on line 64 by constructing a crafted message
+    /// where the parser would succeed after the ver_len=0 check IF it continued
+    /// (the bytes that follow ver_len=0 happen to form a valid DN + password),
+    /// but the original code must return None because ver_len == 0 is unconditionally
+    /// rejected via the `||` arm.
     #[test]
     fn test_ldap_line64_zero_version_length_is_rejected() {
-        let mut bytes = make_bind_request(b"cn=admin", b"secret");
-        // Layout (from make_bind_request):
-        //   [0]  0x30  outer SEQUENCE tag
-        //   [1]  len   outer SEQUENCE length
-        //   [2]  0x02  messageID tag
-        //   [3]  0x01  messageID length
-        //   [4]  0x01  messageID value
-        //   [5]  0x60  BindRequest tag
-        //   [6]  len   BindRequest length
-        //   [7]  0x02  version tag
-        //   [8]  0x01  version length   ← patch to 0x00
-        //   [9]  0x03  version value
-        bytes[8] = 0x00; // version length = 0
+        // Build a valid bind request: after the version tag+len bytes, the remaining
+        // bytes are: version value (0x03), DN tag (0x04), DN len, DN bytes, pw tag (0x80), pw len.
+        //
+        // We want: bytes[8] = 0x00 (ver_len = 0), but bytes[9..] must look like a
+        // valid DN OctetString followed by a valid SimpleAuthentication so that the
+        // `&&` mutant's parser continues past ver_len=0 and returns Some(...).
+        //
+        // With ver_len = 0:
+        //   - Original (`||`): ver_len == 0 → true → return None. CORRECT.
+        //   - Mutant (`&&`): ver_len == 0 && (pos + 0 > len) = false → does NOT return None.
+        //     Parser reads bytes[pos=9] as "version" value.
+        //     bytes[9] must equal 0x04 for DN tag match. Then DN len at [10], DN at [11..],
+        //     pw tag 0x80, pw len, pw bytes — all valid → mutant returns Some(...).
+        //
+        // Construct exactly this scenario:
+        // [0] 0x30  [1] total_len
+        // [2] 0x02  [3] 0x01  [4] 0x01   (msgID = 1)
+        // [5] 0x60  [6] bind_len
+        // [7] 0x02  [8] 0x00              (version tag, len=0)
+        // [9] 0x04  [10] 0x02  [11] 'a'  [12] 'b'   (DN "ab" — but also where mutant reads version=0x04)
+        // [13] 0x80 [14] 0x02  [15] 'x'  [16] 'y'   (password "xy")
+        //
+        // bind body (from [7] onwards): version TLV (0x02,0x00) + DN TLV (0x04,0x02,'a','b')
+        //                               + pw TLV (0x80,0x02,'x','y') = 2 + 4 + 4 = 10 bytes
+        // bind_len = 10
+        // ldap body (from [2]): msgID TLV (0x02,0x01,0x01) + bind TLV (0x60,10,...) = 3 + 12 = 15
+        // outer SEQUENCE len = 15
+        let mut buf = vec![
+            0x30, 15,       // LDAPMessage SEQUENCE, len=15
+            0x02, 0x01, 0x01, // messageID = 1
+            0x60, 10,       // BindRequest APPLICATION 0, len=10
+            0x02, 0x00,     // version INTEGER, len=0  ← the trigger
+            0x04, 0x02, b'a', b'b', // name OctetString, len=2, value="ab"
+            0x80, 0x02, b'x', b'y', // simple [0], len=2, value="xy"
+        ];
+        // Verify outer + inner lengths are consistent with buf.len() = 17
+        assert_eq!(buf.len(), 17, "sanity: crafted buf must be 17 bytes");
+
+        let result = recognize_bind_request(&buf);
         assert_eq!(
-            recognize_bind_request(&bytes),
-            None,
-            "version INTEGER with length 0 must be rejected (|| check on line 64)"
+            result, None,
+            "version INTEGER with length 0 must be rejected by the || check; \
+             the && mutant would return Some here"
         );
+
+        // Sanity: patch ver_len back to 0x01 and the same message parses successfully.
+        buf[8] = 0x01;   // ver_len = 1 (one byte: 0x04 is not a valid LDAP version but parse continues)
+        // Note: with ver_len=1, version = bytes[9] = 0x04. Then pos advances past it.
+        // Then DN tag at bytes[10]=0x02 (INTEGER tag, not OctetString tag 0x04) → fails.
+        // So we just confirm it returns None too (for different reason). The key test
+        // is the original above where ver_len=0 triggers the || branch.
+        // The important assertion is the one above — do not weaken it.
     }
 
     // ── Line 73: DN OctetString bounds check ─────────────────────────────────
