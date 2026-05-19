@@ -174,10 +174,14 @@ stories:
     merged_at: 2026-05-19T19:02:15Z
     notes: "6 criterion benches + procedural 1 MiB synthetic PCAP fixture (committed via !gitignore exception) + perf.yml workflow (cron + perf-labeled PR triggers) + recorded baseline timings. AC-004 satisfied by existing tests/memory_bound.rs from S-2.02."
   S-3.02:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-3.02-prompt-eval-harness
     worktree: null
+    merge_sha: 18a7b62
+    pr: 79
+    merged_at: 2026-05-19T19:25:16Z
+    notes: "Prompt-eval harness with 4 capture-source eval directories, parse_rubric + 7 unit tests, run_all.sh runner with leak detector, opt-in workflow_dispatch CI. BCs (BC-6.02.001, BC-6.02.002) pre-existing in BC-INDEX, no new registration."
   S-3.05:
     status: completed
     wave: 1

@@ -122,3 +122,4 @@ Human approval gate. After approval:
 | S-6.01 scrub map merge (BC-5.03.001) | #76 | 896c9e2 | 2026-05-19T18:12:08Z | CLEAN security verdict; converged in 1 cycle; BC registered at b4586f1; red-gate at eb050f7. One mid-PR fmt fix (f049191) — rustfmt 1.9.0 single-line collapse vs CI two-line expectation. |
 | S-3.05 codecov coverage reporting (BC-build.001 informal) | #77 | 51a3faf | 2026-05-19T18:32:29Z | APPROVE cycle 1, 0 findings, CLEAN security verdict; red-gate at 8789cd1. AC-006 (badge URL resolves) deferred to post-merge manual verification. |
 | S-3.01 Criterion + hyperfine perf regression (no BCs) | #78 | 0c64832 | 2026-05-19T19:02:15Z | APPROVE cycle 1, 0 findings, CLEAN security verdict; red-gate at a4b5c35. |
+| S-3.02 Prompt eval harness (BC-6.02.001, BC-6.02.002 pre-existing) | #79 | 18a7b62 | 2026-05-19T19:25:16Z | 4 eval dirs, parse_rubric + 7 unit tests, run_all.sh + leak detector, opt-in workflow_dispatch CI. |
