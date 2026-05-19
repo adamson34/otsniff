@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 97  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001
+total_bcs: 98  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -132,6 +132,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-8.01.002 `report_md` top-level structure orders sections: Capture summary → Findings → Asset inventory → Comms matrix → Notes (matched by snapshot test) (HIGH, promoted from BC-AUDIT-015 in S-1.05)
 - BC-8.01.003 Report HTML uses hero band + inline-SVG brand mark + severity-tinted finding cards + dark-mode + print-color-adjust + collapsible table sections (HIGH, added S-5.05 v0.4.0)
 - BC-8.01.004 Report HTML applies the otsniff brand handoff: sniff-trail mark (7 circles), ink/paper/accent palette, JetBrains Mono type system, inline favicon as base64 data URL (HIGH, added S-5.06 v0.4.0; supersedes S-5.05's freehand visual)
+- BC-8.01.005 Finding cards in HTML report wrap in `<details open class="finding sev-...">` with `<summary>` containing severity badge + title; default browser triangle suppressed via `details.finding > summary::-webkit-details-marker { display: none }` + `▾`/`▸` chevron via `::before` using `var(--muted)`; default state is open (`open` attribute); nested `<details>` for evidence/criteria/playbook unaffected; `@media print` forces all finding cards expanded with `details.finding > *:not(summary) { display: block !important }` (HIGH, added S-5.07 v0.4.0)
 - BC-8.02.001 rule_catalog::render_markdown matches committed RULES.md (HIGH)
 - BC-8.03.001 Scrubbed markdown contains no real identifiers (HIGH)
 
