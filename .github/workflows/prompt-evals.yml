@@ -1,0 +1,14 @@
+name: Prompt Evals (opt-in)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run prompt evals
+        run: |
+          echo "TODO: implementer wires this in step 4"
+          exit 0
