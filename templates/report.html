@@ -86,6 +86,19 @@
     margin: 0.75rem 0;
     box-shadow: var(--shadow);
   }
+  /* Finding card collapsibility (S-5.07 / BC-8.01.005) */
+  details.finding > summary::-webkit-details-marker { display: none; }
+  details.finding > summary {
+    cursor: pointer;
+    list-style: none;
+  }
+  details.finding > summary::before {
+    content: "▾ ";
+    color: var(--muted);
+  }
+  details.finding:not([open]) > summary::before {
+    content: "▸ ";
+  }
   .finding.sev-critical { border-left-color: var(--crit); background: color-mix(in oklch, var(--crit) 8%, var(--paper)); }
   .finding.sev-high { border-left-color: var(--high); background: color-mix(in oklch, var(--high) 8%, var(--paper)); }
   .finding.sev-medium { border-left-color: var(--med); background: color-mix(in oklch, var(--med) 8%, var(--paper)); }
@@ -268,6 +281,9 @@
       print-color-adjust: exact;
     }
     .finding { break-inside: avoid; }
+    details.finding > *:not(summary) { display: block !important; }
+    details.finding > summary::-webkit-details-marker,
+    details.finding > summary::before { display: none !important; content: "" !important; }
     details[open] summary { display: none; }
     details { margin: 0; }
     details[open] > summary.section-summary,
@@ -321,8 +337,8 @@
   <div class="no-findings">No findings raised. Spot-check the asset inventory and top flows below — quiet captures sometimes mean the right things were filtered out at the SPAN port.</div>
 {% else %}
   {% for f in findings %}
-  <div class="finding sev-{{ f.severity_class }}">
-    <h3><span class="badge sev-{{ f.severity_class }}">{{ f.severity_label }}</span>{{ f.title }}</h3>
+  <details open class="finding sev-{{ f.severity_class }}">
+    <summary><span class="badge sev-{{ f.severity_class }}">{{ f.severity_label }}</span>{{ f.title }}</summary>
     <div>{{ f.summary }}</div>
     {% if !f.evidence.is_empty() %}
     <details>
@@ -347,7 +363,7 @@
     </details>
     {% endif %}
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>{{ f.id }}</code></div>
-  </div>
+  </details>
   {% endfor %}
 {% endif %}
 
