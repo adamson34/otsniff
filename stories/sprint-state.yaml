@@ -119,10 +119,14 @@ stories:
     merged_at: 2026-05-18T23:58:12Z
     notes: "1 NITPICK on trigger text wording, non-blocking, no fix required."
   S-2.08:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-2.08-creds-rdp-no-nla
     worktree: null
+    merge_sha: 387b239
+    pr: 71
+    merged_at: 2026-05-19T15:02:50Z
+    notes: "2 COSMETIC findings on stale doc comments (rdp_legacy.rs:4 and :62 still reference the AC-002 bit-test). Non-blocking, no fix required. AC-002 spec bit-test corrected to exact equality (implementation, BC-INDEX, and tests all agree)."
   S-2.09:
     status: completed
     wave: 1

@@ -114,3 +114,4 @@ Human approval gate. After approval:
 | S-2.05 `creds.ldap_simple_bind` (BC-1.03.005 + BC-3.01.005) | #68 | 31e827b | 2026-05-18T20:58:12Z | 5 NITPICKs logged (non-blocking); BCs registered at 03226af |
 | S-2.06 `compat.ntlmv1` (BC-1.03.006 + BC-3.04.004) | #69 | 317a575 | 2026-05-18T21:31:15Z | APPROVE cycle 1, NITPICK_ONLY; F-002/F-003/F-005 deferred; BCs registered at 0c5bcd6; red-gate at df40937 |
 | S-2.07 `compat.weak_tls_cipher` (BC-1.04.003 + BC-3.04.005) | #70 | a866578 | 2026-05-18T23:58:12Z | APPROVE cycle 1, 1 NITPICK (trigger text wording, non-blocking); BCs registered at 4a0150c; red-gate at 8b19f57 |
+| S-2.08 `creds.rdp_no_nla` (BC-1.04.004 + BC-3.04.006) | #71 | 387b239 | 2026-05-19T15:02:50Z | APPROVE cycle 1, 2 COSMETIC (stale doc comments rdp_legacy.rs:4,:62 ref AC-002 bit-test, non-blocking); BCs registered at ad7a5a2; red-gate at 48f81e8 |
