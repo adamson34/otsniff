@@ -109,7 +109,7 @@ else
   ac003_fail=0
 
   for key in "coverage:" "status:" "comment:" "ignore:" "tests/**" "target: 70%"; do
-    if grep -q "${key}" "${CODECOV_YML}"; then
+    if grep -qF "${key}" "${CODECOV_YML}"; then
       : # found
     else
       check_fail "AC-003: codecov.yml missing required key/value: '${key}'"
