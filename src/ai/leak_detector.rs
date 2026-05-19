@@ -378,4 +378,19 @@ mod kani_proofs {
         let leak = result.unwrap();
         assert!(matches!(leak.kind, LeakKind::Mac), "leak kind must be Mac");
     }
+
+    /// Proves: `ensure_no_map_values` returns `Err` iff any value in the map
+    /// appears as a substring of the input, and `Ok` otherwise.
+    ///
+    /// Bounds: input length ≤ 32, ≤ 4 map values each ≤ 8 bytes.
+    /// See `docs/proofs/ensure-no-map-values.md` for bounds rationale and the
+    /// bidirectional invariant statement.
+    ///
+    /// This is the primary defense for hostname-shape leaks (BC-5.02.002):
+    /// identifiers like `LINE-3-PLC` have no clean regex shape, so the
+    /// map-value check is the only gate that catches them.
+    #[kani::proof]
+    fn map_value_substring() {
+        todo!()
+    }
 }

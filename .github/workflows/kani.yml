@@ -27,3 +27,6 @@ jobs:
       - name: Run leak detector MAC proof
         run: cargo kani --harness leak_regex_mac
         timeout-minutes: 30
+      - name: Run map value substring proof
+        run: cargo kani --harness map_value_substring
+        timeout-minutes: 30
