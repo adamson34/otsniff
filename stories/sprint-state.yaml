@@ -145,10 +145,14 @@ stories:
     pr: 50
     completed_at: 2026-05-12T18:15:00Z
   S-2.11:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-2.11-ics-modbus-unit-id-sweep
     worktree: null
+    merged_at: 2026-05-19T15:39:57Z
+    merge_sha: 238466b
+    pr: 72
+    notes: "Pre-flight BC renumber from BC-1.02.006→BC-1.02.009 to avoid DHCP option walk collision. 1 NITPICK on internal doc comment, non-blocking."
   S-2.12:
     status: completed
     wave: 1
