@@ -18,3 +18,12 @@ jobs:
       - name: Run scrub round-trip proof
         run: cargo kani --harness scrub_roundtrip_bounded
         timeout-minutes: 30
+      - name: Run leak detector IPv4 proof
+        run: cargo kani --harness leak_regex_ipv4
+        timeout-minutes: 30
+      - name: Run leak detector IPv6 proof
+        run: cargo kani --harness leak_regex_ipv6
+        timeout-minutes: 30
+      - name: Run leak detector MAC proof
+        run: cargo kani --harness leak_regex_mac
+        timeout-minutes: 30

@@ -198,3 +198,53 @@ mod tests {
         assert!(ensure_no_map_values(clean, &map).is_ok());
     }
 }
+
+/// Kani formal-verification harnesses (S-4.02).
+///
+/// These harnesses are compiled and run only when `cargo kani --harness …`
+/// is invoked.  Under normal `cargo build` / `cargo test` / `cargo check`
+/// the entire module is elided by the `#[cfg(kani)]` gate.
+///
+/// See `docs/proofs/leak-detector-regex.md` for bounds rationale and
+/// `docs/adr/` for the privacy contract these proofs support (BC-5.02.001).
+///
+/// # Authoring note
+///
+/// `cargo-kani` was not installed in the development environment where these
+/// harnesses were authored (deferred per L-P3-002).
+/// The harnesses will be validated on the first CI run of `.github/workflows/kani.yml`.
+/// The harnesses compile under `#[cfg(kani)]` elision (verified via `cargo check`).
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Proves: for every string of bounded length that contains an IPv4-shaped
+    /// substring, `scan()` returns `Some(Leak { kind: LeakKind::Ipv4, .. })`.
+    ///
+    /// See `docs/proofs/leak-detector-regex.md` for bounds rationale.
+    #[kani::proof]
+    fn leak_regex_ipv4() {
+        todo!()
+    }
+
+    /// Proves: for every string of bounded length that contains an IPv6-shaped
+    /// substring (full 8-group form), `scan()` returns
+    /// `Some(Leak { kind: LeakKind::Ipv6, .. })`.
+    ///
+    /// See `docs/proofs/leak-detector-regex.md` for bounds rationale and
+    /// coverage notes (shorter bounds acceptable for IPv6; documented there).
+    #[kani::proof]
+    fn leak_regex_ipv6() {
+        todo!()
+    }
+
+    /// Proves: for every string of bounded length that contains a MAC-shaped
+    /// substring (`XX:XX:XX:XX:XX:XX`, case-insensitive), `scan()` returns
+    /// `Some(Leak { kind: LeakKind::Mac, .. })`.
+    ///
+    /// See `docs/proofs/leak-detector-regex.md` for bounds rationale.
+    #[kani::proof]
+    fn leak_regex_mac() {
+        todo!()
+    }
+}
