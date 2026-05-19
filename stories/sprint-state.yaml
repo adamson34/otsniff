@@ -268,10 +268,14 @@ stories:
     pr: 45
     completed_at: 2026-05-12T15:08:13Z
   S-6.01:
-    status: pending
+    status: completed
     wave: 1
-    branch: null
+    branch: feature/S-6.01-scrub-map-merge
     worktree: null
+    merge_sha: 896c9e2
+    pr: 76
+    merged_at: 2026-05-19T18:12:08Z
+    notes: "Privacy-critical surface (scrub layer). Required one mid-PR fmt fix commit (f049191) — local rustfmt 1.9.0 produced a single-line collapse for a 100-char line; committed two-line form mismatched CI rustfmt expectation. Resolved by collapsing to single line."
 
   # ===== Wave 2 (depends on Wave 1) =====
   S-1.05:
