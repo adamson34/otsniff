@@ -545,7 +545,7 @@ mod tests {
             result.is_some(),
             "tight-fit password (exactly fills buffer) must be accepted; got None"
         );
-        assert_eq!(result.unwrap().anonymous, false);
+        assert!(!result.unwrap().anonymous);
     }
 
     /// Password of length 0 at exact end of buffer (anonymous bind tight fit).
@@ -558,7 +558,7 @@ mod tests {
             result.is_some(),
             "anonymous bind (empty pw, exact fit) must be accepted; got None"
         );
-        assert_eq!(result.unwrap().anonymous, true);
+        assert!(result.unwrap().anonymous);
     }
 
     // ── Line 73: dn tight-fit where pw still has room ────────────────────────
