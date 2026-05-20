@@ -539,8 +539,7 @@ mod kani_proofs {
         // Scrub: no match → output must equal input.
         let (scrubbed, scrubbed_len) = replace_first_model(input, real, pseudo);
         assert_eq!(
-            scrubbed_len,
-            input_len,
+            scrubbed_len, input_len,
             "vacuous scrub must not change length"
         );
         let mut k = 0;
@@ -602,7 +601,11 @@ mod kani_proofs {
 
         // Step 1: scrub(real, real→pseudo) must produce exactly pseudo.
         let (scrubbed, scrubbed_len) = replace_first_model(real, real, pseudo);
-        assert_eq!(scrubbed_len, pseudo.len(), "scrub of exact real must yield pseudo");
+        assert_eq!(
+            scrubbed_len,
+            pseudo.len(),
+            "scrub of exact real must yield pseudo"
+        );
         let mut k = 0;
         while k < pseudo.len() {
             assert_eq!(scrubbed[k], pseudo[k], "scrubbed byte must match pseudo");
