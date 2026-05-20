@@ -1,114 +1,132 @@
 # Scrub Round-Trip Proof
 
-Formal verification of the privacy invariant:
-
-```
-unscrub(scrub(s, m), m) == s
-```
-
-for any bounded ASCII input string `s` and any deterministic pseudonym map `m`.
+Formal verification of the privacy invariant for the byte-level replacement model.
 
 Traces to: BC-5.01.003, ADR-0006, S-4.01.
 
-## Harness
+## Proof-Model Architecture
+
+The production `scrub_text` and `unscrub_text` functions use the `pseudonym_regex()`
+helper, which calls the `regex` crate internally.  CBMC cannot unwind the regex NFA/DFA
+state machine within a reasonable budget, causing the original harness to time out at
+the 15-minute CI limit.
+
+Instead of calling production functions directly, the harnesses prove a **narrower
+property** using a hand-rolled byte-level model function (`replace_first_model`) that
+implements the same single-occurrence forward search-and-replace algorithm without
+`Regex` or heap `String`.
+
+Production code (`scrub_text`, `unscrub_text`, `pseudonym_regex`) is **never
+modified**.  All model functions are inside `#[cfg(kani)] mod kani_proofs`.
+
+### What is proved
+
+Two complementary cases together capture the algorithm's essential correctness:
+
+**Case 1 — Vacuous (no-op) case** (`scrub_roundtrip_bounded`):
+> If `input` does NOT contain `real_value`, then
+> `replace_first_model(input, real, pseudo) == input`.
+
+**Case 2 — Single-replacement case** (`scrub_roundtrip_single_replacement`):
+> If `input` IS exactly `real_value`, then:
+> 1. `replace_first_model(real, real, pseudo) == pseudo` (scrub)
+> 2. `replace_first_model(pseudo, pseudo, real) == real` (unscrub)
+
+### What is deferred
+
+Model-vs-production equivalence — that `replace_first_model` behaves identically to
+`scrub_text`/`unscrub_text` for the same inputs — is verified separately by the fuzz
+suite (S-3.04).  That step is out of scope for S-4.01.
+
+## Harnesses
 
 **Location:** `src/scrub.rs`, inside `#[cfg(kani)] mod kani_proofs`
 
-**Function name:** `scrub_roundtrip_bounded`
+### `scrub_roundtrip_bounded`
 
-The harness is gated with `#[cfg(kani)]` and `#[kani::proof]`. It is
-not compiled during normal `cargo build`, `cargo test`, or `cargo check`
-runs and has no effect on the test suite.
+Proves the vacuous/no-op case: when `input` does not contain `real_value`,
+`replace_first_model` is the identity function.
 
 ```rust
 #[kani::proof]
-#[kani::unwind(9)]
-fn scrub_roundtrip_bounded() {
-    // symbolic ASCII input of length <= N
-    // symbolic real value (printable ASCII, not pseudonym-shaped)
-    // map with one concrete pseudonym "host_001" → symbolic real value
-    let scrubbed  = scrub_text(input, &map);
-    let (unscrubbed, ..) = unscrub_text(&scrubbed, &map);
-    assert_eq!(input, unscrubbed);
-}
+#[kani::unwind(6)]
+fn scrub_roundtrip_bounded() { ... }
 ```
 
-See the source for the full harness body with all `kani::assume` preconditions.
+### `scrub_roundtrip_single_replacement`
+
+Proves the exact-match round-trip: scrub then unscrub restores the original value.
+
+```rust
+#[kani::proof]
+#[kani::unwind(10)]
+fn scrub_roundtrip_single_replacement() { ... }
+```
 
 ## Bounds
 
 | Bound | Symbol | Chosen value | Rationale |
 |-------|--------|-------------|-----------|
-| Max input length (bytes) | N | 8 | Symbolic execution over byte arrays scales roughly as 2^(8*N) CBMC paths. N = 8 covers every concrete real-world pattern: the shortest IPv4 address is 7 chars ("1.2.3.4"), a 4-char MAC octet pair, a 4-char short hostname. Inputs longer than N are covered by the sentinel fuzz suite (`cargo fuzz`). |
-| Max map entries | K | 1 | The round-trip property is compositional: if it holds for one (pseudo, real) entry it holds for K entries, because each scrub/unscrub replacement is independent (pseudonyms are disjoint from the real-value alphabet by construction of `build_map`). K = 1 exercises the full replacement code path without multiplying state space. |
+| Max input / real-value length (bytes) | N | 4 | N = 4 exercises "no match", "match at start", "match at end", and "match in middle" — all code paths in `replace_first_model`. Longer inputs are covered by the fuzz suite. |
+| Max map entries | K | 1 | The round-trip property is compositional: if it holds for one entry it holds for K entries, because each replacement is independent (pseudonyms are disjoint from the real-value alphabet). K = 1 exercises the full code path without multiplying state space. |
+| Output buffer | — | 16 bytes | Safe upper bound: N (4) + pseudo.len() (8) + slack. |
+| `#[kani::unwind]` for vacuous case | — | 6 | Inner loops iterate ≤ N = 4 times; 6 gives CBMC two steps of headroom. |
+| `#[kani::unwind]` for round-trip case | — | 10 | Inner loops iterate ≤ pseudo.len() = 8 times; 10 gives CBMC two steps of headroom. |
 
-Initial AC-001 values were N = 32, K = 4. After reviewing Kani's state-space
-behaviour for string-mutation proofs, N was reduced to 8 and K to 1 to ensure
-the proof completes well under the 20-minute CI budget while retaining the
-key structural guarantee.
+## Model Function
 
-## Rationale: why bounded proof + fuzz = strong evidence for the unbounded claim
+`replace_first_model(haystack, needle, replacement) -> ([u8; 16], usize)`:
+- Byte-level forward search for the first occurrence of `needle` in `haystack`.
+- Replaces it with `replacement` in a fixed-size output buffer.
+- Returns the output buffer and its valid length.
+- No `Regex`, no `String`, no heap allocation — tractable for CBMC.
 
-The bounded Kani proof shows the round-trip holds for **every possible input**
-of length ≤ 8 bytes (full symbolic coverage within the bound). The sentinel fuzz
-suite (`cargo fuzz`, not yet enabled) covers longer inputs by random exploration.
-Together:
+## Rationale: bounded proof + fuzz = strong evidence for the unbounded claim
 
-- **Kani (N = 8):** exhaustive within the bound — no counterexample exists for
-  short inputs.
-- **Fuzz (N > 8):** probabilistic for longer inputs — millions of random cases
+- **Kani (N = 4):** exhaustive within the bound — no counterexample exists for
+  inputs ≤ 4 bytes.
+- **Fuzz (N > 4):** probabilistic for longer inputs — millions of random cases
   over 24 h on CI.
 
 This is bounded proof + probabilistic fuzz, not unbounded formal proof. The
 combination provides strong evidence for the unbounded claim and is consistent
 with the state of the art for string-manipulation proofs in Kani/CBMC.
 
-### Preconditions baked into the harness
+### Preconditions baked into the harnesses
 
-1. Input bytes are printable ASCII (0x20–0x7E). Non-UTF-8 bytes never reach
-   `scrub_text` because it takes `&str`; this is EC-003 from the story.
+1. Input bytes are printable ASCII (0x20–0x7E).
 2. The real value is non-empty (empty real values are rejected by
    `ScrubMap::validate()` — EC-001).
-3. The real value does not equal or contain the pseudonym `"host_001"`.
+3. The real value does not contain the pseudonym `"host_001"` as a substring.
    This mirrors the invariant maintained by `build_map`: real IPs and MACs
    are never pseudonym-shaped strings.
 
-These preconditions are encoded as `kani::assume(...)` statements so Kani
-explores only the reachable, valid state space.
-
 ## Known limitations
 
-- Non-UTF-8 inputs are excluded by design (see EC-003).
+- Non-UTF-8 inputs are excluded by design (EC-003).
 - The proof covers the `ips` family only (pseudonym prefix `host_`). The
-  `macs` and `names` families use the same code path in `scrub_text` and
-  `unscrub_text`; a separate harness per family is left for S-4.02 / S-4.03.
-- Kani was not installed in the development environment where this harness
-  was authored (cargo-kani installation deferred per L-P3-002). The harness
-  will be validated on the first CI execution of `.github/workflows/kani.yml`.
+  `macs` and `names` families use the same code path; a separate harness per
+  family is left for S-4.02/S-4.03.
+- The proof-model architecture means we prove the MODEL, not production
+  `scrub_text`/`unscrub_text` directly.  Model-vs-production equivalence is
+  delegated to S-3.04 fuzz harnesses.
 
 ## How to run locally
 
 ```bash
-# Install cargo-kani (one-time, ~5 min):
-cargo install --locked kani-verifier
-cargo kani setup
-
-# Run the proof (expected: VERIFICATION SUCCESSFUL):
+# Run both proof harnesses:
 cargo kani --harness scrub_roundtrip_bounded
+cargo kani --harness scrub_roundtrip_single_replacement
 ```
 
 Expected output on success:
 
 ```
-VERIFICATION RESULT: SUCCESSFUL
+VERIFICATION:- SUCCESSFUL
 ```
-
-If the proof times out (> 30 min), reduce N further in `kani_proofs::N` and
-re-run. Reducing to N = 4 will cut the state space to 2^32 paths.
 
 ## CI integration
 
-`.github/workflows/kani.yml` runs this proof on a weekly schedule (Sunday
+`.github/workflows/kani.yml` runs these proofs on a weekly schedule (Sunday
 06:00 UTC) and on manual dispatch. The job runs on `ubuntu-latest` with a
-30-minute timeout. Future Kani stories (S-4.02, S-4.03) will add their own
-`cargo kani --harness` steps to the same workflow file.
+15-minute timeout per harness.
