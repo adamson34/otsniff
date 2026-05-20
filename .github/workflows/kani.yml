@@ -15,18 +15,50 @@ jobs:
         run: cargo install --locked kani-verifier
       - name: Setup kani
         run: cargo kani setup
+      # Each harness runs independently; per-step continue-on-error so a
+      # single timeout/failure doesn't mask the status of subsequent harnesses.
+      # The final summary step asserts all 5 succeeded.
       - name: Run scrub round-trip proof
+        id: scrub_roundtrip
         run: cargo kani --harness scrub_roundtrip_bounded
-        timeout-minutes: 30
+        timeout-minutes: 15
+        continue-on-error: true
       - name: Run leak detector IPv4 proof
+        id: leak_ipv4
         run: cargo kani --harness leak_regex_ipv4
-        timeout-minutes: 30
+        timeout-minutes: 15
+        continue-on-error: true
       - name: Run leak detector IPv6 proof
+        id: leak_ipv6
         run: cargo kani --harness leak_regex_ipv6
-        timeout-minutes: 30
+        timeout-minutes: 15
+        continue-on-error: true
       - name: Run leak detector MAC proof
+        id: leak_mac
         run: cargo kani --harness leak_regex_mac
-        timeout-minutes: 30
+        timeout-minutes: 15
+        continue-on-error: true
       - name: Run map value substring proof
+        id: map_value
         run: cargo kani --harness map_value_substring
-        timeout-minutes: 30
+        timeout-minutes: 15
+        continue-on-error: true
+      - name: Summarize harness outcomes
+        run: |
+          echo "Harness outcomes:"
+          echo "  scrub_roundtrip_bounded: ${{ steps.scrub_roundtrip.outcome }}"
+          echo "  leak_regex_ipv4:         ${{ steps.leak_ipv4.outcome }}"
+          echo "  leak_regex_ipv6:         ${{ steps.leak_ipv6.outcome }}"
+          echo "  leak_regex_mac:          ${{ steps.leak_mac.outcome }}"
+          echo "  map_value_substring:     ${{ steps.map_value.outcome }}"
+          # Fail the job if any harness didn't succeed
+          fail=0
+          for outcome in \
+            "${{ steps.scrub_roundtrip.outcome }}" \
+            "${{ steps.leak_ipv4.outcome }}" \
+            "${{ steps.leak_ipv6.outcome }}" \
+            "${{ steps.leak_mac.outcome }}" \
+            "${{ steps.map_value.outcome }}"; do
+            if [ "$outcome" != "success" ]; then fail=1; fi
+          done
+          exit $fail
