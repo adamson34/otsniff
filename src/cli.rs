@@ -673,6 +673,10 @@ fn run_unscrub(args: UnscrubArgs) -> Result<()> {
         source,
     })?;
     let map: ScrubMap = serde_json::from_slice(&map_bytes)?;
+    // F-W1-001 (wave-1 adversarial review): mirror run_scrub's --baseline-map
+    // path — validate the loaded map before any unscrub work. Rejects empty
+    // pseudonym keys or empty real values that would silently corrupt output.
+    map.validate()?;
 
     let input_text = match &args.input {
         Some(p) => std::fs::read_to_string(p).map_err(|source| OtError::InputOpen {

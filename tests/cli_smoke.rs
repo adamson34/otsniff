@@ -476,6 +476,29 @@ fn test_bc_9_04_001_no_verbose_no_progress_lines() {
         .stderr(predicate::str::contains("[parse]").not());
 }
 
+/// F-W1-001 (wave-1 adversarial review): `otsniff unscrub` must reject a
+/// corrupted baseline map at load time, mirroring the `run_scrub --baseline-map`
+/// path's `validate()` call. A map with an empty-string pseudonym would
+/// otherwise silently corrupt the unscrubbed output.
+#[test]
+fn test_f_w1_001_unscrub_rejects_corrupted_map() {
+    let tmp = TempDir::new().unwrap();
+    let map_path = tmp.path().join("corrupted-map.json");
+    // Map with an empty-string pseudonym key under `ips` — same shape
+    // rejected by ScrubMap::validate() per BC-5.03.001 EC-001.
+    let corrupted_map = r#"{"version":1,"created_at":"2026-05-07T12:00:00Z","ips":{"":"10.0.0.1"},"macs":{},"names":{}}"#;
+    std::fs::write(&map_path, corrupted_map).unwrap();
+    let input = tmp.path().join("ai.txt");
+    std::fs::write(&input, "host_001 saw the leak").unwrap();
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["unscrub", "--map"])
+        .arg(&map_path)
+        .arg(&input)
+        .assert()
+        .failure();
+}
+
 #[test]
 fn unscrub_strict_mode_fails_on_unknown_token() {
     let tmp = TempDir::new().unwrap();
