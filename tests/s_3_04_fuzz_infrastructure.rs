@@ -21,8 +21,7 @@ fn worktree_root() -> std::path::PathBuf {
 }
 
 fn read_file_to_string(path: &Path) -> String {
-    fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e))
+    fs::read_to_string(path).unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e))
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +196,7 @@ fn test_bc_1_02_002_ac002_workflow_runs_weekly_not_pr() {
         .filter(|l| l.trim_start().starts_with("- cron:"))
         .any(|l| {
             // Strip key and surrounding quotes/whitespace, then check for digits
-            let val = l.splitn(2, "cron:").nth(1).unwrap_or("").trim();
+            let val = l.split_once("cron:").map(|x| x.1).unwrap_or("").trim();
             val.chars().any(|c| c.is_ascii_digit())
         });
     assert!(
@@ -293,12 +292,18 @@ fn test_bc_1_02_003_ac003_corpus_seed_doc_or_setup_present() {
 
     let workflow_seeds_corpus = {
         let wf_path = root.join(".github/workflows/fuzz.yml");
-        wf_path.exists() && read_file_to_string(&wf_path).to_lowercase().contains("corpus")
+        wf_path.exists()
+            && read_file_to_string(&wf_path)
+                .to_lowercase()
+                .contains("corpus")
     };
 
     let readme_documents_corpus = {
         let readme = root.join("fuzz/README.md");
-        readme.exists() && read_file_to_string(&readme).to_lowercase().contains("corpus")
+        readme.exists()
+            && read_file_to_string(&readme)
+                .to_lowercase()
+                .contains("corpus")
     };
 
     assert!(
