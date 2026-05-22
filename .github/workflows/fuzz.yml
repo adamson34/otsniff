@@ -1,0 +1,44 @@
+name: Fuzz (weekly)
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        harness:
+          - parse_modbus
+          - parse_enip
+          - parse_s7comm
+          - parse_dhcp
+          - parse_dnp3
+          - scrub_text
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - run: cargo install --locked cargo-fuzz
+
+      - name: Seed corpus from fuzz/corpus if present
+        run: |
+          if [ -d fuzz/corpus/${{ matrix.harness }} ]; then
+            echo "corpus directory found for ${{ matrix.harness }}"
+          fi
+
+      - name: Run fuzz harness ${{ matrix.harness }}
+        run: |
+          cd fuzz
+          cargo +nightly fuzz run ${{ matrix.harness }} -- -max_total_time=60
+
+      - name: Upload artifacts (if crashes found)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.harness }}
+          path: fuzz/artifacts/${{ matrix.harness }}/
+          if-no-files-found: ignore
