@@ -37,7 +37,7 @@ A single self-contained HTML file you can email to a plant manager. Open it in a
 
 ## Why this exists
 
-Every plant tour with a laptop and a SPAN port produces a PCAP. The existing options for analyzing it:
+You have a PCAP from a plant network — pulled from a site-visit `tcpdump`, an incident-response capture, a vendor handover, or a periodic audit. The existing options for analyzing it:
 
 - **Wireshark** — manual, expert-only, no findings layer.
 - **Malcolm** (CISA/INL) — excellent but heavyweight: full Elasticsearch + Arkime + Logstash deployment, hours to stand up, not laptop-grade.
@@ -51,14 +51,20 @@ Every plant tour with a laptop and a SPAN port produces a PCAP. The existing opt
 | Severity | Rule ID | What it catches |
 |----------|---------|-----------------|
 | Critical | `creds.{ftp,telnet,http_basic,snmp}` | Plaintext FTP / Telnet / HTTP-Basic / SNMPv1-v2c traffic |
+| Critical | `creds.ldap_simple_bind` | LDAP `BindRequest` with plaintext simple-bind (no STARTTLS) |
+| Critical | `creds.rdp_no_nla` | RDP connection without Network Level Authentication |
 | Critical | `egress.ot_to_internet` | Flows from configured OT subnets to public IPs |
+| High     | `compat.ntlmv1` | NTLMv1 authentication (dictionary-attackable) |
 | High     | `ics.modbus_writes` | Modbus engineering: write coil / register / mask write / diagnostic restart / force-listen-only |
 | High     | `ics.cip_engineering` | EtherNet/IP CIP engineering services: Stop, Reset, Apply Attributes, Forward Close to controllers |
 | High     | `ics.s7_engineering` | S7Comm engineering: PLC stop/start, block download/upload |
 | High     | `ics.dnp3_engineering` | DNP3 engineering: Operate / Direct Operate / Cold/Warm Restart / Initialize / Enable-Disable Unsolicited / Save Configuration |
 | High     | `compat.smbv1` | SMBv1 magic on tcp/445 or tcp/139 (EternalBlue / WannaCry protocol family) |
 | Medium   | `compat.stale_tls` | SSL 3.0 / TLS 1.0 / TLS 1.1 ClientHellos |
+| Medium   | `compat.weak_tls_cipher` | TLS ClientHello advertising RC4 / DES / 3DES / NULL cipher suites |
 | Medium   | `boundary.dns_resolver` | OT host querying DNS to a destination outside the OT zone |
+| Medium   | `boundary.ntp_external` | OT host syncing time to a public NTP server |
+| Medium   | `ics.modbus_unit_id_sweep` | Modbus client iterating across many unit IDs — PLC discovery / fuzzing pattern |
 | Medium   | `recon.port_scan` | Single source contacting many distinct destinations on the same `(port, proto)` |
 | Medium   | `ot.unexpected_protocols` | AnyDesk, BitTorrent, IRC, OpenVPN, RTMP, SIP, SMTP on OT VLANs |
 
@@ -205,7 +211,7 @@ The map file is the only thing tying pseudonyms to real values — keep it where
 
 - Offline PCAP / PCAPNG analysis on Ethernet captures
 - Modbus/TCP, EtherNet/IP, S7Comm, and DNP3 protocol awareness (function-code level)
-- 14 rule-based findings (see table above and [`docs/RULES.md`](docs/RULES.md))
+- 20 rule-based findings (see table above and [`docs/RULES.md`](docs/RULES.md))
 - Asset inventory with DHCP hostname extraction and ~9,000-entry OUI vendor inference (IEEE MA-L registry, industrial + IT focus)
 - Capture-source heuristic classification + explicit `--source-type` flag
 - Scrub/unscrub pipeline + closed-loop AI triage via local `claude` CLI, with three-airlock privacy contract (scrub bytes, leak detector, runtime tool sandbox)
