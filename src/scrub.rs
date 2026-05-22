@@ -61,6 +61,13 @@ impl ScrubMap {
     /// a corrupted map is rejected with a descriptive `OtError` rather than
     /// producing silent incorrect output.
     pub fn validate(&self) -> crate::error::Result<()> {
+        // First pass: per-entry checks for empty pseudonym or real value (EC-001).
+        // Second pass (F-W1-003): detect duplicate real-value entries across all
+        // three families. Two pseudonyms mapping to the same real value would
+        // cause `forward()` to silently keep only one — the round-trip would
+        // then be lossy for whichever pseudonym got overwritten.
+        let mut seen_reals: std::collections::BTreeMap<&str, &str> =
+            std::collections::BTreeMap::new();
         for (pseudo, real) in self
             .ips
             .iter()
@@ -81,6 +88,15 @@ impl ScrubMap {
                      the map is corrupted (EC-001). \
                      Regenerate the map with `otsniff scrub`.",
                     pseudo
+                )));
+            }
+            // F-W1-003: duplicate real-value detection.
+            if let Some(first_pseudo) = seen_reals.insert(real.as_str(), pseudo.as_str()) {
+                return Err(crate::error::OtError::Parse(format!(
+                    "scrub map maps two pseudonyms ('{}' and '{}') to the same \
+                     real value '{}'; the map is corrupted (F-W1-003 / duplicate \
+                     real value). Regenerate the map with `otsniff scrub`.",
+                    first_pseudo, pseudo, real
                 )));
             }
         }
@@ -1207,6 +1223,72 @@ mod tests {
         let (out2, replaced2, _unknowns2) = unscrub_text(text2, &map);
         assert_eq!(out2, "talk to 10.0.0.1 over there");
         assert_eq!(replaced2, 1);
+    }
+
+    /// F-W1-003: `ScrubMap::validate()` must reject a map that maps two
+    /// different pseudonyms to the same real value.  Without this check,
+    /// `forward()`'s inverse-map construction would silently keep only one
+    /// pseudonym (whichever inserted second), making the round-trip lossy
+    /// for the dropped pseudonym.
+    #[test]
+    fn test_f_w1_003_validate_rejects_duplicate_real_values_same_family() {
+        let mut bad_ips = BTreeMap::new();
+        bad_ips.insert("host_001".to_string(), "10.0.0.1".to_string());
+        bad_ips.insert("host_002".to_string(), "10.0.0.1".to_string()); // dup
+        let bad_map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: bad_ips,
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+        let result = bad_map.validate();
+        assert!(
+            result.is_err(),
+            "validate() must reject duplicate real values within the same family"
+        );
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("10.0.0.1"),
+            "error must name the duplicated real value; got: {err}"
+        );
+    }
+
+    /// F-W1-003 cross-family: duplicate detection spans `ips`/`macs`/`names`.
+    /// In practice the families have disjoint value-shapes (IP vs MAC vs
+    /// hostname), so cross-family duplicates are pathological — but the
+    /// invariant still applies and the validation must catch them.
+    #[test]
+    fn test_f_w1_003_validate_rejects_duplicate_real_values_cross_family() {
+        let mut ips = BTreeMap::new();
+        ips.insert("host_001".to_string(), "shared-value".to_string());
+        let mut names = BTreeMap::new();
+        names.insert("name_001".to_string(), "shared-value".to_string());
+        let bad_map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips,
+            macs: BTreeMap::new(),
+            names,
+        };
+        assert!(
+            bad_map.validate().is_err(),
+            "validate() must reject duplicate real values across families"
+        );
+    }
+
+    /// F-W1-003 regression guard: a valid map (no duplicates) still passes.
+    #[test]
+    fn test_f_w1_003_validate_accepts_unique_real_values() {
+        let map = scrub_map_from(
+            &[("host_001", "10.0.0.1"), ("host_002", "10.0.0.2")],
+            &[("mac_001", "AA:BB:CC:DD:EE:01")],
+            &[("name_001", "PLC-NORTH")],
+        );
+        assert!(
+            map.validate().is_ok(),
+            "validate() must accept a map with unique real values"
+        );
     }
 
     /// F-W1-002 follow-on: a decimal pseudonym that isn't in the map IS

@@ -109,24 +109,41 @@ pub fn ensure_no_map_values(text: &str, map: &ScrubMap) -> Result<()> {
     Ok(())
 }
 
-fn ipv4_regex() -> Regex {
-    // Conservative: dotted-quad with each octet 0-255 isn't strictly
-    // necessary; we want to catch anything dotted-quad-shaped. The only
-    // false-positive risk is a string like "1.2.3.4" appearing in
-    // version numbers — acceptable; better to fail closed.
+// F-W1-004: regexes are compiled once via `LazyLock` (stable since Rust 1.80,
+// our MSRV is 1.85). The previous implementation re-compiled all three regexes
+// on every `scan()` call — which `ensure_clean` invokes multiple times during
+// the --ai pipeline. The compile is cheap individually but the cost adds up.
+//
+// Conservative: dotted-quad with each octet 0-255 isn't strictly necessary;
+// we want to catch anything dotted-quad-shaped. The only false-positive risk
+// is a string like "1.2.3.4" appearing in version numbers — acceptable;
+// better to fail closed.
+static IPV4_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").expect("valid regex")
-}
+});
 
-fn ipv6_regex() -> Regex {
-    // Matches obvious IPv6 forms (full 8-group, common abbreviated forms
-    // with `::`). Doesn't try to match every legal IPv6 representation.
+// Matches obvious IPv6 forms (full 8-group, common abbreviated forms with
+// `::`). Doesn't try to match every legal IPv6 representation.
+static IPV6_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:){2,7}:[0-9a-fA-F]{1,4}\b")
         .expect("valid regex")
+});
+
+// 6 colon-separated hex octets, case-insensitive.
+static MAC_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r"\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b").expect("valid regex")
+});
+
+fn ipv4_regex() -> &'static Regex {
+    &IPV4_RE
 }
 
-fn mac_regex() -> Regex {
-    // 6 colon-separated hex octets, case-insensitive.
-    Regex::new(r"\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b").expect("valid regex")
+fn ipv6_regex() -> &'static Regex {
+    &IPV6_RE
+}
+
+fn mac_regex() -> &'static Regex {
+    &MAC_RE
 }
 
 #[cfg(test)]
