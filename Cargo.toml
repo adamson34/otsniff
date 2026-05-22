@@ -1,6 +1,6 @@
 [package]
 name = "otsniff"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.85"
 description = "One-shot OT-aware PCAP triage. Feed it a span-port capture, get an exec-readable HTML report."
@@ -29,6 +29,13 @@ assert_cmd = "2"
 predicates = "3"
 insta = { version = "1", features = ["json"] }
 tempfile = "3"
+criterion = "0.5"
+
+[lints.rust]
+# `kani` is a well-known custom cfg injected by cargo-kani during proof runs.
+# Declaring it here suppresses the unexpected_cfgs lint that fires on normal
+# `cargo build` / `cargo check` / `cargo clippy` invocations.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 
 [profile.release]
 lto = "thin"
@@ -38,3 +45,27 @@ strip = true
 [[bin]]
 name = "otsniff"
 path = "src/main.rs"
+
+[[bench]]
+name = "parse_modbus"
+harness = false
+
+[[bench]]
+name = "parse_enip"
+harness = false
+
+[[bench]]
+name = "parse_s7comm"
+harness = false
+
+[[bench]]
+name = "parse_dhcp"
+harness = false
+
+[[bench]]
+name = "observe_pipeline"
+harness = false
+
+[[bench]]
+name = "findings_run"
+harness = false

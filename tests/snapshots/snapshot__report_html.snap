@@ -1,6 +1,5 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 225
 expression: html
 ---
 <!doctype html>
@@ -8,54 +7,113 @@ expression: html
 <head>
 <meta charset="utf-8">
 <title>otsniff report — tests/fixtures/synthetic.pcap</title>
+<link rel="icon" type="image/svg+xml"
+      href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiBzaGFwZS1yZW5kZXJpbmc9Imdlb21ldHJpY1ByZWNpc2lvbiI+CiAgCiAgPGNpcmNsZSBjeD0iMy41IiBjeT0iOCIgcj0iMi42IiBmaWxsPSJub25lIiBzdHJva2U9IiMxNTE3MWMiIHN0cm9rZS13aWR0aD0iMS41Ij48L2NpcmNsZT4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iMS40IiBmaWxsPSIjMTUxNzFjIj48L2NpcmNsZT4KICA8Y2lyY2xlIGN4PSIxMi41IiBjeT0iOCIgcj0iMi44IiBmaWxsPSIjMTUxNzFjIj48L2NpcmNsZT4KPC9zdmc+">
 <style>
   :root {
-    --fg: #1a1a1a;
-    --muted: #666;
-    --bg: #fff;
-    --card: #f7f7f8;
-    --line: #e3e3e7;
-    --crit: #b3261e;
-    --high: #b9520b;
-    --med: #8b6e00;
-    --info: #4d6580;
-    --ok: #2e7d32;
+    --ink: #15171c;
+    --paper: #fbfaf6;
+    --accent: #ff7e35;
+    --ink-2: #4a4639;
+    --muted: #8a8474;
+    --line: #c8c2ad;
+    --crit:   #c33a36;
+    --high:   #b87325;
+    --med:    #b59121;
+    --info:   #3c6da6;
+    --ok:     #2e7d4a;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    --bg:   var(--paper);
+    --fg:   var(--ink);
+
+    --radius:    8px;
+    --radius-sm: 4px;
   }
   html { background: var(--bg); color: var(--fg); }
   body {
-    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font: 14px/1.5 var(--font-sans);
     max-width: 1100px;
-    margin: 2rem auto;
+    margin: 0 auto;
+    padding: 0 0 2rem 0;
+  }
+  h1, h2, h3, code, .mono { font-family: var(--font-mono); }
+  .brand-header { display: flex; align-items: center; gap: 12px; padding: 20px 0 16px; border-bottom: 1px solid var(--line); margin-bottom: 28px; color: var(--ink); }
+  .brand-header svg { color: var(--ink); flex: none; }
+  .brand-wordmark { font: 600 18px/1 var(--font-mono); }
+  .brand-sep { color: var(--muted); font-weight: 400; }
+  .brand-meta { font: 500 11px/1.4 var(--font-mono); color: var(--muted); margin-top: 4px; }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+    margin: 0 0 1.5rem 0;
+  }
+  .stat {
+    background: color-mix(in oklch, var(--ink) 4%, var(--paper));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+  }
+  .stat .n {
+    font-size: 1.4rem;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+    font-family: var(--font-mono);
+    color: var(--ink);
+  }
+  .stat .l {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .page-body {
     padding: 0 1.5rem;
   }
-  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
-  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid var(--line); padding-bottom: 0.3rem; }
+  h2 {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-top: 2rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.3rem;
+  }
   h3 { font-size: 1rem; margin: 0.5rem 0 0.25rem 0; }
   .muted { color: var(--muted); }
-  .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin: 1rem 0 1.5rem 0; }
-  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 0.75rem 1rem; }
-  .stat .n { font-size: 1.4rem; font-weight: 600; }
-  .stat .l { color: var(--muted); font-size: 0.85rem; }
+  .capture-meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
   .finding {
     border: 1px solid var(--line);
     border-left-width: 4px;
-    border-radius: 6px;
+    border-radius: var(--radius);
     padding: 0.9rem 1rem;
     margin: 0.75rem 0;
-    background: var(--card);
+    box-shadow: var(--shadow);
   }
-  .finding.sev-critical { border-left-color: var(--crit); }
-  .finding.sev-high { border-left-color: var(--high); }
-  .finding.sev-medium { border-left-color: var(--med); }
-  .finding.sev-info { border-left-color: var(--info); }
+  /* Finding card collapsibility (S-5.07 / BC-8.01.005) */
+  details.finding > summary::-webkit-details-marker { display: none; }
+  details.finding > summary {
+    cursor: pointer;
+    list-style: none;
+  }
+  details.finding > summary::before {
+    content: "▾ ";
+    color: var(--muted);
+  }
+  details.finding:not([open]) > summary::before {
+    content: "▸ ";
+  }
+  .finding.sev-critical { border-left-color: var(--crit); background: color-mix(in oklch, var(--crit) 8%, var(--paper)); }
+  .finding.sev-high { border-left-color: var(--high); background: color-mix(in oklch, var(--high) 8%, var(--paper)); }
+  .finding.sev-medium { border-left-color: var(--med); background: color-mix(in oklch, var(--med) 8%, var(--paper)); }
+  .finding.sev-info { border-left-color: var(--info); background: color-mix(in oklch, var(--info) 8%, var(--paper)); }
   .badge {
     display: inline-block;
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     padding: 0.15rem 0.5rem;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     font-weight: 600;
     color: #fff;
     margin-right: 0.5rem;
@@ -65,13 +123,72 @@ expression: html
   .badge.sev-high { background: var(--high); }
   .badge.sev-medium { background: var(--med); }
   .badge.sev-info { background: var(--info); }
-  .ot-badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 3px; background: #1f3b5e; color: #fff; }
+  .ot-badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: var(--radius-sm); background: var(--accent); color: #fff; }
   details { margin-top: 0.5rem; }
-  details summary { cursor: pointer; color: var(--muted); }
+  details summary {
+    cursor: pointer;
+    color: var(--muted);
+    list-style: none;
+  }
+  details summary::before { content: "▸ "; }
+  details[open] summary::before { content: "▾ "; }
+  details.table-section {
+    margin-top: 2.4rem;
+  }
+  details.table-section > summary.section-summary {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    list-style: none;
+  }
+  details.table-section > summary.section-summary::-webkit-details-marker { display: none; }
+  details.table-section > summary.section-summary::before {
+    content: "▾ ";
+    display: inline-block;
+    width: 1em;
+  }
+  details.table-section:not([open]) > summary.section-summary::before {
+    content: "▸ ";
+  }
+  .row-count {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 0.85rem;
+    margin-left: 0.4rem;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  summary.section-summary {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    list-style: none;
+  }
+  summary.section-summary::-webkit-details-marker { display: none; }
+  summary.section-summary::before {
+    content: "▾ ";
+    display: inline-block;
+    width: 1em;
+  }
+  details:not([open]) > summary.section-summary::before {
+    content: "▸ ";
+  }
   pre.evidence {
-    background: #fff;
+    background: rgba(255,255,255,0.7);
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 0.6rem 0.75rem;
     font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     white-space: pre-wrap;
@@ -87,22 +204,30 @@ expression: html
     line-height: 1.5;
   }
   ol.playbook code {
-    background: #fff;
+    background: rgba(255,255,255,0.7);
     border: 1px solid var(--line);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     padding: 0 0.25rem;
     font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
+  .table-wrap {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    margin: 0.5rem 0 1.5rem 0;
+  }
   table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
   th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { background: var(--card); font-weight: 600; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  th { background: color-mix(in oklch, var(--ink) 5%, var(--paper)); font-weight: 600; }
+  tbody tr:nth-child(even) { background: color-mix(in oklch, var(--ink) 3%, var(--paper)); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
   .no-findings { color: var(--ok); padding: 0.5rem 0; }
   .ai-section {
-    background: var(--card);
+    background: color-mix(in oklch, var(--info) 8%, var(--paper));
     border: 1px solid var(--line);
     border-left: 4px solid var(--info);
-    border-radius: 6px;
+    border-radius: var(--radius);
     padding: 0.5rem 1rem 0.75rem 1rem;
     margin: 0.75rem 0 1rem 0;
   }
@@ -110,41 +235,91 @@ expression: html
     font-size: 1rem;
     border-bottom: none;
     margin: 0.6rem 0 0.3rem 0;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--fg);
   }
   .ai-section pre {
-    background: #fff;
+    background: rgba(255,255,255,0.7);
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 0.6rem 0.75rem;
     font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     white-space: pre-wrap;
   }
   .ai-section code { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
   .ai-banner {
-    background: var(--card);
+    background: color-mix(in oklch, var(--ink) 4%, var(--paper));
     border-left: 4px solid var(--info);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 0.5rem 0.75rem;
     margin: 0.5rem 0 1rem 0;
     font-size: 0.85rem;
     color: var(--muted);
   }
   footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink:   #fbfaf6;
+      --paper: #15171c;
+      --ink-2: #c8c2ad;
+      --muted: #8a8474;
+      --line:  #2a2d33;
+      --bg:    var(--paper);
+      --fg:    var(--ink);
+    }
+    pre.evidence, ol.playbook code, .ai-section pre { background: rgba(0,0,0,0.3); }
+  }
   @media print {
     body { max-width: none; margin: 0; padding: 1rem; }
+    .brand-header {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .badge {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .ot-badge {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
     .finding { break-inside: avoid; }
+    details.finding > *:not(summary) { display: block !important; }
+    details.finding > summary::-webkit-details-marker,
+    details.finding > summary::before { display: none !important; content: "" !important; }
     details[open] summary { display: none; }
     details { margin: 0; }
+    details[open] > summary.section-summary,
+    details:not([open]) > summary.section-summary::before {
+      content: "" !important;
+    }
+    details > summary.section-summary {
+      border-bottom: none;
+    }
+    details > *:not(summary) {
+      display: block !important;
+    }
   }
 </style>
 </head>
 <body>
 
-<h1>otsniff report</h1>
-<div class="meta">
-  Source: <code>tests/fixtures/synthetic.pcap</code><br>
-  Generated: 2026-05-07 12:00:00 UTC &middot; otsniff v0.3.1
-</div>
+<header class="brand-header">
+  <svg viewBox="0 0 64 64" width="40" height="40" aria-hidden="true" shape-rendering="geometricPrecision">
+    <circle cx="8.08" cy="42.24" r="6.08" fill="none" stroke="currentColor" stroke-width="3.2"/>
+    <circle cx="16.053" cy="33.351" r="2.56" fill="currentColor"/>
+    <circle cx="24.027" cy="28.018" r="2.56" fill="currentColor"/>
+    <circle cx="32" cy="26.24" r="2.56" fill="currentColor"/>
+    <circle cx="39.973" cy="28.018" r="2.56" fill="currentColor"/>
+    <circle cx="47.947" cy="33.351" r="2.56" fill="currentColor"/>
+    <circle cx="55.92" cy="42.24" r="6.08" fill="currentColor"/>
+  </svg>
+  <div>
+    <div class="brand-wordmark">otsniff <span class="brand-sep">·</span> triage report</div>
+    <div class="brand-meta">tests/fixtures/synthetic.pcap <span class="brand-sep">·</span> v0.4.0 <span class="brand-sep">·</span> 2026-05-07 12:00:00 UTC</div>
+  </div>
+</header>
 
 <div class="stats">
   <div class="stat"><div class="n">505</div><div class="l">packets parsed</div></div>
@@ -152,15 +327,18 @@ expression: html
   <div class="stat"><div class="n">3</div><div class="l">hosts (2 in OT zones)</div></div>
   <div class="stat"><div class="n">8</div><div class="l">findings</div></div>
 </div>
-<div class="muted" style="margin-bottom:1rem;">Capture window: 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC</div>
+
+<div class="page-body">
+
+<div class="capture-meta">Capture window: 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC</div>
 
 
 
 <h2>Findings</h2>
 
   
-  <div class="finding sev-critical">
-    <h3><span class="badge sev-critical">critical</span>Telnet session observed (cleartext by definition)</h3>
+  <details open class="finding sev-critical">
+    <summary><span class="badge sev-critical">critical</span>Telnet session observed (cleartext by definition)</summary>
     <div>1 Telnet packet(s) seen across 1 host(s). Credentials traversing these flows should be considered exposed.</div>
     
     <details>
@@ -185,10 +363,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>creds.telnet</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-critical">
-    <h3><span class="badge sev-critical">critical</span>Internet-bound traffic from OT subnets</h3>
+  <details open class="finding sev-critical">
+    <summary><span class="badge sev-critical">critical</span>Internet-bound traffic from OT subnets</summary>
     <div>Saw 1 distinct flow(s) (600 bytes total) from hosts inside the configured OT subnets to public internet addresses. Plant networks should be egress-restricted at the IT/OT boundary.</div>
     
     <details>
@@ -213,10 +391,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>egress.ot_to_internet</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-high">
-    <h3><span class="badge sev-high">high</span>SMBv1 traffic on the wire</h3>
+  <details open class="finding sev-high">
+    <summary><span class="badge sev-high">high</span>SMBv1 traffic on the wire</summary>
     <div>12 SMBv1 packet(s) seen across 1 host pair(s). SMBv1 is deprecated, blocked by default in modern Windows, and a known exploitation surface (WannaCry / EternalBlue). Its presence indicates legacy clients, legacy servers, or both.</div>
     
     <details>
@@ -241,10 +419,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>compat.smbv1</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-high">
-    <h3><span class="badge sev-high">high</span>EtherNet/IP CIP engineering-class services observed</h3>
+  <details open class="finding sev-high">
+    <summary><span class="badge sev-high">high</span>EtherNet/IP CIP engineering-class services observed</summary>
     <div>1 CIP engineering-class request(s) (Set/Reset/Start/Stop/Forward Open with config) seen across 1 pair(s). These services change controller configuration or run state.</div>
     
     <details>
@@ -269,10 +447,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.cip_engineering</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-high">
-    <h3><span class="badge sev-high">high</span>Modbus engineering-class commands on the wire</h3>
+  <details open class="finding sev-high">
+    <summary><span class="badge sev-high">high</span>Modbus engineering-class commands on the wire</summary>
     <div>1 write/diagnostic Modbus call(s) observed across 1 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.</div>
     
     <details>
@@ -297,10 +475,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.modbus_writes</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-high">
-    <h3><span class="badge sev-high">high</span>S7Comm engineering-class commands on the wire</h3>
+  <details open class="finding sev-high">
+    <summary><span class="badge sev-high">high</span>S7Comm engineering-class commands on the wire</summary>
     <div>1 S7 engineering call(s) — 1 download op(s) across 1 client→server pair(s). S7Comm has no authentication; any host that can reach a controller on tcp/102 can read/write variables, download programs, or stop the CPU.</div>
     
     <details>
@@ -312,7 +490,7 @@ expression: html
     
     <details>
       <summary>Detection criteria</summary>
-      <div style="padding:0.3rem 0;">Fires when S7Comm (Siemens S7-300/400/1200/1500 over tcp/102) traffic contains a function code we classify as engineering — PLC stop / start, block download / upload, password operations. S7Comm has no native authentication; S7-1500 adds Secure Communication only when explicitly enabled.</div>
+      <div style="padding:0.3rem 0;">Fires when S7Comm (Siemens S7-300/400/1200/1500 over tcp/102) traffic contains a function code we classify as engineering — 0x05 Write Var, 0x1A-0x1C block download, 0x1D-0x1F block upload, 0x28 PLC Control (hot / cold restart sub-types), 0x29 PLC Stop. S7Comm has no native authentication; S7-1500 adds Secure Communication only when explicitly enabled.</div>
     </details>
     
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> Limit which engineering workstations can talk to controllers on tcp/102. For S7-1500 / TIA Portal environments, set the controller access level to &quot;no access (complete protection)&quot; or &quot;read access&quot; and require known-fingerprint TLS via Secure Communication. For older S7-300/400, use switch ACLs and physically lock the keyswitch to RUN.</div>
@@ -325,10 +503,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>ics.s7_engineering</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-medium">
-    <h3><span class="badge sev-medium">medium</span>DNS queries to a non-OT resolver</h3>
+  <details open class="finding sev-medium">
+    <summary><span class="badge sev-medium">medium</span>DNS queries to a non-OT resolver</summary>
     <div>1 OT host(s) sending DNS queries to resolvers outside the configured OT subnets (100 total query packet(s)). Cross-zone DNS leaks query patterns to the IT side and trusts an external resolver&#x27;s answers. Both belong on the OT side under change control.</div>
     
     <details>
@@ -353,10 +531,10 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>boundary.dns_resolver</code></div>
-  </div>
+  </details>
   
-  <div class="finding sev-medium">
-    <h3><span class="badge sev-medium">medium</span>Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1)</h3>
+  <details open class="finding sev-medium">
+    <summary><span class="badge sev-medium">medium</span>Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1)</summary>
     <div>4 ClientHello(s) using deprecated TLS versions seen across 1 host pair(s): TLS 1.0 (4 hello(s)). These versions are deprecated and blocked by default in modern Windows / browsers. Their presence indicates legacy clients (older Java runtimes, embedded devices) or legacy services.</div>
     
     <details>
@@ -381,11 +559,13 @@ expression: html
     </details>
     
     <div class="muted" style="margin-top:0.3rem;font-size:0.8rem;">id: <code>compat.stale_tls</code></div>
-  </div>
+  </details>
   
 
 
-<h2>Asset inventory</h2>
+<details open>
+<summary class="section-summary">Asset inventory <span class="row-count">(3)</span></summary>
+<div class="table-wrap">
 <table>
   <thead><tr>
     <th>IP</th><th>Hostname</th><th>Zone</th><th>MAC</th><th>Vendor</th><th>Inferred role</th><th>Protocols</th><th class="num">Packets</th><th class="num">Bytes</th>
@@ -430,8 +610,12 @@ expression: html
   
   </tbody>
 </table>
+</div>
+</details>
 
-<h2>Top flows</h2>
+<details open>
+<summary class="section-summary">Top flows <span class="row-count">(3)</span></summary>
+<div class="table-wrap">
 <table>
   <thead><tr>
     <th>Source</th><th>Destination</th><th>Protocol</th><th class="num">Conns</th><th class="num">Packets</th><th class="num">Bytes</th>
@@ -467,6 +651,8 @@ expression: html
   
   </tbody>
 </table>
+</div>
+</details>
 
 
 
@@ -475,5 +661,6 @@ expression: html
   Generated by otsniff. This is a triage tool — findings are heuristic and a clean report is not an audit. Validate with the on-site team before acting.
 </footer>
 
+</div><!-- .page-body -->
 </body>
 </html>

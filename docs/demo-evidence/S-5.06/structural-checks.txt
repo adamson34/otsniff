@@ -1,0 +1,27 @@
+=== Brand palette ===
+--ink: #15171c     present: 1
+--paper: #fbfaf6   present: 1
+--accent: #ff7e35  present: 1
+
+=== Type system ===
+--font-mono        present: 5
+--font-sans        present: 2
+"JetBrains Mono"   present: 1
+
+=== Brand header ===
+class="brand-header"    present: 1
+class="brand-wordmark"  present: 1
+class="brand-meta"      present: 1
+
+=== Sniff-trail SVG (in brand-header) ===
+<circle elements (header only): 7 (expected 7)
+<polyline elements (header only): 0 (expected 0)
+<path elements (header only): 0 (expected 0)
+
+=== Inline favicon ===
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,...> present: 1
+Note: favicon href is on a wrapped second line; matched via data:image/svg+xml;base64, pattern.
+
+=== Obsolete S-5.05 tokens removed ===
+--bg-strong (should be 0): 0
+--crit-soft (should be 0): 0

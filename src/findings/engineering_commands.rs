@@ -73,10 +73,11 @@ pub const S7_METADATA: RuleMetadata = RuleMetadata {
     severity: Severity::High,
     trigger: "Fires when S7Comm (Siemens S7-300/400/1200/1500 over \
               tcp/102) traffic contains a function code we classify as \
-              engineering — PLC stop / start, block download / upload, \
-              password operations. S7Comm has no native authentication; \
-              S7-1500 adds Secure Communication only when explicitly \
-              enabled.",
+              engineering — 0x05 Write Var, 0x1A-0x1C block download, \
+              0x1D-0x1F block upload, 0x28 PLC Control (hot / cold \
+              restart sub-types), 0x29 PLC Stop. S7Comm has no native \
+              authentication; S7-1500 adds Secure Communication only \
+              when explicitly enabled.",
     data_source: &["s7_events (where engineering_class = true)"],
     references: &[
         Reference {
@@ -408,5 +409,31 @@ fn format_ip_list(ips: &[IpAddr]) -> String {
             s
         }
         _ => format!("`{}` and {} other host(s)", ips[0], ips.len() - 1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC-006 Red Gate: S7_METADATA.trigger must NOT mention "password".
+    /// The word crept in as an erroneous classifier label ("password operations")
+    /// and must be removed so the trigger accurately lists only real S7Comm
+    /// engineering function codes (PLC stop/start, block download/upload).
+    /// This test will FAIL until the production string is corrected.
+    #[test]
+    fn s7_metadata_trigger_does_not_mention_password() {
+        assert!(
+            !S7_METADATA.trigger.contains("password"),
+            "S7_METADATA.trigger still mentions 'password': {}",
+            S7_METADATA.trigger
+        );
+        assert!(
+            S7_METADATA.trigger.contains("PLC stop")
+                || S7_METADATA.trigger.contains("block download")
+                || S7_METADATA.trigger.contains("upload"),
+            "S7_METADATA.trigger should list real engineering classifiers (PLC stop, block download, upload): {}",
+            S7_METADATA.trigger
+        );
     }
 }

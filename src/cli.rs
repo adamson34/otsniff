@@ -37,9 +37,10 @@ impl From<SourceTypeArg> for DeclaredSource {
 }
 use crate::observe::Observer;
 use crate::pcap::iter_packets;
+use crate::progress::ProgressReporter;
 use crate::report::render_html;
 use crate::report_md::render_markdown;
-use crate::scrub::{build_map, scrub_text, unscrub_text, ScrubMap};
+use crate::scrub::{build_map, merge_map, scrub_text, unscrub_text, ScrubMap};
 
 /// One-shot OT-aware PCAP triage.
 ///
@@ -101,6 +102,15 @@ pub struct ScrubArgs {
     /// See `--source-type` on `analyze`.
     #[arg(long = "source-type", value_name = "TYPE", value_enum)]
     pub source_type: Option<SourceTypeArg>,
+    /// Optional path to a previously saved pseudonym map to use as a
+    /// baseline. When provided, real identifiers already in the baseline
+    /// map reuse their existing pseudonyms; new identifiers are appended
+    /// with fresh pseudonyms. If omitted, the current behavior is
+    /// preserved (a brand-new map is built from this capture alone).
+    ///
+    /// See S-6.01 / BC-5.03.001 for the stability contract.
+    #[arg(long = "baseline-map", value_name = "PATH")]
+    pub baseline_map: Option<PathBuf>,
     /// Print parse summary to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
@@ -154,6 +164,11 @@ pub struct AnalyzeArgs {
     /// Only meaningful when `--ai` is set.
     #[arg(long = "model", value_name = "MODEL")]
     pub model: Option<String>,
+    /// Print the scrubbed prompt to stderr and pause for confirmation
+    /// before invoking claude. Defense-in-depth — the automated leak
+    /// detector still runs; this adds a human eyeball.
+    #[arg(long = "review-scrub")]
+    pub review_scrub: bool,
     /// Print parse summary + (with `--ai`) privacy ledger lines to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
@@ -218,15 +233,26 @@ fn classify_with_guard(
     classification
 }
 
+/// Parse a PCAP and accumulate observations.
+///
+/// `progress` is the optional progress reporter introduced in S-5.01.
+/// When `Some`, `record_packet` is called once per decoded packet so the
+/// reporter can emit periodic progress lines.  The caller is responsible
+/// for calling `reporter.finish()` after this function returns.
 fn analyze(
     input: &std::path::Path,
     ot_subnets: &[IpNet],
     verbose: bool,
+    mut progress: Option<&mut ProgressReporter<std::io::Stderr>>,
 ) -> Result<crate::observe::Observations> {
     let mut observer = Observer::new(ot_subnets.to_vec());
     let mut packet_count: u64 = 0;
-    for pkt in iter_packets(input)? {
-        observer.observe(&pkt?);
+    for pkt_result in iter_packets(input)? {
+        let pkt = pkt_result?;
+        if let Some(reporter) = progress.as_deref_mut() {
+            reporter.record_packet(pkt.payload.len());
+        }
+        observer.observe(&pkt);
         packet_count += 1;
     }
     let obs = observer.finish();
@@ -259,7 +285,9 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
             args.input.display()
         );
     }
-    let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let mut reporter = ProgressReporter::new(std::io::stderr(), args.verbose);
+    let obs = analyze(&args.input, &ot_subnets, args.verbose, Some(&mut reporter))?;
+    reporter.finish();
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
@@ -269,7 +297,20 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
     // types stay pristine) and limits substitution to values we actually
     // saw, which avoids accidentally rewriting IP-shaped substrings in
     // unrelated text.
-    let map = build_map(&obs);
+    //
+    // S-6.01 (BC-5.03.001): when --baseline-map is supplied the merged map
+    // is built via merge_map(baseline, &obs) rather than a fresh build_map.
+    let map = if let Some(ref baseline_path) = args.baseline_map {
+        let bytes = std::fs::read(baseline_path).map_err(|source| OtError::InputOpen {
+            path: baseline_path.clone(),
+            source,
+        })?;
+        let baseline: ScrubMap = serde_json::from_slice(&bytes)?;
+        baseline.validate()?;
+        merge_map(baseline, &obs)
+    } else {
+        build_map(&obs)
+    };
     let raw_md = render_markdown(
         &inventory,
         &findings,
@@ -301,6 +342,32 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
     Ok(())
 }
 
+/// Print the scrubbed bytes to stderr and prompt the user for confirmation.
+/// Returns `Ok(())` if the user answers "y" or "yes"; aborts with an error
+/// for any other answer (including EOF).
+fn review_scrub_gate(scrubbed: &str) -> Result<()> {
+    eprintln!(
+        "--- scrubbed prompt to claude ({} bytes) ---",
+        scrubbed.len()
+    );
+    eprintln!("{scrubbed}");
+    eprintln!("--- end scrubbed prompt ---");
+    eprint!("Send to claude? [y/N]: ");
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|source| OtError::WriteOutput {
+            path: "<stdin:review_scrub>".into(),
+            source,
+        })?;
+    let trimmed = answer.trim().to_ascii_lowercase();
+    if trimmed == "y" || trimmed == "yes" {
+        Ok(())
+    } else {
+        Err(OtError::Parse("aborted by --review-scrub".to_string()))
+    }
+}
+
 fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     let ot_subnets = ot_or_default(&args.ot_subnets);
     if args.verbose {
@@ -310,7 +377,9 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             args.input.display()
         );
     }
-    let obs = analyze(&args.input, &ot_subnets, args.verbose)?;
+    let mut reporter = ProgressReporter::new(std::io::stderr(), args.verbose);
+    let obs = analyze(&args.input, &ot_subnets, args.verbose, Some(&mut reporter))?;
+    reporter.finish();
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
@@ -412,21 +481,22 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     leak_detector::ensure_clean(&user_message)?; // belt-and-braces
     leak_detector::ensure_no_map_values(&user_message, &map)?;
 
+    if args.review_scrub {
+        review_scrub_gate(&user_message)?;
+    }
+
     let model_label = args.model.clone().unwrap_or_else(|| "default".to_string());
     if args.verbose {
         eprintln!("  invoking claude (model: {})...", model_label);
     }
-    let provider = ClaudeCliProvider::new(args.model.clone());
+    // Pass verbose through to the provider so run_with_heartbeat knows
+    // whether to emit heartbeat lines. The provider also checks
+    // stderr.is_terminal() internally (AC-004), so explicit -v and
+    // interactive TTY use cases are both covered.
+    let provider = ClaudeCliProvider::new_verbose(args.model.clone(), args.verbose);
     let invoke_start = std::time::Instant::now();
     let scrubbed_response = provider.analyze(&system_prompt, &user_message)?;
     let elapsed = invoke_start.elapsed();
-    if args.verbose {
-        eprintln!(
-            "    done in {:.1}s, {} bytes response",
-            elapsed.as_secs_f64(),
-            scrubbed_response.len(),
-        );
-    }
 
     // 5. Unscrub the AI response on this side of the boundary.
     let (unscrubbed_response, replaced, unmapped) = unscrub_text(&scrubbed_response, &map);
@@ -603,6 +673,10 @@ fn run_unscrub(args: UnscrubArgs) -> Result<()> {
         source,
     })?;
     let map: ScrubMap = serde_json::from_slice(&map_bytes)?;
+    // F-W1-001 (wave-1 adversarial review): mirror run_scrub's --baseline-map
+    // path — validate the loaded map before any unscrub work. Rejects empty
+    // pseudonym keys or empty real values that would silently corrupt output.
+    map.validate()?;
 
     let input_text = match &args.input {
         Some(p) => std::fs::read_to_string(p).map_err(|source| OtError::InputOpen {
@@ -684,4 +758,42 @@ fn run_rules(args: RulesArgs) -> Result<()> {
             source,
         })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AC-005 regression-lockdown: ot_or_default(&[]) must return exactly
+    /// the three IPv4 RFC1918 ranges — no IPv6, no extras, no missing.
+    #[test]
+    fn ot_or_default_empty_input_returns_only_ipv4_rfc1918() {
+        let result = ot_or_default(&[]);
+        assert_eq!(
+            result.len(),
+            3,
+            "expected exactly 3 default OT subnets, got {}",
+            result.len()
+        );
+        let expected: Vec<IpNet> = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+            .iter()
+            .map(|s| s.parse::<IpNet>().unwrap())
+            .collect();
+        assert_eq!(
+            result, expected,
+            "default OT subnets do not match the three RFC1918 ranges"
+        );
+        for net in &result {
+            assert!(
+                matches!(net, IpNet::V4(_)),
+                "default OT subnet {} is not IPv4; AC-005 requires IPv4-only RFC1918 defaults",
+                net
+            );
+        }
+        assert_eq!(
+            result.iter().filter(|n| matches!(n, IpNet::V6(_))).count(),
+            0,
+            "one or more default OT subnets are IPv6; AC-005 requires IPv4-only RFC1918 defaults"
+        );
+    }
 }

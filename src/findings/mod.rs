@@ -4,13 +4,21 @@
 //! zero or more `Finding`s. The CLI runs them all and renders the union into
 //! the report, sorted by severity.
 
+pub mod dnp3_engineering;
 mod dns_resolver;
 mod engineering_commands;
 mod internet_egress;
+pub mod ldap_creds;
+pub mod modbus_recon;
+pub mod ntlmv1;
+mod ntp_external;
 mod plaintext_creds;
+pub mod rdp_legacy;
+pub mod recon_scan;
 mod smbv1;
 mod stale_tls;
 mod unexpected_protocols;
+pub mod weak_tls_cipher;
 
 use std::net::IpAddr;
 
@@ -140,13 +148,21 @@ pub fn catalog() -> Vec<RuleMetadata> {
         plaintext_creds::TELNET_METADATA,
         plaintext_creds::HTTP_BASIC_METADATA,
         plaintext_creds::SNMP_METADATA,
+        ldap_creds::LDAP_METADATA,
+        ntlmv1::NTLM_METADATA,
         engineering_commands::MODBUS_METADATA,
         engineering_commands::ENIP_METADATA,
         engineering_commands::S7_METADATA,
+        dnp3_engineering::METADATA,
         smbv1::METADATA,
         stale_tls::METADATA,
+        weak_tls_cipher::WEAK_TLS_CIPHER_METADATA,
+        rdp_legacy::RDP_LEGACY_METADATA,
+        modbus_recon::MODBUS_RECON_METADATA,
         internet_egress::METADATA,
         dns_resolver::METADATA,
+        ntp_external::METADATA,
+        recon_scan::METADATA,
         unexpected_protocols::METADATA,
     ]
 }
@@ -162,12 +178,20 @@ pub fn metadata_for(id: &str) -> Option<RuleMetadata> {
 pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     let mut out = Vec::new();
     out.extend(plaintext_creds::detect(obs));
+    out.extend(ldap_creds::build_findings(obs));
+    out.extend(ntlmv1::build_findings(obs));
     out.extend(internet_egress::detect(obs));
     out.extend(engineering_commands::detect(obs, ot_subnets));
+    out.extend(dnp3_engineering::detect(obs, ot_subnets));
     out.extend(unexpected_protocols::detect(obs, ot_subnets));
     out.extend(smbv1::detect(obs));
     out.extend(stale_tls::detect(obs));
+    out.extend(weak_tls_cipher::build_findings(obs));
+    out.extend(rdp_legacy::build_findings(obs));
+    out.extend(modbus_recon::build_findings(obs));
     out.extend(dns_resolver::detect(obs, ot_subnets));
+    out.extend(ntp_external::detect(obs, ot_subnets));
+    out.extend(recon_scan::detect(obs, ot_subnets));
     out.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(b.id)));
     out
 }

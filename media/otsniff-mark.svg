@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" shape-rendering="geometricPrecision">
+  
+
+  
+  <circle cx="8.08" cy="42.24" r="6.08" fill="none" stroke="currentColor" stroke-width="3.2"></circle>
+
+  
+  <circle cx="16.053" cy="33.351" r="2.56" fill="currentColor"></circle>
+  <circle cx="24.027" cy="28.018" r="2.56" fill="currentColor"></circle>
+  <circle cx="32" cy="26.24" r="2.56" fill="currentColor"></circle>
+  <circle cx="39.973" cy="28.018" r="2.56" fill="currentColor"></circle>
+  <circle cx="47.947" cy="33.351" r="2.56" fill="currentColor"></circle>
+
+  
+  <circle cx="55.92" cy="42.24" r="6.08" fill="currentColor"></circle>
+</svg>

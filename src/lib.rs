@@ -9,6 +9,7 @@ pub mod observe;
 pub mod oui;
 pub mod parse;
 pub mod pcap;
+pub mod progress;
 pub mod report;
 pub mod report_md;
 pub mod rule_catalog;

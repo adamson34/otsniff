@@ -125,11 +125,13 @@ fn build_finding(kind: CredKind, events: &[&CredEvent], obs: &Observations) -> F
     // Aggregate per (dst, port) — one evidence line per destination,
     // sorted by packet count descending so the noisiest hosts are
     // listed first.
+    // Use `count` from each CredEvent (BC-1.03.007): after dedup, `count`
+    // holds the number of raw observations for this (src, dst, port, kind) key.
     let mut packets_per_dst: BTreeMap<(IpAddr, u16), u64> = BTreeMap::new();
     for ev in events {
-        *packets_per_dst.entry((ev.dst, ev.dst_port)).or_insert(0) += 1;
+        *packets_per_dst.entry((ev.dst, ev.dst_port)).or_insert(0) += u64::from(ev.count);
     }
-    let total_packets = events.len();
+    let total_packets: usize = events.iter().map(|ev| ev.count as usize).sum();
     let host_count = packets_per_dst.len();
 
     let mut sorted_dsts: Vec<((IpAddr, u16), u64)> = packets_per_dst.into_iter().collect();
@@ -274,6 +276,7 @@ mod tests {
             dst: ip(dst),
             dst_port: 23,
             kind: CredKind::TelnetSession,
+            count: 1,
             note: "Telnet session (cleartext)".to_string(),
         }
     }
@@ -317,6 +320,7 @@ mod tests {
                     dst: ip("10.0.0.5"),
                     dst_port: 21,
                     kind: CredKind::FtpAuth,
+                    count: 1,
                     note: "USER admin".to_string(),
                 },
             ],

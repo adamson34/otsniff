@@ -13,28 +13,45 @@ picked up.
 
 ## Released
 
-- **v0.2.1** (tagged on `main`, current) — patch release adding
-  `install.sh` curl-pipe-sh installer + repo URL fix. No binary changes
-  vs. v0.2.0.
-- **v0.2.0** — first substantive release after v0.1.0. Scrub/unscrub,
-  `analyze` subcommand (Claude Code CLI integration), capture-source
-  detector, logical flow grouping, S7Comm parser, plaintext-cred
-  finding dedup.
+- **v0.4.0-dev.1** (unreleased — HEAD of `develop`). VSDD wave-1 batch:
+  - **Seven new detection rules** — every item from "Near-term rule
+    additions" below now shipped at once (`creds.ldap_simple_bind`,
+    `compat.ntlmv1`, `compat.weak_tls_cipher`, `creds.rdp_no_nla`,
+    `boundary.ntp_external`, `recon.port_scan`,
+    `ics.modbus_unit_id_sweep`). Rule catalog now lists **20** rules.
+  - **DNP3 parser** (P1-1) — function-code classification with
+    `ics.dnp3_engineering` finding.
+  - **Privacy invariant formally verified** — six Kani harnesses cover
+    the scrub round-trip and the IP/MAC shape detectors used by the
+    fail-closed leak detector. Hand-rolled proof-models avoid `regex` /
+    UTF-8 inside CBMC; all harnesses report `VERIFICATION:- SUCCESSFUL`.
+  - **Mutation testing** wired with `cargo-mutants` and an 80% kill-rate
+    gate in CI (compensating control for facade-mode stories).
+  - **Tech-debt closure:** `ScrubMap::validate()` now rejects duplicate
+    real-values (F-W1-003); leak-detector regexes wrapped in
+    `LazyLock` (F-W1-004); `run_unscrub` validates corrupted maps
+    eagerly (F-W1-001); pseudonym regex tightened to decimal-only
+    (F-W1-002).
+- **v0.3.1** — patch release: fix `Cargo.toml` repository URL,
+  cover AI-flow artifacts in `.gitignore` (`*.map.json`, `*.audit.json`,
+  `*.scrubbed.md`). No code change.
+- **v0.3.0** — major release. CLI consolidation: `analyze` is the
+  primary verb, `--ai` is the opt-in for the AI section, audit log
+  auto-writes alongside. New detections (SMBv1, stale TLS, DNS
+  resolver). Hostname extraction with NERC-CIP-aware scrub. Rule
+  catalog with `otsniff rules` and `docs/RULES.md`. Privacy-ledger
+  audit log. `--source-type` flag with heuristic-as-guard. Investigation
+  playbooks per finding. Demo GIF + CIP-011 audit. Breaking: `report`
+  subcommand removed (use `analyze`).
+- **v0.2.1** — patch release adding `install.sh` curl-pipe-sh
+  installer + repo URL fix. No binary changes vs. v0.2.0.
+- **v0.2.0** — Scrub/unscrub for AI-assisted triage, `analyze`
+  subcommand (Claude Code CLI integration), capture-source detector,
+  logical flow grouping, S7Comm parser, plaintext-cred finding dedup.
 - **v0.1.0** — initial release. Pure-Rust PCAP triage, Modbus +
   EtherNet/IP, four findings, HTML + JSON output.
 
 See [GitHub releases](https://github.com/adamson34/otsniff/releases).
-
-## On `develop` (unreleased, will land in the next stable cut)
-
-- Scrub/unscrub for AI-assisted triage (ADR-0006)
-- `analyze` subcommand — closed-loop scrub → Claude Code CLI → unscrub (ADR-0007)
-- Capture-source heuristic detector + AI prompt qualifier
-- Logical flow grouping (drops src_port from the flow key, tracks unique connections)
-- S7Comm parser + new sub-finding under engineering-commands
-
-When ready to ship, cut a release PR `develop → main`. Likely version: `0.2.0`
-(or `0.3.0` if accumulated scope pushes us there). No tag pressure.
 
 ---
 
@@ -44,17 +61,13 @@ Things that visibly improve tomorrow's report on captures we already test
 against. The 4SICS runs are the benchmark — a P0 item should change those
 outputs in a way an OT defender would notice.
 
-**Track 1 emphasis (next priority).** P0-7 (investigation playbooks) and
-P0-8 (AI-augmented detection) are the items most directly aimed at
-making the tool indispensable through obvious value-add per run, rather
-than expanding reach. They were promoted from P2 after the strategic
-discussion: a single OT defender saving real time on a real capture is
-the difference between "neat tool" and "have to have." Pair P0-7 first
-(no AI dependency, ships standalone), then P0-8 (anchored on richer
-rule coverage). The other P0 items remain valuable but can sequence
-behind these two.
+**Track 1 emphasis (next priority).** P0-7 (investigation playbooks)
+shipped in v0.3. P0-8 (AI-augmented detection) is in flight as VSDD
+story **S-5.03** scheduled for wave-3 of the v0.4 cycle — it's the
+biggest remaining "make it indispensable" move. The other P0 items
+remain valuable but sequence behind the wave-2/3 plan.
 
-### P0-1: Finding dedup / rollup (S)
+### P0-1: Finding dedup / rollup (S) — ✅ shipped (v0.2)
 
 The 4SICS-22 output had 12 duplicate Telnet findings — one per destination
 host. Same shape for FTP, HTTP-Basic, SNMPv1. Roll them up into one finding
@@ -70,7 +83,7 @@ Evidence: 192.168.x.y, 192.168.x.z, ... (12 hosts)
 **Why:** every busy capture today produces noise that drowns the real signal.
 Single change to `findings/plaintext_creds.rs`. **Touches:** 1 file. **Deps:** none.
 
-### P0-2: New rule-based findings (M)
+### P0-2: New rule-based findings (M) — ✅ shipped (#27, v0.3)
 
 Three findings that fire on data we already parse:
 
@@ -88,7 +101,7 @@ miss today. Compounds the value-per-capture without expanding the protocol
 surface. **Touches:** new modules under `findings/`, possibly new flow-label
 recognizers in `observe.rs::classify_flow`. **Deps:** none.
 
-### P0-3: Hostname / NetBIOS extraction + NERC-CIP-aware scrub (M) — ✅ shipped (DHCP only; mDNS / NetBIOS deferred)
+### P0-3: Hostname / NetBIOS extraction + NERC-CIP-aware scrub (M) — ✅ shipped (#28, v0.3) — DHCP only; mDNS / NetBIOS deferred
 
 Inventory becomes much more useful with hostnames. "PLC-LINE3" beats
 "10.10.10.10" for an exec reading the report. Sources: DHCP option 12,
@@ -109,7 +122,7 @@ invariant honest as we extract more identifier types. **Touches:**
 `inventory.rs` (display), `ai/leak_detector.rs` (extend regex). Updates
 ADR-0006 to name CIP-011 as the framing reference. **Deps:** none.
 
-### P0-4: NERC CIP / IEC 62443 scrub audit (M) — ✅ shipped
+### P0-4: NERC CIP / IEC 62443 scrub audit (M) — ✅ shipped (#29, v0.3)
 
 The audit lives at `docs/audits/scrub-audit-cip011.md`. Systematic
 walk of every field on `Observations` and every rendered surface
@@ -155,7 +168,7 @@ accumulates leak vectors as we add more extractors.
 
 **Deps:** none, landed right after P0-3.
 
-### P0-5: Source-type flag (CLI-recommended, heuristic as guard) (S)
+### P0-5: Source-type flag (CLI-recommended, heuristic as guard) (S) — ✅ shipped (#33, v0.3)
 
 `otsniff <subcommand> --source-type span|host-side|tap` becomes the
 recommended way to declare capture provenance. The heuristic detector
@@ -194,7 +207,7 @@ shipped with ~50 entries.
 "works for any plant we'd realistically see." Trivial to ship, no ongoing
 maintenance burden. **Touches:** `oui.rs` only. **Deps:** none.
 
-### P0-7: Investigation playbooks per finding (M)
+### P0-7: Investigation playbooks per finding (M) — ✅ shipped (#26, v0.3)
 
 Every Finding gains a structured playbook field — concrete next-action
 steps tied to the actual evidence in that finding, not generic advice.
@@ -249,7 +262,7 @@ extend.
 specific evidence to reference. Order: land P0-7 first, then add
 playbook content to new findings as they ship.
 
-### P0-8: AI-augmented detection (M)
+### P0-8: AI-augmented detection (M) — 🚧 in flight (VSDD wave-3 / S-5.03)
 
 Second AI pass anchored on the rules-based findings. After
 `run_all_findings()` produces the deterministic findings, an additional
@@ -288,6 +301,49 @@ hostname extraction mean richer anchors for the LLM's reasoning.
 Doable in parallel with P0-7 since the entry points are different
 detectors.
 
+### P0-9: mDNS / NetBIOS / LLMNR hostname extraction (S)
+
+Completes the deferred half of P0-3. Today we extract hostnames from
+DHCP `Option 12 / Hostname` only. Mid-shop OT networks frequently have
+no DHCP and lean on:
+
+- **mDNS** (UDP/5353) — `_workstation._tcp.local`, vendor-specific
+  service records like `_PROFINET-CBA._udp.local` on Siemens kit.
+- **NetBIOS Name Service** (UDP/137) — `NBSTAT` queries reveal both
+  the host's name and its workgroup, often the only label on legacy
+  Windows engineering stations.
+- **LLMNR** (UDP/5355) — Windows fallback, still common on engineering
+  VLANs running domain-less workgroup setups.
+
+**Why:** every finding currently rendered as `host_NNN (10.0.0.5)`
+gains a real label when we observe just one mDNS/NBNS broadcast. The
+defender goes from "who is `192.168.88.61`?" to "that's
+`HMI-LINE-3 (192.168.88.61)`". Same UX win as P0-3's DHCP path
+extended to captures that lacked DHCP entirely. **Touches:**
+`observe.rs` (three small recognizers), `inventory.rs::Host::hostname`
+already exists — just more code-paths populating it.
+**Deps:** none.
+
+### P0-10: Multi-PCAP / rotated-capture analyze (S)
+
+`otsniff analyze a.pcap b.pcap c.pcap -o report.html` — concatenate
+captures in CLI order, treat them as one logical capture, emit a
+single report covering the union window.
+
+**Why:** real plant captures rarely arrive as one file. `tcpdump -G`
+and SPAN-port appliances both rotate by time or size; the operator
+hands over `capture-2024-10-{01..07}.pcap`. Today the workaround is
+`mergecap` from Wireshark, which is an extra tool, an extra step, and
+leaves the user wondering whether timestamps survived the merge.
+Native multi-file analyze removes that friction entirely.
+
+**Touches:** `pcap.rs` (iterator chain over multiple files;
+preserve per-file source attribution in the audit log), `cli.rs`
+(positional arg becomes a `Vec<PathBuf>` with `min_values=1`).
+**Edge case:** require captures share at least one common link-layer
+type; refuse to merge `ethernet + linux-sll` etc. with an explicit
+error. **Deps:** none.
+
 ---
 
 ## Mid-term (P1)
@@ -295,7 +351,7 @@ detectors.
 Items that expand reach or complete capability promises rather than improve
 current outputs. Pick when P0 is empty.
 
-### P1-1: DNP3 parser (M)
+### P1-1: DNP3 parser (M) — ✅ shipped (v0.4 wave-1)
 
 DNP3 over TCP/UDP 20000. Used by electric utilities and water/wastewater.
 Same minimal-fidelity discipline as Modbus / ENIP / S7: function-code
@@ -312,14 +368,34 @@ quality. Worth verifying that one exists publicly before starting.
 
 ### P1-2: Better progress feedback (S)
 
-`-v` mode currently emits one line at end-of-parse. For multi-GB captures the
-user sees nothing for minutes. Periodic progress (every N packets, or every
-10 MB read) would close that.
+Two related UX gaps in `-v` mode:
 
-**Why:** quality of life on big captures. Cheap. **Touches:** `cli.rs`,
+1. **Parse loop is silent.** Currently emits one line at end-of-parse.
+   For multi-GB captures the user sees nothing for minutes. Periodic
+   progress (every N packets, or every 10 MB read) would close that.
+
+2. **Claude invocation is silent.** With `--ai`, after printing
+   "invoking claude (model: X)..." the user waits 10–60s with no
+   output until Claude returns. The user can't tell if it's stuck.
+   Lightweight fix: spawn the subprocess on a background thread and
+   print a heartbeat from the main thread every ~3s:
+   ```
+   invoking claude (model: default)...
+     [3s] still working...
+     [7s] still working...
+     done in 11.4s, 4127 bytes response
+   ```
+   ~30 LoC. The streaming-stdout alternative (`claude --output-format
+   stream-json`) is more useful but couples us to a CLI output
+   format and the privacy contract makes mid-stream display awkward
+   (can't unscrub until the response completes, so partial tokens
+   would still be in pseudonym form).
+
+**Why:** quality of life on big captures and on AI invocations. Cheap.
+**Touches:** `cli.rs`,
 `pcap.rs`. **Deps:** none.
 
-### P1-3: Cross-capture diff (M)
+### P1-3: Cross-capture diff (M) — 🚧 in flight (VSDD wave-2/3 / S-6.02 + S-6.03)
 
 `otsniff diff baseline.pcap suspect.pcap --baseline-map baseline.map.json
 --current-map current.map.json -o diff.html`
@@ -375,16 +451,178 @@ the non-deterministic LLM testing pattern.
 
 **Deps:** none.
 
-### P1-5: Tagged release of the develop accumulation (S)
+### P1-5: Tagged release of the develop accumulation (S) — ✅ recurring
 
-Release PR `develop → main`, decide on version (probably 0.2.0), follow the
-`/release` slash command. Then the four merged features (scrub, analyze,
-capture-source, flow-grouping, S7Comm) ship as a coherent release.
-
-**Status:** Done in v0.2.0 + v0.2.1. Kept in roadmap as a recurring
-discipline — the `release/v0.X.Y` branch + `develop → main` PR + tag
-flow runs after every meaningful develop accumulation. See
+**Status:** Done through v0.3.1 (current). Kept in roadmap as a
+recurring discipline — the `release/v0.X.Y` branch + `develop → main`
+PR + tag flow runs after every meaningful develop accumulation. See
 `.claude/commands/release.md` for the current playbook.
+
+### P1-6: MITRE ATT&CK for ICS technique mapping (M)
+
+Every `Finding` gains a `technique_ids: Vec<MitreId>` field
+referencing the [ATT&CK for ICS](https://attack.mitre.org/matrices/ics/)
+matrix — concrete `T0815` (Denial of View), `T0853` (Scripting),
+`T0859` (Valid Accounts), `T0866` (Exploitation of Remote Services)
+identifiers per finding. Renderers (HTML, markdown, JSON) surface the
+IDs with anchors back to the MITRE site.
+
+**Why:** "engineering-class CIP write" is otsniff's framing; "T0831
+Manipulation of Control" is the framing every blue-team playbook
+already uses. Mapping our findings into that taxonomy meets defenders
+where they already think and makes our output paste-able directly
+into an IR ticket. Several recently-shipped rules (`ics.modbus_writes`,
+`creds.rdp_no_nla`, `recon.port_scan`) have obvious one-to-one
+technique mappings; others (`compat.stale_tls`) map less cleanly and
+get tagged as "supports T-XXXX" rather than asserting fire-equals-
+technique. **Touches:** `findings/mod.rs` (`Finding` schema), each
+detector module (one-line tag), rendering layer, snapshot tests.
+**Deps:** none.
+
+### P1-7: PCAP slicing — extract subset that triggered a finding (M)
+
+`otsniff slice <PCAP> --finding F-001 -o filtered.pcap` — produce a
+much smaller PCAP containing only the packets that contributed to
+finding `F-001`. Plus `--host 192.168.88.52` and `--flow A→B:502`
+variants.
+
+**Why:** today, when otsniff flags a Modbus write, the operator still
+opens the original (potentially gigabyte-sized) PCAP in Wireshark to
+investigate. A pre-sliced PCAP loads instantly, contains only the
+relevant packets, and is small enough to attach to a ticket or share
+with a vendor for support. Closes the loop with the
+deeper-investigation tools that already exist (Wireshark, tshark,
+zeek) rather than competing with them. **Touches:** new `slice`
+subcommand, packet-index threading through the observer (which packet
+contributed to which event), `pcap.rs` write-half. **Deps:** small
+refactor to retain `pcap_offset: u64` on `CredEvent` / `ModbusEvent`
+etc. so we know which bytes to write out.
+
+### P1-8: IOC matching against curated OT threat-intel feeds (M)
+
+Embedded offline database of OT-relevant IOCs (IPs, domains, file
+hashes, JA3/JA3S fingerprints). Sources: [CISA ICS-CERT advisories](https://www.cisa.gov/news-events/cybersecurity-advisories?f%5B0%5D=advisory_type%3A95),
+Dragos public WorldView IOC samples, Talos public IOC dumps. New
+`threat.known_bad` finding fires when an observed identifier matches.
+
+**Why:** otsniff is positioned as a triage tool, not a SIEM — but
+"have we already seen this IP in a CISA advisory" is a question the
+defender will ask of every output, and answering it offline (no
+network call, no telemetry, no API key) fits the deploy model. Update
+cadence is per release — the DB ships embedded, just like the OUI
+table. **Touches:** new `threat/` module with the compressed DB,
+new detector `findings/known_bad.rs`, build-time data ingestion
+script. **Deps:** P0-6 (OUI table refresh) is the same pattern at
+smaller scale — share infrastructure.
+
+---
+
+## Shipped in v0.3 without prior roadmap entries
+
+These landed during the v0.3 cycle without a P0/P1 slot but are worth
+documenting so the trajectory is recoverable from this file alone.
+
+### Rule catalog — ✅ shipped (#30)
+
+Every detector now carries a `RuleMetadata` block (id, plain-English
+trigger, data sources, MITRE/CWE/RFC/vendor references). Surfaces:
+
+- `otsniff rules [--format md|json]` — print the catalog without a PCAP
+- [`docs/RULES.md`](RULES.md) — auto-generated, kept in sync by a test
+  that fails the build if it drifts
+- "Detection criteria" line inline in HTML and markdown reports under
+  each fired finding
+
+Sentinel tests ensure every detector has metadata and every fired
+finding id appears in the catalog.
+
+### Privacy-ledger audit log — ✅ shipped (#31)
+
+When `--ai` is on, a JSON chain-of-custody artifact writes alongside
+the report (default path: `<report-stem>.audit.json`). Contains scrub
+counts, leak-check verdicts, SHA-256 hashes of the exact bytes sent to
+and received from the AI — no real identifiers. Override path with
+`--audit-log <PATH>`.
+
+### Hostnames in finding evidence — ✅ shipped (#32)
+
+Evidence lines render `LINE-3-PLC (10.10.10.10)` instead of bare IPs
+when DHCP told us a hostname. Degrades cleanly to just the IP on
+captures without DHCP. Threaded through every detector via a shared
+`host_label(ip, obs)` helper.
+
+### CLI unification — ✅ shipped (#35, breaking change)
+
+The `report` subcommand was folded into `analyze`. `analyze` is now
+the primary verb: rules-based HTML by default, `--ai` is the opt-in
+for the AI section. Audit log auto-writes when `--ai` is on.
+`scrub` / `unscrub` remain as advanced subcommands for users driving
+their own AI (Claude.ai web, ChatGPT, local Ollama).
+
+Migration: `report` → `analyze`; old `analyze` (AI-only) → `analyze --ai`.
+
+---
+
+## Near-term rule additions — ✅ all shipped in v0.4 wave-1
+
+This batch was originally five to seven rules sized at ~80 LoC each.
+All seven landed in the VSDD wave-1 batch; the rule catalog grew from
+13 → 20. Section preserved as a historical record of the proposal
+shape; each entry below is now annotated with its shipped state.
+
+### `creds.ldap_simple_bind` (S) — ✅ shipped
+
+LDAP `BindRequest` with `SimpleAuthentication` over plaintext LDAP
+(TCP/389, no STARTTLS). Fires on real captures more often than
+expected — small IT shops still ship default Windows AD without TLS.
+**Touches:** `observe.rs` LDAP recognizer, new `findings/ldap_creds.rs`.
+
+### `compat.ntlmv1` (S) — ✅ shipped
+
+NTLMv1 authentication. Dictionary-attackable. Observable from the
+NTLMSSP NEGOTIATE message's flags field. **Touches:** SMB / HTTP path
+recognizers in `observe.rs`, new `findings/ntlmv1.rs`.
+
+### `compat.weak_tls_cipher` (S) — ✅ shipped
+
+TLS ClientHello listing RC4, DES, 3DES, or NULL cipher suites.
+Parallel to `compat.stale_tls`, narrower angle. **Touches:**
+`observe.rs::observe_tcp` (extend ClientHello parsing to capture
+cipher list), new `findings/weak_tls_cipher.rs`.
+
+### `creds.rdp_no_nla` (S) — ✅ shipped
+
+RDP connection negotiated without Network Level Authentication.
+Visible in the X.224 / TPKT connection-confirm packet's RDP_NEG
+flags. **Touches:** `observe.rs` RDP recognizer, new
+`findings/rdp_legacy.rs`.
+
+### `boundary.ntp_external` (S) — ✅ shipped (S-2.09, PR #65)
+
+OT host syncing time to a public NTP server. Parallel to
+`boundary.dns_resolver` — same cross-zone filter shape on UDP/123.
+**Touches:** new `findings/ntp_external.rs`.
+
+### `recon.port_scan` (M) — ✅ shipped
+
+Same source IP talking to many distinct destinations on the same
+port within the capture window. Implementable as a detector over
+existing `Observations::flows`, no new observer state needed.
+Threshold: ≥ 5 distinct destinations to start; tunable later.
+**Touches:** new `findings/recon_scan.rs`.
+
+### `ics.modbus_unit_id_sweep` (M) — ✅ shipped
+
+Same Modbus client iterating across many unit IDs. Classic Modbus
+discovery / fuzzing pattern. **Touches:** `observe.rs` to track unit
+ID per (src, dst) pair on modbus events, new
+`findings/modbus_recon.rs`.
+
+**Sequence (historical):** all seven landed inside the VSDD wave-1
+delivery without serializing — the per-story TDD discipline let them
+proceed in parallel. The originally-planned ordering (four `S` rules
+first, then `recon.port_scan`, then `ics.modbus_unit_id_sweep` last)
+turned out not to be a constraint.
 
 ---
 
@@ -456,6 +694,46 @@ literally cannot use any external AI service.
 
 **Open question:** which local models are good enough for OT triage?
 Probably qwen2.5-7b or llama3.1-8b at a minimum. Output quality varies.
+
+### P2-7: Encrypted output bundle (S)
+
+`otsniff bundle <report-stem> --passphrase` (or read passphrase from
+env) — zips `report.html` + `map.json` + `audit.json` into one
+file encrypted with a symmetric cipher. Inverse `unbundle` extracts
+back.
+
+**Why:** the BCSI handling commitment (NERC CIP-011 alignment) is
+currently a documentation claim — we *say* the map file is sensitive
+and should be protected at rest, and rely on the user to do so. A
+first-party encrypted bundle moves that from "guidance" to "default
+behavior." Doesn't change the privacy invariant — the AI still never
+sees real values — but closes the at-rest exposure window between
+`scrub` and `unscrub`. **Touches:** new `bundle` subcommand, new
+dep on `age` or `cocoon` for the encryption primitive (`age` is the
+modern choice; small footprint, audited).
+
+### P2-8: User-defined rules via YAML (L)
+
+`otsniff analyze --rules-file site.yml ...` loads additional
+detectors from a user-provided YAML file. Schema is constrained:
+a rule names an Observations field (e.g. `flows`, `cred_events`),
+filter predicates, and a finding template. Not a full expression
+language — closer to Sigma-rules-with-OT-specific-fields than to
+generic rule engines.
+
+**Why:** every plant has a few site-specific patterns the embedded
+catalog will never cover ("any traffic to `192.168.10.0/24` outside
+maintenance windows," "any `ENIP CIP write` to `controller-A` not
+sourced from `eng-station-1`"). A constrained YAML format lets the
+on-site engineer encode those patterns without forking the codebase.
+
+**Why P2 / not P1:** Pandora's box. Once user rules exist, the
+project owns a tiny detection-engine surface forever. Worth doing,
+but only after the embedded catalog is rich enough that user rules
+are a long-tail extension rather than a workaround. **Touches:** new
+`rules/` module, YAML schema in `src/rules/schema.rs`, snapshot
+tests on the deserializer. **Deps:** none functionally; conceptually
+the catalog needs to be richer first.
 
 ---
 

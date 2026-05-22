@@ -1,0 +1,9 @@
+$ ls -lh media/otsniff-*.svg
+-rw-r--r--  1 lukeadamson  staff   339B May 12 15:50 media/otsniff-favicon-ink.svg
+-rw-r--r--  1 lukeadamson  staff   339B May 12 15:50 media/otsniff-favicon-paper.svg
+-rw-r--r--  1 lukeadamson  staff   354B May 12 15:50 media/otsniff-favicon.svg
+-rw-r--r--  1 lukeadamson  staff   641B May 12 15:50 media/otsniff-mark-ink.svg
+-rw-r--r--  1 lukeadamson  staff   641B May 12 15:50 media/otsniff-mark-paper.svg
+-rw-r--r--  1 lukeadamson  staff   676B May 12 15:50 media/otsniff-mark.svg
+---
+Legacy PNG removed.

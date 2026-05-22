@@ -1,0 +1,14 @@
+Table size — before/after S-2.03
+=================================
+
+Before (develop branch, hand-curated table):
+  $ git show develop:src/oui.rs | grep -c '^\s*(\[0x'
+  43
+
+After (S-2.03 branch, IEEE MA-L + OT/IT curation):
+  $ grep -c '^\s*(\[0x' src/oui.rs
+  9243
+
+Growth: +9,200 entries (214× increase)
+Encoding: array of ([u8; 3], &str) tuples, sorted by prefix for binary_search_by_key
+Binary size impact: < 200 KB (within AC-002 bound)

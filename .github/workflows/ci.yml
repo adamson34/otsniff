@@ -39,22 +39,40 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-features
 
-  # macOS runners cost 10× the Linux billing multiplier on private repos.
-  # On every-PR runs that adds up fast and we have no macOS-specific code
-  # paths today. Run macOS only on push to develop/main so it gates merges
-  # to the long-lived branches without paying per PR.
+  # macOS runs on every PR and every push. The 10× billing multiplier
+  # only applies to private repos; public repos get unlimited Actions
+  # minutes on the free tier, so we restore full coverage. otsniff is
+  # pure Rust and we ship macOS binaries, so PR signal on macOS is
+  # worth having even if functional divergence between Linux and macOS
+  # is rare for this codebase.
   #
-  # If we flip the repo public (Actions become unlimited) or add macOS-
-  # specific code paths, change this back to running on pull_request as
-  # well, or fold both back into a matrix.
+  # PATH guard step:
+  # On macOS GitHub runners, `cargo` (the rustup proxy binary) sometimes
+  # resolves to a stale `rustup-init` binary even after
+  # `dtolnay/rust-toolchain@stable` reports successful install, producing
+  # "error: unexpected argument 'test' found / Usage: rustup-init[EXE]".
+  # Symptom hit five times on this repo (PR #58 CI, post-#58 develop
+  # push, post-#59 develop push, post-#60 first attempt, post-#60 retry)
+  # despite the initial macos-14 pin in #60. PR runs against the runner's
+  # empty cache pass; develop pushes that hit the populated cache fail.
+  # The fix is to explicitly put `$HOME/.cargo/bin` (where rustup writes
+  # its proxy shims) at the front of GITHUB_PATH and verify cargo
+  # resolves correctly before running tests. Tracked end-to-end via
+  # S-3.06; this is option (b) from the spec.
   test-macos:
-    name: Test (macos-latest)
-    runs-on: macos-latest
-    if: github.event_name == 'push'
+    name: Test (macos-14)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - name: Force rustup-managed cargo to front of PATH
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo "Resolved cargo: $(which cargo || true)"
+          cargo --version
+      # Cache step omitted per S-3.06 option (b''): the rust-cache action's
+      # restore on macOS replaces ~/.cargo/bin/* with rustup-init bytes.
+      # Trade-off: +90s cold compile; eliminates the cache-corruption vector.
       - run: cargo test --all-features
 
   msrv:
@@ -70,6 +88,33 @@ jobs:
           toolchain: "1.85.0"
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-features
+
+  no-user-paths:
+    name: No user paths in committed files (POL-12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: scripts/lint-no-user-paths.sh
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: Run coverage
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      - name: Upload to codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   deny:
     name: cargo-deny (licenses + advisories)

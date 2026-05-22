@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**12 rules.**
+**20 rules.**
 
 ## Index
 
@@ -14,13 +14,21 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`creds.telnet`](#credstelnet) | critical | Telnet session observed (cleartext by definition) |
 | [`creds.http_basic`](#credshttp_basic) | critical | HTTP Basic authentication over plaintext HTTP |
 | [`creds.snmp`](#credssnmp) | critical | SNMPv1 / SNMPv2c traffic (plaintext community strings) |
+| [`creds.ldap_simple_bind`](#credsldap_simple_bind) | critical | LDAP plaintext simple-bind observed |
+| [`compat.ntlmv1`](#compatntlmv1) | high | NTLMv1 authentication observed |
 | [`ics.modbus_writes`](#icsmodbus_writes) | high | Modbus engineering-class commands on the wire |
 | [`ics.cip_engineering`](#icscip_engineering) | high | EtherNet/IP engineering-class CIP services |
 | [`ics.s7_engineering`](#icss7_engineering) | high | S7Comm engineering-class commands on the wire |
+| [`ics.dnp3_engineering`](#icsdnp3_engineering) | high | DNP3 engineering-class commands on the wire |
 | [`compat.smbv1`](#compatsmbv1) | high | SMBv1 traffic observed |
 | [`compat.stale_tls`](#compatstale_tls) | medium | Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1) |
+| [`compat.weak_tls_cipher`](#compatweak_tls_cipher) | medium | Weak TLS cipher suites advertised (RC4 / DES / 3DES / NULL) |
+| [`creds.rdp_no_nla`](#credsrdp_no_nla) | critical | RDP connection without Network Level Authentication (NLA) |
+| [`ics.modbus_unit_id_sweep`](#icsmodbus_unit_id_sweep) | medium | Modbus unit-ID sweep — PLC discovery or fuzzing pattern |
 | [`egress.ot_to_internet`](#egressot_to_internet) | critical | Internet-bound traffic from OT subnets |
 | [`boundary.dns_resolver`](#boundarydns_resolver) | medium | DNS queries from OT to an out-of-zone resolver |
+| [`boundary.ntp_external`](#boundaryntp_external) | medium | OT host syncing time to public NTP |
+| [`recon.port_scan`](#reconport_scan) | medium | Port scan — source host probing many destinations or ports |
 | [`ot.unexpected_protocols`](#otunexpected_protocols) | medium | Non-OT protocols observed touching OT subnets |
 
 ## `creds.ftp`
@@ -79,6 +87,35 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 - **RFC** — RFC 3411 — Architecture for SNMPv3 (the secure replacement) ([link](https://datatracker.ietf.org/doc/html/rfc3411))
 
+## `creds.ldap_simple_bind`
+
+**LDAP plaintext simple-bind observed**
+
+- **Severity:** critical
+- **Data source:** `ldap_bind_events`
+
+**Trigger.** Fires when at least one LDAPv3 BindRequest with SimpleAuthentication (tag 0x80) is observed on tcp/389 or tcp/3268 without a prior successful STARTTLS exchange on the same flow. The username and password are transmitted in cleartext; any host on a SPAN port of the same VLAN can capture them. Anonymous binds (empty DN + empty password) are not flagged — they carry no credential.
+
+**References:**
+
+- **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
+- **RFC** — RFC 4511 — Lightweight Directory Access Protocol (LDAP): The Protocol ([link](https://datatracker.ietf.org/doc/html/rfc4511))
+- **RFC** — RFC 4513 — LDAP Authentication Methods and Security Mechanisms (STARTTLS) ([link](https://datatracker.ietf.org/doc/html/rfc4513))
+
+## `compat.ntlmv1`
+
+**NTLMv1 authentication observed**
+
+- **Severity:** high
+- **Data source:** `ntlm_events`
+
+**Trigger.** Fires when at least one NTLMSSP NEGOTIATE_MESSAGE is observed in a TCP payload (ports 445, 139, 80, 443, 8080, 135) with NTLMSSP_NEGOTIATE_NTLM (bit 9, 0x00000200) set and NTLMSSP_NEGOTIATE_NTLM2_KEY (bit 19, 0x00080000) unset. NTLMv1 challenges are trivially crackable with off-the-shelf tools (e.g. hashcat, Responder) and should not appear on OT networks. NTLMv2 events are excluded — a separate rule covers those.
+
+**References:**
+
+- **CWE** — CWE-916 — Use of Password Hash With Insufficient Computational Effort ([link](https://cwe.mitre.org/data/definitions/916.html))
+- **MITRE ATT&CK for ICS** — T0859 — Valid Accounts ([link](https://attack.mitre.org/techniques/T0859/))
+
 ## `ics.modbus_writes`
 
 **Modbus engineering-class commands on the wire**
@@ -115,13 +152,28 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **Severity:** high
 - **Data source:** `s7_events (where engineering_class = true)`
 
-**Trigger.** Fires when S7Comm (Siemens S7-300/400/1200/1500 over tcp/102) traffic contains a function code we classify as engineering — PLC stop / start, block download / upload, password operations. S7Comm has no native authentication; S7-1500 adds Secure Communication only when explicitly enabled.
+**Trigger.** Fires when S7Comm (Siemens S7-300/400/1200/1500 over tcp/102) traffic contains a function code we classify as engineering — 0x05 Write Var, 0x1A-0x1C block download, 0x1D-0x1F block upload, 0x28 PLC Control (hot / cold restart sub-types), 0x29 PLC Stop. S7Comm has no native authentication; S7-1500 adds Secure Communication only when explicitly enabled.
 
 **References:**
 
 - **MITRE ATT&CK for ICS** — T0858 — Change Operating Mode ([link](https://attack.mitre.org/techniques/T0858/))
 - **MITRE ATT&CK for ICS** — T0843 — Program Download ([link](https://attack.mitre.org/techniques/T0843/))
 - **Vendor** — Siemens — S7 Communication overview (industrial security)
+
+## `ics.dnp3_engineering`
+
+**DNP3 engineering-class commands on the wire**
+
+- **Severity:** high
+- **Data source:** `dnp3_events (where engineering_class = true)`
+
+**Trigger.** Fires when a DNP3 master issues engineering-class function codes (Operate (4), Direct Operate (5), Direct Operate No Ack (6), Cold Restart (13), Warm Restart (14), Initialize Data (15), Initialize Application (16), Disable Unsolicited (20), Enable Unsolicited (21), Save Configuration (24)) against a controller. DNP3 has no native authentication in its base specification; any host that can reach a DNP3 outstation on tcp/20000 can send these commands.
+
+**References:**
+
+- **MITRE ATT&CK for ICS** — T0855 — Unauthorized Command Message ([link](https://attack.mitre.org/techniques/T0855/))
+- **MITRE ATT&CK for ICS** — T0836 — Modify Parameter ([link](https://attack.mitre.org/techniques/T0836/))
+- **Spec** — IEEE 1815-2012 — DNP3 Standard
 
 ## `compat.smbv1`
 
@@ -151,6 +203,50 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **RFC** — RFC 8996 — Deprecating TLS 1.0 and TLS 1.1 ([link](https://datatracker.ietf.org/doc/html/rfc8996))
 - **CWE** — CWE-326 — Inadequate Encryption Strength ([link](https://cwe.mitre.org/data/definitions/326.html))
 
+## `compat.weak_tls_cipher`
+
+**Weak TLS cipher suites advertised (RC4 / DES / 3DES / NULL)**
+
+- **Severity:** medium
+- **Data source:** `tls_cipher_suites`
+
+**Trigger.** Fires when a TLS ClientHello on TCP/443 or TCP/8443 includes any of the following cipher suite codes: 0x0001 (NULL_MD5), 0x0002 (NULL_SHA), 0x0004 (RC4_128_MD5), 0x0005 (RC4_128_SHA), 0x0009 (DES_CBC_SHA), 0x000A (3DES_EDE_CBC_SHA). These suites are broken or severely weakened — RC4 has statistical biases exploitable in practice (RFC 7465), DES has a 56-bit key vulnerable to brute force, 3DES is vulnerable to Sweet32 (CVE-2016-2183), and NULL suites provide no encryption at all. Detection runs on the cipher_suites list in the TLS ClientHello handshake message regardless of which suite the server ultimately negotiates. GREASE values (RFC 8701) are skipped.
+
+**References:**
+
+- **RFC** — RFC 7465 — Prohibiting RC4 Cipher Suites ([link](https://datatracker.ietf.org/doc/html/rfc7465))
+- **CWE** — CWE-326 — Inadequate Encryption Strength ([link](https://cwe.mitre.org/data/definitions/326.html))
+
+## `creds.rdp_no_nla`
+
+**RDP connection without Network Level Authentication (NLA)**
+
+- **Severity:** critical
+- **Data source:** `rdp_events`
+
+**Trigger.** Fires when an X.224 Connection Confirm PDU on tcp/3389 contains an RDP_NEG_RSP block whose selectedProtocol field has bit 0 clear (PROTOCOL_RDP = 0x00000000). This means the server accepted a connection with no SSL/TLS wrapping and no CredSSP pre-authentication (NLA). Without NLA the Windows logon screen is rendered before authentication, enabling credential-harvesting attacks and exposing the session to passive capture on the local network segment.
+
+**References:**
+
+- **MITRE ATT&CK for ICS** — T0822 — External Remote Services ([link](https://attack.mitre.org/techniques/T0822/))
+- **CWE** — CWE-308 — Use of Single-factor Authentication ([link](https://cwe.mitre.org/data/definitions/308.html))
+- **Spec** — MS-RDPBCGR §2.2.1.2 — RDP Negotiation Response (RDP_NEG_RSP) ([link](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/b2975bdc-6d56-49ee-9c57-f2ff3a0b6817))
+
+## `ics.modbus_unit_id_sweep`
+
+**Modbus unit-ID sweep — PLC discovery or fuzzing pattern**
+
+- **Severity:** medium
+- **Data source:** `modbus_flow_summary`
+
+**Trigger.** Fires when a single Modbus client (src IP) sends requests to five or more distinct unit IDs addressed to the same server (dst IP) within the capture window. The Modbus unit identifier (slave address, 0x00–0xFF) is the primary way a master selects a specific PLC or slave device on a shared serial segment. Sweeping a large range of unit IDs is a hallmark of automated discovery tools, protocol fuzzers, and unauthorized reconnaissance scripts. Severity is Medium for ≥ 5 distinct unit IDs and escalates to High at ≥ 50. Evidence lists the (src, dst) pair, the total count of distinct unit IDs observed, and the first ten unit IDs seen.
+
+**References:**
+
+- **MITRE ATT&CK for ICS** — T0846 — Remote System Discovery ([link](https://attack.mitre.org/techniques/T0846/))
+- **MITRE ATT&CK for ICS** — T0888 — Remote System Information Discovery ([link](https://attack.mitre.org/techniques/T0888/))
+- **Spec** — Modbus Application Protocol Specification V1.1b3 §4.1 — Unit Identifier ([link](https://modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf))
+
 ## `egress.ot_to_internet`
 
 **Internet-bound traffic from OT subnets**
@@ -179,6 +275,34 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Network segmentation
 - **Spec** — Purdue Reference Model — boundary services
 
+## `boundary.ntp_external`
+
+**OT host syncing time to public NTP**
+
+- **Severity:** medium
+- **Data source:** `flows (dst_port = 123; src in OT, dst not in OT)`
+
+**Trigger.** Fires when at least one flow with `dst_port = 123` (UDP) has a source IP inside a configured `--ot-subnet` and a destination IP that is NOT inside any configured OT subnet. OT devices should sync time to an in-zone NTP server under change control; queries to external NTP servers (including public pool addresses) leak timing behaviour across the OT/IT boundary and introduce a dependency on the external network for a safety-critical function.
+
+**References:**
+
+- **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Network segmentation
+- **Spec** — Purdue Reference Model — boundary services
+
+## `recon.port_scan`
+
+**Port scan — source host probing many destinations or ports**
+
+- **Severity:** medium
+- **Data source:** `flows (grouped by src_ip; counting distinct dst_ip and (dst_port, proto) pairs)`
+
+**Trigger.** Fires when a single source IP contacts >= 10 distinct destinations (horizontal scan) OR >= 10 distinct (port, protocol) combinations (vertical scan) within the capture window. Severity escalates to High at >= 50. One finding per scanning source, classified as horizontal, vertical, or combined. Broadcast/multicast destinations are skipped.
+
+**References:**
+
+- **MITRE ATT&CK for ICS** — T0846 — Remote System Discovery ([link](https://attack.mitre.org/techniques/T0846/))
+- **Spec** — ISA/IEC 62443-3-3 SR-7.7 — Least privilege
+
 ## `ot.unexpected_protocols`
 
 **Non-OT protocols observed touching OT subnets**
@@ -186,7 +310,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **Severity:** medium
 - **Data source:** `flows (label matches no-fly list)`
 
-**Trigger.** Fires when a flow on a host inside a configured `--ot-subnet` carries a protocol label from the no-fly list — currently anydesk, bittorrent, irc, openvpn, rtmp, sip, smtp. Labels come from the port-based flow classifier in `observe.rs::classify_flow`, so the false positive is a service that happens to use a no-fly port for an unrelated reason. Findings tag every offending protocol independently.
+**Trigger.** Fires when a flow whose src or dst is inside a configured `--ot-subnet` carries a protocol label from the no-fly list — currently anydesk, apns, bittorrent, gcm, irc, openvpn, rtmp, sip, smtp, stun, teamviewer. Labels come from the port-based flow classifier in `observe.rs::classify_flow`, so the false positive is a service that happens to use a no-fly port for an unrelated reason. Findings tag every offending protocol independently.
 
 **References:**
 
