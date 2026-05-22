@@ -1,12 +1,12 @@
-/// Acceptance tests for S-3.03: mutation testing CI infrastructure.
-///
-/// This file is the Red Gate — every test must FAIL against the stub commit
-/// (fa95cd3) that contains TODO placeholders, and must PASS once the
-/// implementer fills in real values in Step 4.
-///
-/// Tests use only `std::fs` and string matching; no new dependencies.
-///
-/// Naming: test_ac_NNN_description
+// Acceptance tests for S-3.03: mutation testing CI infrastructure.
+//
+// This file is the Red Gate — every test must FAIL against the stub commit
+// (fa95cd3) that contains TODO placeholders, and must PASS once the
+// implementer fills in real values in Step 4.
+//
+// Tests use only `std::fs` and string matching; no new dependencies.
+//
+// Naming: test_ac_NNN_description
 
 // ---------------------------------------------------------------------------
 // AC-001 — .cargo-mutants.toml: scoped mutation config
@@ -128,8 +128,7 @@ fn test_ac_001_no_todo_placeholders_remain() {
 /// a placeholder, not a real result-posting step.
 #[test]
 fn test_ac_002_mutants_workflow_exists() {
-    let path =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows/mutants.yml");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows/mutants.yml");
     let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!(
             "AC-002: .github/workflows/mutants.yml must exist to integrate \
@@ -157,8 +156,7 @@ fn test_ac_002_mutants_workflow_exists() {
 /// which indicates Step 4 has not been completed.
 #[test]
 fn test_ac_002_workflow_runs_on_schedule() {
-    let path =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows/mutants.yml");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows/mutants.yml");
     let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!(
             "AC-002: .github/workflows/mutants.yml must exist; \
@@ -211,8 +209,7 @@ fn test_ac_002_workflow_runs_on_schedule() {
 /// established" but Step 4 has not done so.
 #[test]
 fn test_ac_002_workflow_does_not_block_prs() {
-    let path =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows/mutants.yml");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows/mutants.yml");
     let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!(
             "AC-002: .github/workflows/mutants.yml must exist; \
@@ -244,8 +241,7 @@ fn test_ac_002_workflow_does_not_block_prs() {
 /// TODO(S-3.03 step 4) placeholders.
 #[test]
 fn test_ac_002_no_todo_placeholders_remain() {
-    let path =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows/mutants.yml");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows/mutants.yml");
     let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!(
             "AC-002: .github/workflows/mutants.yml must exist; \
@@ -301,11 +297,9 @@ fn test_ac_003_baseline_documented_in_mutants_md() {
             .map(|s| &content[s..section_end])
             .unwrap_or("");
         section.contains('%')
-            && section
-                .chars()
-                .zip(section.chars().skip(1))
-                .any(|(a, b)| a.is_ascii_digit() && b == '%'
-                    || (a.is_ascii_digit() && b.is_ascii_digit()))
+            && section.chars().zip(section.chars().skip(1)).any(|(a, b)| {
+                a.is_ascii_digit() && b == '%' || (a.is_ascii_digit() && b.is_ascii_digit())
+            })
     };
 
     assert!(
