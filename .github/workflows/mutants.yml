@@ -1,0 +1,53 @@
+name: Mutation Testing (Weekly)
+
+# Runs mutation tests weekly on develop tip
+# Does not block PRs — slow schedule only per AC-002
+
+on:
+  schedule:
+    # TODO(S-3.03 step 4): set actual weekly cadence (cron format: minute hour day month day-of-week)
+    # Current placeholder: disabled (empty cron) — enable once baseline is established
+    - cron: '0 0 * * *'  # placeholder: runs daily at 00:00 UTC (replace with actual schedule)
+  workflow_dispatch: # allow manual trigger
+
+jobs:
+  mutants:
+    name: Run Mutants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-mutants
+        # TODO(S-3.03 step 4): pin version once established (e.g., cargo-mutants@0.2.x)
+        run: cargo install cargo-mutants
+
+      - name: Run mutation testing
+        # TODO(S-3.03 step 4): capture output format (JSON, text, etc.) and set artifact paths
+        run: cargo mutants --no-shuffle
+        env:
+          RUST_BACKTRACE: 1
+
+      - name: Upload mutation results
+        # TODO(S-3.03 step 4): set artifact retention and post results to issue/summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-results
+          path: mutants.out
+          retention-days: 30
+
+      - name: Comment on develop with results
+        # TODO(S-3.03 step 4): implement result posting (issue comment or PR comment)
+        if: always()
+        run: echo "TODO(S-3.03 step 4): post kill-rate summary to issue or action summary"

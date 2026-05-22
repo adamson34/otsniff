@@ -1,0 +1,28 @@
+# Cargo-mutants configuration for otsniff
+# Scope: mutation testing for high-value security-critical modules
+# See: docs/MUTANTS.md for triage guidance
+
+[examine]
+# TODO(S-3.03 step 4): populate with actual glob patterns once baseline is established
+# In-scope modules per AC-001:
+examine_globs = [
+    "src/findings/",
+    "src/parse/",
+    "src/scrub.rs",
+    "src/ai/leak_detector.rs",
+]
+
+[skip]
+# TODO(S-3.03 step 4): add skip-list entries for known irrelevant mutations
+# Examples: metadata strings, log levels, evidence sample ordering (see docs/MUTANTS.md)
+skip = []
+
+[timeout]
+# TODO(S-3.03 step 4): set timeout based on local baseline run
+# Current placeholder: 600 seconds (adjust after Step 3 baseline run)
+timeout_seconds = 600
+
+[cargo]
+# TODO(S-3.03 step 4): add any additional cargo args needed
+# Examples: --features, --lib, etc.
+# additional_cargo_args = []
