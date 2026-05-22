@@ -1,0 +1,47 @@
+name: Fuzz (weekly)
+
+on:
+  # TODO(S-3.04 step 4): set cron schedule (e.g., "0 2 * * 0" for Sunday 2 AM UTC)
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+# TODO(S-3.04 step 4): add pull_request trigger if desired, otherwise remove.
+# Currently scheduled-only to avoid blocking PRs on long-running fuzz jobs.
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # TODO(S-3.04 step 4): update harness names if any are renamed or removed
+        harness:
+          - parse_modbus
+          - parse_enip
+          - parse_s7comm
+          - parse_dhcp
+          - parse_dnp3
+          - scrub_text
+    steps:
+      - uses: actions/checkout@v4
+
+      # TODO(S-3.04 step 4): pin nightly version if reproducibility is critical
+      - uses: dtolnay/rust-toolchain@nightly
+
+      # TODO(S-3.04 step 4): confirm cargo-fuzz version after testing locally
+      - run: cargo install cargo-fuzz
+
+      - name: Run fuzz harness ${{ matrix.harness }}
+        # TODO(S-3.04 step 4): adjust -max_total_time if needed (currently 60 seconds per AC-002)
+        run: |
+          cd fuzz
+          cargo +nightly fuzz run ${{ matrix.harness }} -- -max_total_time=60
+
+      - name: Upload artifacts (if crashes found)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.harness }}
+          # TODO(S-3.04 step 4): confirm artifact path matches libfuzzer output structure
+          path: fuzz/artifacts/${{ matrix.harness }}/
+          if-no-files-found: ignore

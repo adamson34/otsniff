@@ -38,3 +38,8 @@ media/*.pcap
 .factory/
 .factory-project/
 .worktrees/
+
+# libFuzzer corpus and build artifacts
+fuzz/target/
+fuzz/corpus/
+# Note: fuzz/artifacts/ is NOT ignored — those are regression seeds (AC-004)
