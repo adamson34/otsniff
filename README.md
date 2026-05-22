@@ -79,17 +79,15 @@ otsniff rules            # markdown
 otsniff rules --format json
 ```
 
-> **Known issue (v0.4.0):** `recon.port_scan` over-fires on captures containing an active scanner — emits one finding per `(src, port, proto)` tuple instead of per source IP. A capture with a scanner hitting many ports can produce thousands of cards. Fix tracked at [`.factory/stories/S-2.12-recon-port-scan-rollup.md`](.factory/stories/S-2.12-recon-port-scan-rollup.md) and lands in v0.4.1.
-
 ### What that looks like on real captures
 
 Run against the public 4SICS ICS Lab captures (with `--ot-subnet 10.10.10.0/24`):
 
 | Capture | Hosts | Findings | Notable signals |
 |---|---:|---:|---|
-| 4SICS-GeekLounge-151020 (240K pkt, 25 MB) | 12 | 1 | S7 engineering on the lab PLC |
-| 4SICS-GeekLounge-151021 (1.2M pkt, 134 MB) | 47 | 5+ | FTP / HTTP-Basic / Telnet plaintext, stale TLS, S7 engineering, + recon.port_scan over-fires (see known issue) |
-| 4SICS-GeekLounge-151022 (2.3M pkt, 200 MB) | 99 | 8+ | Modbus *and* S7 *and* DNP3 engineering, FTP / HTTP-Basic / SNMPv1 / Telnet plaintext, stale TLS, + recon.port_scan over-fires |
+| 4SICS-GeekLounge-151020 (240K pkt, 25 MB) | 12 | 3 | S7 engineering on the lab PLC, port-scan recon |
+| 4SICS-GeekLounge-151021 (1.2M pkt, 134 MB) | 47 | 44 | FTP / HTTP-Basic / Telnet plaintext, stale TLS, weak TLS ciphers, S7 engineering, port-scan recon |
+| 4SICS-GeekLounge-151022 (2.3M pkt, 200 MB) | 99 | 62 | Modbus *and* S7 *and* DNP3 engineering, FTP / HTTP-Basic / SNMPv1 / Telnet plaintext, stale TLS, weak TLS ciphers, Modbus unit-ID sweep, port-scan recon |
 
 ## Install
 
@@ -225,6 +223,17 @@ The map file is the only thing tying pseudonyms to real values — keep it where
 - Full protocol decoding (function/service-code-level only)
 - Compliance attestation — the project *aligns with* CIP-011 / IEC 62443 handling principles but does not certify
 - OPC-UA, BACnet, IEC-104 — see the [roadmap](docs/ROADMAP.md) for prioritization
+
+## What's next
+
+A taste of the in-flight and proposed work — the full prioritized backlog with rationale lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+- **AI-augmented findings** (`P0-8`, in flight) — second LLM pass anchored on the rules + inventory, surfacing patterns the deterministic rules don't encode.
+- **Cross-capture diff** (`P1-3`, in flight) — `otsniff diff baseline.pcap current.pcap` for "what changed since last quarter's scan?"
+- **mDNS / NetBIOS / LLMNR hostnames** (`P0-9`) — extend the asset inventory beyond DHCP-named hosts.
+- **Multi-PCAP analyze** (`P0-10`) — `otsniff analyze rotated-*.pcap` without needing `mergecap`.
+- **MITRE ATT&CK for ICS mapping** (`P1-6`) — every finding tagged with technique IDs blue teams already use.
+- **PCAP slicing** (`P1-7`) — produce a Wireshark-friendly subset that triggered a finding.
 
 ## Testing with public PCAPs
 
