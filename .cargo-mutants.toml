@@ -1,0 +1,84 @@
+# Cargo-mutants configuration for otsniff
+# Scope: mutation testing for high-value security-critical modules.
+#
+# This file is read by passing --config .cargo-mutants.toml to cargo-mutants.
+# See docs/MUTANTS.md for triage guidance and the kill-rate baseline.
+
+# ---------------------------------------------------------------------------
+# Scope — only high-value modules per AC-001
+# ---------------------------------------------------------------------------
+# We restrict mutation testing to the four modules where a missed mutation
+# would represent a real security regression:
+#
+#   src/findings/   — detection rules whose correctness is security-critical;
+#                     a mutation that silences a finding could miss a real attack.
+#   src/parse/      — protocol parsers; wrong function-code handling leads to
+#                     false-negative findings.
+#   src/scrub.rs    — privacy invariant; a missed mutation could leak real IPs
+#                     to the AI provider.
+#   src/ai/leak_detector.rs — fail-closed kill switch; must never allow a
+#                             scrub bypass through.
+#
+# Modules excluded from scope:
+#   src/main.rs     — entry point; exit-code mapping, not business logic.
+#   src/cli.rs      — argument parsing; clap integration, covered by smoke tests.
+#   src/observe.rs  — accumulator; high mutation count, low security impact.
+#   src/inventory.rs — role-inference heuristics; best tested by integration.
+#   src/oui.rs      — static lookup table; no branches to mutate meaningfully.
+#   src/report*.rs  — HTML/MD rendering; output format, not security logic.
+[examine]
+examine_globs = [
+    "src/findings/**/*.rs",
+    "src/parse/**/*.rs",
+    "src/scrub.rs",
+    "src/ai/leak_detector.rs",
+]
+
+# ---------------------------------------------------------------------------
+# Exclusions — generated or test-only files that are not production logic
+# ---------------------------------------------------------------------------
+[exclude]
+exclude_globs = [
+    "tests/**",
+    "benches/**",
+    "examples/**",
+]
+
+# ---------------------------------------------------------------------------
+# Timeout — slow mutant runs must not false-fail under load
+# ---------------------------------------------------------------------------
+# Set to 5× the baseline test-suite runtime so that genuinely slow mutants
+# are killed rather than timed out (which would inflate the "timeout" bucket
+# and undercount the true kill rate).
+[timeout]
+timeout_multiplier = 5.0
+
+# ---------------------------------------------------------------------------
+# Skip-calls — noise reduction for well-understood call patterns
+# ---------------------------------------------------------------------------
+# These call sites are skipped because mutating them produces mutations that
+# are either unreachable in practice or trivially equivalent:
+#
+#   unwrap / expect   — these are panic sites in error paths; a mutation that
+#                       changes them would only be caught if the test suite
+#                       intentionally triggers that error path, which it does
+#                       not for most recovery paths.  We prefer `?` in
+#                       production code; residual expect() calls carry an
+#                       actionable message that is not worth testing via mutation.
+#
+#   panic!            — explicit programmer assertion, not business logic.
+#
+#   trace! / debug!   — log-level macros; changing log output does not affect
+#                       the security properties we care about.
+#
+#   info! / warn!     — see above.
+[skip_calls]
+skip_calls = [
+    "unwrap",
+    "expect",
+    "panic",
+    "trace",
+    "debug",
+    "info",
+    "warn",
+]
