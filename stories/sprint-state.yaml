@@ -332,25 +332,25 @@ stories:
     completed_at: 2026-05-14T11:30:00Z
     semantics: regression-lockdown (tests pass on first commit; no implementer step)
   S-3.03:
-    status: blocked
+    status: pending  # 2026-05-22: flipped from blocked — S-3.01 completed at 0c64832, wave-2 kickoff
     wave: 2
     blocked_by: [S-3.01]
     branch: null
     worktree: null
   S-3.04:
-    status: blocked
+    status: pending  # 2026-05-22: flipped from blocked — S-2.04 completed (DNP3 parser shipped), wave-2 kickoff
     wave: 2
     blocked_by: [S-2.04]
     branch: null
     worktree: null
   S-4.04:
-    status: blocked
+    status: pending  # 2026-05-22: flipped from blocked — S-4.01..03 all completed via PR #80/#81/#82
     wave: 2
     blocked_by: [S-4.01, S-4.02, S-4.03]
     branch: null
     worktree: null
   S-6.02:
-    status: blocked
+    status: pending  # 2026-05-22: flipped from blocked — S-6.01 completed via PR #76
     wave: 2
     blocked_by: [S-6.01]
     branch: null
