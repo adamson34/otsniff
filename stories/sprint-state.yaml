@@ -332,11 +332,15 @@ stories:
     completed_at: 2026-05-14T11:30:00Z
     semantics: regression-lockdown (tests pass on first commit; no implementer step)
   S-3.03:
-    status: pending  # 2026-05-22: flipped from blocked — S-3.01 completed at 0c64832, wave-2 kickoff
+    status: completed
     wave: 2
     blocked_by: [S-3.01]
-    branch: null
+    branch: feature/S-3.03-mutation-testing-ci
     worktree: null
+    merge_sha: cfd6058
+    pr: 94
+    merged_at: 2026-05-22T21:19:44Z
+    notes: ".cargo-mutants.toml scoped to 4 high-value modules + weekly mutants.yml (Mon 06:00 UTC) + docs/MUTANTS.md with 84.1% baseline and 5% ratchet. 11 acceptance tests in tests/s_3_03_mutation_testing_infrastructure.rs all green (total suite 314/0). cargo-mutants pinned to ^27."
   S-3.04:
     status: pending  # 2026-05-22: flipped from blocked — S-2.04 completed (DNP3 parser shipped), wave-2 kickoff
     wave: 2

@@ -36,7 +36,7 @@ status: draft
 | S-3.02 | Prompt eval harness | E-3 | 1 | 5 | completed (#79, 18a7b62) | — | S.6 |
 | S-3.05 | codecov coverage reporting (v0.4.1 patch) | E-3 | 1 | 2 | completed (#77, 51a3faf) | — | build |
 | S-3.06 | macOS CI rustup-init flake fix (v0.4.1 patch) | E-3 | 1 | 2 | completed (#66, e425733) | — | build |
-| S-3.03 | Mutation testing CI | E-3 | 2 | 5 | draft | S-3.01 | build |
+| S-3.03 | Mutation testing CI | E-3 | 2 | 5 | completed | S-3.01 | build |
 | S-3.04 | Fuzz harnesses for parsers | E-3 | 2 | 5 | draft | S-2.04 | S.1 |
 | S-4.01 | Kani: scrub round-trip | E-4 | 1 | 5 | completed (#80, fde249d) | — | S.5 |
 | S-4.02 | Kani: leak-detector regex | E-4 | 1 | 5 | completed (#81, 827d5b6) | — | S.5 |
