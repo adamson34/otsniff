@@ -338,7 +338,13 @@ pub fn unscrub_text(text: &str, map: &ScrubMap) -> (String, usize, Vec<String>) 
 fn pseudonym_regex() -> Regex {
     // host_NNN, mac_NNN, name_NNN — pseudonym vocabulary lives here. Add
     // new prefixes as we add new identifier classes (unit_NN, etc.).
-    Regex::new(r"\b(?:host|mac|name)_[0-9a-f]+\b").expect("valid regex")
+    //
+    // Suffix is `[0-9]+` (decimal-only), matching what `build_map` and
+    // `merge_family` actually emit via `format!("{prefix}{:03}", idx)`.
+    // The earlier `[0-9a-f]+` was overly permissive and could spuriously
+    // match real values that happened to look pseudonym-shaped (e.g. a
+    // legitimate hostname `host_abc01`). F-W1-002 (wave-1 adversarial review).
+    Regex::new(r"\b(?:host|mac|name)_[0-9]+\b").expect("valid regex")
 }
 
 /// Kani formal-verification harnesses (S-4.01).
@@ -1170,5 +1176,51 @@ mod tests {
             .expect("regex leak check must pass after scrub with merged map");
         leak_detector::ensure_no_map_values(&scrubbed, &merged)
             .expect("map-value leak check must pass after scrub with merged map");
+    }
+
+    /// F-W1-002 (wave-1 adversarial review): the pseudonym regex must match
+    /// only what `build_map` actually emits — decimal-only suffixes (`{:03}`).
+    /// The earlier `[0-9a-f]+` pattern would spuriously match real values
+    /// like `host_abc01` (a legitimate hostname containing a hex-looking
+    /// suffix), breaking the scrub round-trip for those values.
+    #[test]
+    fn test_f_w1_002_pseudonym_regex_rejects_hex_only_suffix() {
+        let map = scrub_map_from(&[("host_001", "10.0.0.1")], &[], &[]);
+
+        // A token shaped like a hex pseudonym but not in the map.  Under the
+        // old `[0-9a-f]+` pattern this would be classified as an unknown
+        // pseudonym (unmapped token); under the new `[0-9]+` pattern it is
+        // ignored entirely — the regex doesn't match it, so unscrub leaves
+        // it alone.
+        let text = "talk to host_abc01 over there";
+        let (out, replaced, unknowns) = unscrub_text(text, &map);
+        assert_eq!(out, text, "non-decimal suffix must not be touched");
+        assert_eq!(replaced, 0);
+        assert!(
+            unknowns.is_empty(),
+            "host_abc01 must NOT be flagged as an unknown pseudonym (it isn't one); got: {:?}",
+            unknowns
+        );
+
+        // Sanity: a real decimal pseudonym in the map still round-trips.
+        let text2 = "talk to host_001 over there";
+        let (out2, replaced2, _unknowns2) = unscrub_text(text2, &map);
+        assert_eq!(out2, "talk to 10.0.0.1 over there");
+        assert_eq!(replaced2, 1);
+    }
+
+    /// F-W1-002 follow-on: a decimal pseudonym that isn't in the map IS
+    /// surfaced as unknown, preserving the strict-mode safety property.
+    /// We didn't break that path by tightening the regex.
+    #[test]
+    fn test_f_w1_002_decimal_pseudonym_not_in_map_is_still_unknown() {
+        let map = scrub_map_from(&[("host_001", "10.0.0.1")], &[], &[]);
+        let text = "what about host_999?";
+        let (_out, _replaced, unknowns) = unscrub_text(text, &map);
+        assert!(
+            unknowns.iter().any(|u| u == "host_999"),
+            "host_999 (decimal, not in map) must be flagged as unknown; got: {:?}",
+            unknowns
+        );
     }
 }
