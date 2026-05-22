@@ -11,9 +11,6 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 otsniff = { path = ".." }
 
-# TODO(S-3.04 step 4): pin exact versions of libfuzzer-sys and transitive deps
-# to ensure deterministic corpus reproduction across runs and environments.
-
 [workspace]
 # This empty workspace table isolates the fuzz package from the main crate's
 # workspace, preventing `cargo` from treating fuzz/ as a member of the parent

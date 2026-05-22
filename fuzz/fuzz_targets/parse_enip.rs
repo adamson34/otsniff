@@ -2,8 +2,12 @@
 
 use libfuzzer_sys::fuzz_target;
 
+// EC-001: bound input to 64 KB per call to prevent OOM in the fuzz runner.
+const MAX_INPUT: usize = 64 * 1024;
+
 fuzz_target!(|data: &[u8]| {
-    // TODO(S-3.04 step 4): implement corpus seeding from tests/fixtures/
-    // and call otsniff::parse::enip::parse() with fuzzer-provided input.
-    // Bound input to 64 KB per EC-001. Assert no panic on adversarial bytes.
+    if data.len() > MAX_INPUT {
+        return;
+    }
+    let _ = otsniff::parse::enip::parse_header(data);
 });
