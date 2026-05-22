@@ -1,53 +1,94 @@
-name: Mutation Testing (Weekly)
+name: Mutants (weekly)
 
-# Runs mutation tests weekly on develop tip
-# Does not block PRs — slow schedule only per AC-002
+# Runs mutation tests on the develop tip once per week.
+# Does NOT trigger on pull_request — mutation testing is slow (~30 min) and
+# must not block PR merges per AC-002.  Results are surfaced as a GitHub
+# Actions step summary and as a downloadable artifact.
 
 on:
   schedule:
-    # TODO(S-3.03 step 4): set actual weekly cadence (cron format: minute hour day month day-of-week)
-    # Current placeholder: disabled (empty cron) — enable once baseline is established
-    - cron: '0 0 * * *'  # placeholder: runs daily at 00:00 UTC (replace with actual schedule)
-  workflow_dispatch: # allow manual trigger
+    # Monday 06:00 UTC — runs on develop tip once per week.
+    # Weekly cadence is appropriate: mutation suites are slow and the codebase
+    # does not change faster than once a week for the security-critical modules.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    # Allow manual trigger for ad-hoc baseline runs or after a large refactor.
 
 jobs:
   mutants:
-    name: Run Mutants
+    name: Mutation testing
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-mutants
-        # TODO(S-3.03 step 4): pin version once established (e.g., cargo-mutants@0.2.x)
-        run: cargo install cargo-mutants
+      - name: Install cargo-mutants (pinned to ^27)
+        # Pin the major version to keep CI reproducible.  Bump manually when
+        # a new major release is validated against this config.
+        run: cargo install --locked cargo-mutants --version "^27"
 
       - name: Run mutation testing
-        # TODO(S-3.03 step 4): capture output format (JSON, text, etc.) and set artifact paths
-        run: cargo mutants --no-shuffle
+        run: |
+          cargo mutants \
+            --no-shuffle \
+            --timeout-multiplier 5 \
+            --output mutants-out \
+            --config .cargo-mutants.toml
         env:
           RUST_BACKTRACE: 1
 
-      - name: Upload mutation results
-        # TODO(S-3.03 step 4): set artifact retention and post results to issue/summary
+      - name: Upload mutation results artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mutants-results
-          path: mutants.out
+          path: mutants-out/**
           retention-days: 30
 
-      - name: Comment on develop with results
-        # TODO(S-3.03 step 4): implement result posting (issue comment or PR comment)
+      - name: Post kill-rate summary to Actions step summary
         if: always()
-        run: echo "TODO(S-3.03 step 4): post kill-rate summary to issue or action summary"
+        run: |
+          # Parse the outcomes.json produced by cargo-mutants and compute kill rate.
+          OUTCOMES="mutants-out/outcomes.json"
+          if [ -f "$OUTCOMES" ]; then
+            KILLED=$(python3 -c "
+          import json, sys
+          data = json.load(open('$OUTCOMES'))
+          outcomes = data.get('outcomes', [])
+          killed  = sum(1 for o in outcomes if o.get('summary') in ('MissedMutations', 'killed', 'caught'))
+          total   = len(outcomes)
+          survived = sum(1 for o in outcomes if o.get('summary') == 'missed')
+          timeout  = sum(1 for o in outcomes if o.get('summary') == 'timeout')
+          print(f'{killed} {total} {survived} {timeout}')
+          " 2>/dev/null || echo "0 0 0 0")
+            read -r KILLED TOTAL SURVIVED TIMEOUT <<< "$KILLED"
+            if [ "$TOTAL" -gt 0 ]; then
+              KILL_PCT=$(python3 -c "print(f'{$KILLED/$TOTAL*100:.1f}')")
+            else
+              KILL_PCT="n/a"
+            fi
+          else
+            KILLED=0; TOTAL=0; SURVIVED=0; TIMEOUT=0; KILL_PCT="n/a"
+          fi
+
+          {
+            echo "## Mutation testing results"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Kill rate | ${KILL_PCT}% |"
+            echo "| Killed / Total | ${KILLED} / ${TOTAL} |"
+            echo "| Survived | ${SURVIVED} |"
+            echo "| Timeout | ${TIMEOUT} |"
+            echo ""
+            echo "See the \`mutants-results\` artifact for the full report."
+            echo ""
+            echo "> Baseline: 84.1% (wave-1, effective kill rate after disposition)."
+            echo "> A drop > 5% below baseline is a soft signal for review (see docs/MUTANTS.md)."
+          } >> "$GITHUB_STEP_SUMMARY"
