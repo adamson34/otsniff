@@ -50,7 +50,7 @@ jobs:
         continue-on-error: true
       - name: Run composed privacy invariant proof
         id: composed_privacy
-        run: cargo kani --harness composed_privacy_invariant  # TODO(S-4.04 step 4): confirm harness name and unwind args once Step 4 lands
+        run: cargo kani --harness composed_privacy_invariant --unwind 13
         timeout-minutes: 30
         continue-on-error: true
       - name: Summarize harness outcomes

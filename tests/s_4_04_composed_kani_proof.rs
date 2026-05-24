@@ -22,8 +22,7 @@ fn worktree_root() -> &'static Path {
 
 fn read_file(rel: &str) -> String {
     let path = worktree_root().join(rel);
-    fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("could not read {rel}: {e}"))
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("could not read {rel}: {e}"))
 }
 
 fn file_exists(rel: &str) -> bool {
@@ -55,8 +54,7 @@ fn test_ac_001_module_registered_in_lib_rs() {
         || normalised.contains("#[cfg(kani)]  mod kani_proofs")
         || {
             // Two-line form: attribute on one line, mod on the next
-            content.contains("#[cfg(kani)]")
-                && content.contains("mod kani_proofs")
+            content.contains("#[cfg(kani)]") && content.contains("mod kani_proofs")
         };
 
     assert!(
@@ -196,7 +194,10 @@ fn test_ac_002_doc_has_required_sections() {
 
     let required: &[(&str, &str)] = &[
         ("## overview", "## Overview"),
-        ("## the three component proofs", "## The three component proofs"),
+        (
+            "## the three component proofs",
+            "## The three component proofs",
+        ),
         ("## the composed proof", "## The composed proof"),
         ("## what bounds remain", "## What bounds remain"),
         ("## how to run", "## How to run"),
