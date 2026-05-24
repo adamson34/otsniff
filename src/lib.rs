@@ -15,6 +15,9 @@ pub mod report_md;
 pub mod rule_catalog;
 pub mod scrub;
 
+#[cfg(kani)]
+mod kani_proofs;
+
 pub use error::{OtError, Result};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
