@@ -195,29 +195,39 @@ fn test_ac_002_host_added_appears_in_hosts_new() {
         },
     );
 
-    // hosts_new should contain exactly C
+    // hosts_new should contain exactly C (pseudonym "host_003").
+    // F-W2-003: assert by pseudonym, not raw IP — the Diff output is
+    // pseudonymized.
     assert_eq!(
         diff.hosts_new.len(),
         1,
         "BC-3.08.001 AC-002: expected 1 new host (C / host_003), got {:?}",
-        diff.hosts_new.iter().map(|a| a.ip).collect::<Vec<_>>()
+        diff.hosts_new
+            .iter()
+            .map(|h| h.pseudonym.clone())
+            .collect::<Vec<_>>()
     );
     assert_eq!(
-        diff.hosts_new[0].ip, ip_c,
-        "BC-3.08.001 AC-002: hosts_new[0] should be C (1.0.0.3)"
+        diff.hosts_new[0].pseudonym, "host_003",
+        "BC-3.08.001 AC-002: hosts_new[0] should be host_003"
     );
+    let _ = ip_c; // kept for fixture parity even though we now assert on pseudonym
 
-    // hosts_gone should contain exactly A
+    // hosts_gone should contain exactly A (pseudonym "host_001").
     assert_eq!(
         diff.hosts_gone.len(),
         1,
         "BC-3.08.001 AC-002: expected 1 gone host (A / host_001), got {:?}",
-        diff.hosts_gone.iter().map(|a| a.ip).collect::<Vec<_>>()
+        diff.hosts_gone
+            .iter()
+            .map(|h| h.pseudonym.clone())
+            .collect::<Vec<_>>()
     );
     assert_eq!(
-        diff.hosts_gone[0].ip, ip_a,
-        "BC-3.08.001 AC-002: hosts_gone[0] should be A (1.0.0.1)"
+        diff.hosts_gone[0].pseudonym, "host_001",
+        "BC-3.08.001 AC-002: hosts_gone[0] should be host_001"
     );
+    let _ = ip_a;
 }
 
 /// AC-002 | BC-3.08.001
@@ -609,24 +619,24 @@ fn test_ac_004_new_flow_pair_appears_in_flow_shifts() {
         },
     );
 
+    // F-W2-002: a flow that exists only in `current` is no longer in
+    // `flow_shifts` — it goes into `flows_new`. `flow_shifts` is reserved
+    // for two-sided volume shifts.
+    assert!(
+        diff.flow_shifts.is_empty(),
+        "F-W2-002: a current-only flow must NOT appear in flow_shifts \
+         (which is now reserved for two-sided volume shifts); got {} entries",
+        diff.flow_shifts.len()
+    );
     assert_eq!(
-        diff.flow_shifts.len(),
+        diff.flows_new.len(),
         1,
-        "BC-3.08.003 AC-004: new flow in current should produce 1 flow_shift"
+        "F-W2-002: a current-only flow should appear in flows_new"
     );
-    let fs = &diff.flow_shifts[0];
-    assert!(
-        fs.baseline_bytes.is_none(),
-        "BC-3.08.003 AC-004: new flow must have baseline_bytes: None, got {:?}",
-        fs.baseline_bytes
-    );
-    assert!(
-        fs.current_bytes.is_some(),
-        "BC-3.08.003 AC-004: new flow must have current_bytes: Some(...)"
-    );
+    let fs = &diff.flows_new[0];
     assert_eq!(
         fs.dst_port, 502,
-        "BC-3.08.003 AC-004: flow_shifts entry should have dst_port 502"
+        "BC-3.08.003 AC-004: flows_new entry should have dst_port 502"
     );
 }
 
@@ -668,14 +678,17 @@ fn test_ac_004_flow_volume_doubled_triggers_shift() {
     );
     let fs = &diff.flow_shifts[0];
     assert_eq!(
-        fs.baseline_bytes,
-        Some(100),
+        fs.baseline_bytes, 100,
         "BC-3.08.003 AC-004: baseline_bytes should be 100"
     );
     assert_eq!(
-        fs.current_bytes,
-        Some(300),
+        fs.current_bytes, 300,
         "BC-3.08.003 AC-004: current_bytes should be 300"
+    );
+    assert!(
+        (fs.ratio - 3.0).abs() < 1e-9,
+        "BC-3.08.003 AC-004: ratio for 300/100 should be 3.0, got {}",
+        fs.ratio
     );
 }
 
@@ -763,5 +776,277 @@ fn test_ec_002_maps_with_no_shared_pseudonyms_warns_and_proceeds() {
         diff.hosts_gone.len(),
         1,
         "EC-002: all baseline hosts should be in hosts_gone when maps share no pseudonyms"
+    );
+}
+
+// ============================================================================
+// F-W2-001..004 regression tests (filed after S-6.02 end-to-end review)
+// ============================================================================
+
+use otsniff::diff::HostRef;
+
+/// F-W2-001: the `Diff` enum variant's clap doc-comment must NOT leak the
+/// internal `AC-001 (BC-9.05.001): subcommand exists` traceability marker
+/// into the user-facing `--help` output. This is checked at the binary
+/// level — we already exercise `--help` in CLI smoke tests, but specifically
+/// regress against the marker text never appearing in stdout.
+#[test]
+fn test_f_w2_001_help_does_not_leak_bc_markers() {
+    use assert_cmd::Command;
+
+    let output = Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["diff", "--help"])
+        .output()
+        .expect("otsniff binary should run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("AC-001"),
+        "F-W2-001 regression: `otsniff diff --help` must not show internal \
+         traceability markers (found 'AC-001' in output): {stdout}"
+    );
+    assert!(
+        !stdout.contains("BC-9.05.001"),
+        "F-W2-001 regression: `otsniff diff --help` must not show internal \
+         BC IDs (found 'BC-9.05.001' in output): {stdout}"
+    );
+}
+
+/// F-W2-002: a flow that exists in only one capture appears in `flows_new`
+/// (or `flows_gone`), NOT in `flow_shifts`. `flow_shifts` is reserved for
+/// volume changes on flows present in BOTH captures.
+#[test]
+fn test_f_w2_002_disjoint_flow_does_not_pad_flow_shifts() {
+    let src: IpAddr = "10.2.0.1".parse().unwrap();
+    let dst: IpAddr = "10.2.0.2".parse().unwrap();
+
+    let base_obs = Observations::default();
+    let base_map = scrub_map_with_ips(&[("host_200", "10.2.0.1"), ("host_201", "10.2.0.2")]);
+
+    let mut curr_obs = Observations::default();
+    let (fk, fv) = flow_obs(src, dst, 443, 6, 9999);
+    curr_obs.flows.insert(fk, fv);
+    let curr_map = scrub_map_with_ips(&[("host_200", "10.2.0.1"), ("host_201", "10.2.0.2")]);
+
+    let diff = compute(
+        DiffInput {
+            observations: &base_obs,
+            map: &base_map,
+            findings: &[],
+        },
+        DiffInput {
+            observations: &curr_obs,
+            map: &curr_map,
+            findings: &[],
+        },
+    );
+
+    assert!(
+        diff.flow_shifts.is_empty(),
+        "F-W2-002: a flow only in current must NOT pad flow_shifts; got {} entries",
+        diff.flow_shifts.len()
+    );
+    assert_eq!(
+        diff.flows_new.len(),
+        1,
+        "F-W2-002: a current-only flow must appear in flows_new"
+    );
+}
+
+/// F-W2-002 (mirror): same property for `flows_gone`.
+#[test]
+fn test_f_w2_002_disjoint_flow_baseline_only_goes_to_flows_gone() {
+    let src: IpAddr = "10.3.0.1".parse().unwrap();
+    let dst: IpAddr = "10.3.0.2".parse().unwrap();
+
+    let mut base_obs = Observations::default();
+    let (fk, fv) = flow_obs(src, dst, 22, 6, 8888);
+    base_obs.flows.insert(fk, fv);
+    let base_map = scrub_map_with_ips(&[("host_300", "10.3.0.1"), ("host_301", "10.3.0.2")]);
+
+    let curr_obs = Observations::default();
+    let curr_map = scrub_map_with_ips(&[("host_300", "10.3.0.1"), ("host_301", "10.3.0.2")]);
+
+    let diff = compute(
+        DiffInput {
+            observations: &base_obs,
+            map: &base_map,
+            findings: &[],
+        },
+        DiffInput {
+            observations: &curr_obs,
+            map: &curr_map,
+            findings: &[],
+        },
+    );
+
+    assert!(
+        diff.flow_shifts.is_empty(),
+        "F-W2-002: a flow only in baseline must NOT pad flow_shifts"
+    );
+    assert_eq!(
+        diff.flows_gone.len(),
+        1,
+        "F-W2-002: a baseline-only flow must appear in flows_gone"
+    );
+}
+
+/// F-W2-003: `HostRef` carries the pseudonym, never the real IP. The diff
+/// output is pseudonym-safe — nothing real-identifier-shaped leaks through.
+#[test]
+fn test_f_w2_003_hosts_new_uses_pseudonym_not_real_ip() {
+    let ip_a: IpAddr = "192.168.42.1".parse().unwrap();
+
+    let base_obs = Observations::default();
+    let base_map = scrub_map_with_ips(&[]);
+
+    let mut curr_obs = Observations::default();
+    curr_obs.hosts.insert(ip_a, host_obs(ip_a, &["modbus"]));
+    let curr_map = scrub_map_with_ips(&[("host_042", "192.168.42.1")]);
+
+    let diff = compute(
+        DiffInput {
+            observations: &base_obs,
+            map: &base_map,
+            findings: &[],
+        },
+        DiffInput {
+            observations: &curr_obs,
+            map: &curr_map,
+            findings: &[],
+        },
+    );
+
+    assert_eq!(diff.hosts_new.len(), 1, "expected one new host");
+    let hr: &HostRef = &diff.hosts_new[0];
+    assert_eq!(
+        hr.pseudonym, "host_042",
+        "F-W2-003: hosts_new must carry the pseudonym, not the raw IP"
+    );
+
+    // Serialize the diff and confirm the raw IP never appears.
+    let json = serde_json::to_string(&diff).expect("Diff serializes");
+    assert!(
+        !json.contains("192.168.42.1"),
+        "F-W2-003 regression: real IP 192.168.42.1 leaked into Diff JSON: {json}"
+    );
+}
+
+/// F-W2-004: the finding-key extractor handles real evidence formats. A
+/// creds.ftp finding emits evidence like `"192.168.88.49:21 (34 packet(s))"`;
+/// the matcher must extract dst+port and resolve dst to its pseudonym.
+///
+/// Without F-W2-004, two findings of the same `rule_id` against DIFFERENT
+/// destination hosts would collide on `(rule_id, "", "", 0)` and be reported
+/// as `findings_recurring`. With F-W2-004, they extract to different
+/// `(rule_id, "", dst_pseudo, port)` tuples and are reported correctly as
+/// `findings_new` / `findings_resolved`.
+#[test]
+fn test_f_w2_004_finding_dst_port_extracted_from_real_evidence() {
+    use otsniff::findings::{Finding, Severity};
+
+    // Two creds.ftp findings against different servers. Same rule_id; the
+    // previous extractor would say they recur.
+    let f_baseline = Finding {
+        id: "creds.ftp",
+        severity: Severity::Critical,
+        title: "Plaintext FTP".to_string(),
+        summary: "ftp on baseline server".to_string(),
+        evidence: vec!["192.168.88.49:21 (34 packet(s))".to_string()],
+        recommendation: "rotate",
+        playbook: vec![],
+    };
+    let f_current = Finding {
+        id: "creds.ftp",
+        severity: Severity::Critical,
+        title: "Plaintext FTP".to_string(),
+        summary: "ftp on a DIFFERENT server".to_string(),
+        evidence: vec!["192.168.88.51:21 (12 packet(s))".to_string()],
+        recommendation: "rotate",
+        playbook: vec![],
+    };
+
+    let base_obs = Observations::default();
+    let base_map =
+        scrub_map_with_ips(&[("host_049", "192.168.88.49"), ("host_051", "192.168.88.51")]);
+    let curr_obs = Observations::default();
+    let curr_map = base_map.clone();
+
+    let diff = compute(
+        DiffInput {
+            observations: &base_obs,
+            map: &base_map,
+            findings: std::slice::from_ref(&f_baseline),
+        },
+        DiffInput {
+            observations: &curr_obs,
+            map: &curr_map,
+            findings: std::slice::from_ref(&f_current),
+        },
+    );
+
+    // F-W2-004: dst extraction works. Different destinations → different keys
+    // → no recurrence.
+    assert!(
+        diff.findings_recurring.is_empty(),
+        "F-W2-004: two findings against DIFFERENT destination hosts must not \
+         match as recurring; got {} recurring",
+        diff.findings_recurring.len()
+    );
+    assert_eq!(
+        diff.findings_new.len(),
+        1,
+        "F-W2-004: current-only finding should be in findings_new"
+    );
+    assert_eq!(
+        diff.findings_resolved.len(),
+        1,
+        "F-W2-004: baseline-only finding should be in findings_resolved"
+    );
+}
+
+/// F-W2-004 (positive): same `rule_id` + same destination IP across captures
+/// → recurring, AFTER the extractor resolves the IP to its pseudonym.
+#[test]
+fn test_f_w2_004_same_dst_across_captures_is_recurring() {
+    use otsniff::findings::{Finding, Severity};
+
+    let f_both_sides = || Finding {
+        id: "creds.telnet",
+        severity: Severity::Critical,
+        title: "Telnet".to_string(),
+        summary: "telnet observed".to_string(),
+        evidence: vec!["192.168.10.5:23 (100 packet(s))".to_string()],
+        recommendation: "replace",
+        playbook: vec![],
+    };
+    let base_obs = Observations::default();
+    let base_map = scrub_map_with_ips(&[("host_005", "192.168.10.5")]);
+    let curr_obs = Observations::default();
+    let curr_map = base_map.clone();
+
+    let f_b = f_both_sides();
+    let f_c = f_both_sides();
+    let diff = compute(
+        DiffInput {
+            observations: &base_obs,
+            map: &base_map,
+            findings: std::slice::from_ref(&f_b),
+        },
+        DiffInput {
+            observations: &curr_obs,
+            map: &curr_map,
+            findings: std::slice::from_ref(&f_c),
+        },
+    );
+
+    assert_eq!(
+        diff.findings_recurring.len(),
+        1,
+        "F-W2-004: same rule_id + same destination should be recurring"
+    );
+    assert!(
+        diff.findings_new.is_empty() && diff.findings_resolved.is_empty(),
+        "F-W2-004: recurring case should not produce findings_new/resolved"
     );
 }

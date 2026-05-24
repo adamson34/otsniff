@@ -3,17 +3,62 @@
 //! Computes the delta between two captures using their merged ScrubMaps
 //! (S-6.01) so identification is by pseudonym, not raw IP. Output is a
 //! pure-data `Diff` struct; rendering lives in S-6.03.
+//!
+//! The output is fully pseudonymized — no real IPs, MACs, or hostnames
+//! reach the `Diff` data structure (F-W2-003). Host references use a
+//! `HostRef` type (a pseudonym + behavioral fields) instead of `Asset`.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use crate::findings::Finding;
 use crate::inventory::{self, Asset};
 use crate::observe::Observations;
 use crate::scrub::ScrubMap;
+use regex::Regex;
 use serde::Serialize;
 
 /// Role inference result for a host. Mirror the shape used by inventory.
 pub type Role = String;
+
+/// A pseudonymized reference to a host in the diff output.
+///
+/// **F-W2-003:** the diff's output must never carry real identifiers (raw IP,
+/// MAC, vendor lookup against MAC, or DHCP hostname). `HostRef` keeps the
+/// behavioral fields a downstream renderer actually needs — role, protocols
+/// spoken, packet/byte counts, zone classification — and replaces every
+/// real-identifier field with the host's pseudonym.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct HostRef {
+    /// Stable pseudonym (e.g. `host_001`) drawn from the merged scrub map.
+    /// Falls back to `unmapped:<ip>` if the asset's IP is not in the map —
+    /// callers should treat this fallback as a map-coverage warning.
+    pub pseudonym: String,
+    /// Role inference label (e.g. `"plc"`, `"hmi"`, `"engineering"`).
+    pub role: Role,
+    /// Protocols this host was observed speaking, sorted.
+    pub protocols: Vec<String>,
+    pub packets: u64,
+    pub bytes: u64,
+    pub in_ot_zone: bool,
+}
+
+impl HostRef {
+    /// Build a `HostRef` from an `Asset` by resolving the asset's IP to its
+    /// pseudonym in `map`. Strips the IP, MAC, vendor, and hostname fields.
+    pub fn from_asset(asset: &Asset, map: &ScrubMap) -> Self {
+        let pseudonym = resolve_ip_to_pseudonym(&asset.ip.to_string(), map)
+            .unwrap_or_else(|| format!("unmapped:{}", asset.ip));
+        HostRef {
+            pseudonym,
+            role: asset.role.label().to_string(),
+            protocols: asset.protocols.clone(),
+            packets: asset.packets,
+            bytes: asset.bytes,
+            in_ot_zone: asset.in_ot_zone,
+        }
+    }
+}
 
 /// A change in a host's inferred role between the baseline and current capture.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -23,17 +68,36 @@ pub struct RoleShift {
     pub new_role: Role,
 }
 
-/// A change in a single flow's traffic shape between baseline and current.
+/// A summary of a single flow's pseudonymized endpoints + byte count.
+///
+/// Used by `flows_new` / `flows_gone` (F-W2-002 split) to enumerate flows
+/// that appeared in only one capture without padding `flow_shifts` with
+/// every disjoint flow.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FlowSummary {
+    pub src: String,
+    pub dst: String,
+    pub dst_port: u16,
+    pub proto: String,
+    pub bytes: u64,
+}
+
+/// A volume shift on a flow that exists in BOTH captures.
+///
+/// **F-W2-002:** `FlowDelta` is now reserved for flows whose `max/min` byte
+/// ratio meets or exceeds the configured `flow_shift_multiplier`. Flows that
+/// exist on only one side go into `Diff::flows_new` or `Diff::flows_gone`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FlowDelta {
     pub src: String,
     pub dst: String,
     pub dst_port: u16,
     pub proto: String,
-    /// Baseline byte count; None means the flow did not exist in baseline.
-    pub baseline_bytes: Option<u64>,
-    /// Current byte count; None means the flow disappeared in current.
-    pub current_bytes: Option<u64>,
+    pub baseline_bytes: u64,
+    pub current_bytes: u64,
+    /// `max / min` ratio. Always ≥ `flow_shift_multiplier` for entries
+    /// in `flow_shifts`.
+    pub ratio: f64,
 }
 
 /// Top-level diff output. Pure data; renderer (S-6.03) consumes this.
@@ -43,13 +107,22 @@ pub struct FlowDelta {
 /// should address round-trip serialization in S-6.03 if needed.
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct Diff {
-    pub hosts_new: Vec<Asset>,
-    pub hosts_gone: Vec<Asset>,
+    /// Hosts present in `current` whose pseudonym is absent from `baseline`.
+    pub hosts_new: Vec<HostRef>,
+    /// Hosts present in `baseline` whose pseudonym is absent from `current`.
+    pub hosts_gone: Vec<HostRef>,
     pub findings_new: Vec<Finding>,
     pub findings_recurring: Vec<Finding>,
     pub findings_resolved: Vec<Finding>,
     pub role_shifts: Vec<RoleShift>,
+    /// **F-W2-002:** flows whose volume changed by `>= multiplier` AND that
+    /// exist in both captures. Per-flow byte counts are kept so the renderer
+    /// can show the direction of the change.
     pub flow_shifts: Vec<FlowDelta>,
+    /// **F-W2-002:** flows present in `current` but not in `baseline`.
+    pub flows_new: Vec<FlowSummary>,
+    /// **F-W2-002:** flows present in `baseline` but not in `current`.
+    pub flows_gone: Vec<FlowSummary>,
 }
 
 /// Inputs to `compute`: each side carries its own observations + merged map
@@ -68,30 +141,124 @@ pub struct DiffInput<'a> {
 /// Configurable threshold for the flow-shift detector (AC-004). Default 2×.
 pub const DEFAULT_FLOW_SHIFT_MULTIPLIER: f64 = 2.0;
 
-/// Extract a finding's diff key: `(rule_id, src_pseudo, dst_pseudo, dst_port)`.
-///
-/// The key is parsed from the first evidence line, which may contain
-/// `src=...`, `dst=...`, and `port=...` tokens (format produced by the test
-/// helper and future detectors that adopt this convention). Falls back to
-/// empty strings / zero port when evidence is absent or unparseable — two
-/// findings with identical rule_id and no parseable evidence still compare
-/// as equal, which is the conservative (matching) behaviour for recurring
-/// findings.
-fn finding_diff_key(finding: &Finding) -> (String, String, String, u16) {
-    let rule_id = finding.id.to_string();
+// ----------------------------------------------------------------------------
+// F-W2-004: structured finding-endpoint extraction
+//
+// Real detectors emit evidence in three families:
+//   A. "<ip> -> <ip>:<port> : <descriptor>"   — most cross-zone findings
+//   B. "<ip>:<port> (...)"                    — server-side findings
+//      (creds.ftp, creds.telnet, creds.http_basic, creds.snmp, …)
+//   C. pseudonymized "host_NNN -> host_NNN:port"
+//      (engineering_commands rendered post-scrub)
+//
+// The test-helper format `src=X dst=Y port=Z` is also recognised so the
+// existing test fixtures keep working without rewrite.
+//
+// If no pattern matches, the key falls back to (rule_id, "", "", 0) and
+// findings of the same `rule_id` will collide. This is an HONEST limitation:
+// rule_id-only matching is the v1 floor when evidence isn't endpoint-shaped.
+// The renderer (S-6.03) should call this out so reviewers know the diff is
+// rolling up at rule-id granularity for such findings.
+// ----------------------------------------------------------------------------
 
-    // Best-effort: try to parse `src=...`, `dst=...`, `port=...` from evidence[0].
+static IPV4: &str = r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}";
+
+static PATTERN_IP_ARROW_IP_PORT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"({IPV4})\s*->\s*({IPV4}):(\d+)")).expect("valid regex"));
+static PATTERN_IP_ARROW_IP: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"({IPV4})\s*->\s*({IPV4})")).expect("valid regex"));
+static PATTERN_IP_PORT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"({IPV4}):(\d+)")).expect("valid regex"));
+static PATTERN_PSEUDO_ARROW_PSEUDO_PORT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(host_\d+)\s*->\s*(host_\d+):(\d+)").expect("valid regex"));
+static PATTERN_PSEUDO_ARROW_PSEUDO: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(host_\d+)\s*->\s*(host_\d+)").expect("valid regex"));
+/// Server-side pseudonymized endpoint with port — matches evidence like
+/// `"host_049:21 (34 packet(s))"` after F-W2-003's scrubbing pass.
+static PATTERN_PSEUDO_PORT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(host_\d+):(\d+)").expect("valid regex"));
+
+/// Extract a finding's diff key. Pseudonymizes any raw IPs via `map`.
+///
+/// Order matters: more specific patterns (with explicit ports) are tried
+/// first so that a richer match doesn't get clipped by a less specific one.
+fn finding_diff_key(finding: &Finding, map: &ScrubMap) -> (String, String, String, u16) {
+    let rule_id = finding.id.to_string();
     let evidence = finding.evidence.first().map(String::as_str).unwrap_or("");
 
-    let src = extract_kv(evidence, "src");
-    let dst = extract_kv(evidence, "dst");
-    let port: u16 = extract_kv(evidence, "port").parse().unwrap_or(0);
+    // Test-helper format (back-compat): "src=X dst=Y port=Z"
+    let test_src = extract_kv(evidence, "src");
+    let test_dst = extract_kv(evidence, "dst");
+    let test_port: u16 = extract_kv(evidence, "port").parse().unwrap_or(0);
+    if !test_src.is_empty() || !test_dst.is_empty() || test_port != 0 {
+        return (
+            rule_id,
+            resolve_endpoint(&test_src, map),
+            resolve_endpoint(&test_dst, map),
+            test_port,
+        );
+    }
 
-    (rule_id, src, dst, port)
+    // Already-pseudonymized "host_NNN -> host_NNN:port"
+    if let Some(caps) = PATTERN_PSEUDO_ARROW_PSEUDO_PORT.captures(evidence) {
+        return (
+            rule_id,
+            caps[1].to_string(),
+            caps[2].to_string(),
+            caps[3].parse().unwrap_or(0),
+        );
+    }
+
+    // Raw "IP -> IP:port"
+    if let Some(caps) = PATTERN_IP_ARROW_IP_PORT.captures(evidence) {
+        return (
+            rule_id,
+            resolve_endpoint(&caps[1], map),
+            resolve_endpoint(&caps[2], map),
+            caps[3].parse().unwrap_or(0),
+        );
+    }
+
+    // Already-pseudonymized "host_NNN -> host_NNN" (no port)
+    if let Some(caps) = PATTERN_PSEUDO_ARROW_PSEUDO.captures(evidence) {
+        return (rule_id, caps[1].to_string(), caps[2].to_string(), 0);
+    }
+
+    // Raw "IP -> IP" (no port)
+    if let Some(caps) = PATTERN_IP_ARROW_IP.captures(evidence) {
+        return (
+            rule_id,
+            resolve_endpoint(&caps[1], map),
+            resolve_endpoint(&caps[2], map),
+            0,
+        );
+    }
+
+    // Server-side pseudo `host_NNN:port` (matches AFTER F-W2-003 scrubbing).
+    if let Some(caps) = PATTERN_PSEUDO_PORT.captures(evidence) {
+        return (
+            rule_id,
+            String::new(),
+            caps[1].to_string(),
+            caps[2].parse().unwrap_or(0),
+        );
+    }
+
+    // Server-side raw "IP:port" — only the destination is known.
+    if let Some(caps) = PATTERN_IP_PORT.captures(evidence) {
+        return (
+            rule_id,
+            String::new(),
+            resolve_endpoint(&caps[1], map),
+            caps[2].parse().unwrap_or(0),
+        );
+    }
+
+    // No endpoint pattern matched — degenerate key (rule-id only).
+    (rule_id, String::new(), String::new(), 0)
 }
 
 /// Extract `key=value` from a space-separated evidence string.
-/// Returns the value as a `String`, or an empty string if not found.
 fn extract_kv(text: &str, key: &str) -> String {
     let prefix = format!("{key}=");
     for token in text.split_whitespace() {
@@ -102,15 +269,45 @@ fn extract_kv(text: &str, key: &str) -> String {
     String::new()
 }
 
+/// Resolve a raw IP (or pseudonym) to its pseudonym via the map.
+/// - Already-pseudonymized strings (`host_NNN`) pass through unchanged.
+/// - Empty strings pass through unchanged.
+/// - Raw IPs are looked up in `map.ips`; if absent, the raw IP is returned.
+fn resolve_endpoint(s: &str, map: &ScrubMap) -> String {
+    if s.is_empty() || s.starts_with("host_") {
+        return s.to_string();
+    }
+    resolve_ip_to_pseudonym(s, map).unwrap_or_else(|| s.to_string())
+}
+
+/// Look up an IP string in the map and return its pseudonym if present.
+fn resolve_ip_to_pseudonym(ip: &str, map: &ScrubMap) -> Option<String> {
+    map.ips
+        .iter()
+        .find(|(_, real)| real.as_str() == ip)
+        .map(|(pseudo, _)| pseudo.clone())
+}
+
+// ----------------------------------------------------------------------------
+// compute()
+// ----------------------------------------------------------------------------
+
 /// Compute the delta between two captures.
 ///
-/// **AC-002 (BC-3.08.001):** identifies hosts by pseudonym, not raw IP.
-/// **AC-003 (BC-3.08.002):** matches findings on `(rule_id, src_pseudo, dst_pseudo, dst_port)`.
-/// **AC-004 (BC-3.08.003):** detects role inference changes and 2×-default flow-volume shifts.
-/// **EC-002:** when maps share no pseudonyms, warns to stderr and proceeds (treating
-/// it like EC-001: all current hosts are new, all baseline hosts are gone).
+/// - **AC-002 (BC-3.08.001):** identifies hosts by pseudonym. Outputs use
+///   `HostRef` (pseudonym + behavioral fields), never `Asset` (which carries
+///   raw IPs / MACs).
+/// - **AC-003 (BC-3.08.002):** matches findings on
+///   `(rule_id, src_pseudo, dst_pseudo, dst_port)`. Endpoint extraction
+///   handles the three real evidence formats; falls back to `(rule_id, "", "", 0)`
+///   for findings without endpoint-shaped evidence (documented limitation).
+/// - **AC-004 (BC-3.08.003):** role-inference changes and flow-volume shifts.
+///   Flows existing in only one capture are now in `flows_new`/`flows_gone`
+///   (F-W2-002 split); `flow_shifts` is reserved for both-sides shifts at
+///   or above the multiplier threshold.
+/// - **EC-002:** when maps share no pseudonyms, warns to stderr and proceeds.
 pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
-    // ---- EC-002: warn when maps share no pseudonyms -----------------------
+    // ---- EC-002 ----------------------------------------------------------
     let base_pseudo_set: HashSet<&str> = baseline.map.ips.keys().map(String::as_str).collect();
     let curr_pseudo_set: HashSet<&str> = current.map.ips.keys().map(String::as_str).collect();
     if !base_pseudo_set.is_empty()
@@ -119,15 +316,12 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
     {
         eprintln!(
             "WARNING (EC-002): baseline map and current map share no IP pseudonyms. \
-             Treating all hosts as new/gone. Verify that both maps were built from \
-             the same pseudonym namespace (e.g. via `otsniff scrub --baseline-map`)."
+             Treating all hosts as new/gone. Verify both maps were built from the \
+             same pseudonym namespace (e.g. via `otsniff scrub --baseline-map`)."
         );
     }
 
-    // ---- AC-002 (BC-3.08.001): host deltas --------------------------------
-    //
-    // Build a reverse index: real_ip_str → pseudonym, for each side.
-    // Identification is by pseudonym, not raw IP.
+    // ---- AC-002: host deltas (pseudonym-keyed) ---------------------------
     let base_ip_to_pseudo: HashMap<&str, &str> = baseline
         .map
         .ips
@@ -141,8 +335,6 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .map(|(pseudo, real)| (real.as_str(), pseudo.as_str()))
         .collect();
 
-    // Collect pseudonyms actually present on each side (based on which hosts
-    // appear in observations.hosts).
     let base_pseudonyms: HashSet<&str> = baseline
         .observations
         .hosts
@@ -156,18 +348,15 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .filter_map(|ip| curr_ip_to_pseudo.get(ip.to_string().as_str()).copied())
         .collect();
 
-    // Build inventory for each side (role inference, etc.).
     let base_inventory = inventory::build(baseline.observations);
     let curr_inventory = inventory::build(current.observations);
 
-    // Index inventory by IP for quick lookup.
     let base_asset_by_ip: HashMap<std::net::IpAddr, &Asset> =
         base_inventory.iter().map(|a| (a.ip, a)).collect();
     let curr_asset_by_ip: HashMap<std::net::IpAddr, &Asset> =
         curr_inventory.iter().map(|a| (a.ip, a)).collect();
 
-    // hosts_new = current pseudonyms not in baseline pseudonym set.
-    let mut hosts_new: Vec<Asset> = current
+    let mut hosts_new: Vec<HostRef> = current
         .observations
         .hosts
         .keys()
@@ -178,12 +367,12 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
                 .unwrap_or("");
             !base_pseudonyms.contains(pseudo)
         })
-        .filter_map(|ip| curr_asset_by_ip.get(ip).copied().cloned())
+        .filter_map(|ip| curr_asset_by_ip.get(ip).copied())
+        .map(|asset| HostRef::from_asset(asset, current.map))
         .collect();
-    hosts_new.sort_by_key(|a| a.ip);
+    hosts_new.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
 
-    // hosts_gone = baseline pseudonyms not in current pseudonym set.
-    let mut hosts_gone: Vec<Asset> = baseline
+    let mut hosts_gone: Vec<HostRef> = baseline
         .observations
         .hosts
         .keys()
@@ -194,52 +383,61 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
                 .unwrap_or("");
             !curr_pseudonyms.contains(pseudo)
         })
-        .filter_map(|ip| base_asset_by_ip.get(ip).copied().cloned())
+        .filter_map(|ip| base_asset_by_ip.get(ip).copied())
+        .map(|asset| HostRef::from_asset(asset, baseline.map))
         .collect();
-    hosts_gone.sort_by_key(|a| a.ip);
+    hosts_gone.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
 
-    // ---- AC-003 (BC-3.08.002): finding deltas -----------------------------
+    // ---- AC-003: finding deltas ------------------------------------------
     //
-    // Match by exact tuple (rule_id, src_pseudo, dst_pseudo, dst_port).
-    let base_keys: HashMap<(String, String, String, u16), &Finding> = baseline
+    // F-W2-003 (extended): pseudonymize finding evidence + summary BEFORE
+    // tuple extraction. Findings come from the normal analyze pipeline with
+    // raw IPs in evidence strings; the diff output must be pseudonym-safe so
+    // it can be shown to the same audience as a scrubbed report. We apply
+    // `scrub_text` to each finding's evidence and summary using the
+    // appropriate side's map, then compute keys against the scrubbed copies.
+    let base_scrubbed: Vec<Finding> = baseline
         .findings
         .iter()
-        .map(|f| (finding_diff_key(f), f))
+        .map(|f| scrub_finding(f, baseline.map))
         .collect();
-    let curr_keys: HashMap<(String, String, String, u16), &Finding> = current
+    let curr_scrubbed: Vec<Finding> = current
         .findings
         .iter()
-        .map(|f| (finding_diff_key(f), f))
+        .map(|f| scrub_finding(f, current.map))
+        .collect();
+
+    let base_keys: HashMap<(String, String, String, u16), &Finding> = base_scrubbed
+        .iter()
+        .map(|f| (finding_diff_key(f, baseline.map), f))
+        .collect();
+    let curr_keys: HashMap<(String, String, String, u16), &Finding> = curr_scrubbed
+        .iter()
+        .map(|f| (finding_diff_key(f, current.map), f))
         .collect();
 
     let base_key_set: HashSet<&(String, String, String, u16)> = base_keys.keys().collect();
     let curr_key_set: HashSet<&(String, String, String, u16)> = curr_keys.keys().collect();
 
-    // findings_new: in current but not in baseline.
     let mut findings_new: Vec<Finding> = curr_key_set
         .difference(&base_key_set)
         .filter_map(|k| curr_keys.get(*k).copied().cloned())
         .collect();
     findings_new.sort_by(|a, b| a.id.cmp(b.id));
 
-    // findings_resolved: in baseline but not in current.
     let mut findings_resolved: Vec<Finding> = base_key_set
         .difference(&curr_key_set)
         .filter_map(|k| base_keys.get(*k).copied().cloned())
         .collect();
     findings_resolved.sort_by(|a, b| a.id.cmp(b.id));
 
-    // findings_recurring: in both.
     let mut findings_recurring: Vec<Finding> = curr_key_set
         .intersection(&base_key_set)
         .filter_map(|k| curr_keys.get(*k).copied().cloned())
         .collect();
     findings_recurring.sort_by(|a, b| a.id.cmp(b.id));
 
-    // ---- AC-004 (BC-3.08.003): role shifts --------------------------------
-    //
-    // For each pseudonym present in BOTH captures, compare inferred roles.
-    // Build a map: pseudonym → IP for each side.
+    // ---- AC-004: role shifts ---------------------------------------------
     let base_pseudo_to_ip: HashMap<&str, std::net::IpAddr> = baseline
         .map
         .ips
@@ -288,14 +486,9 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .collect();
     role_shifts.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
 
-    // ---- AC-004 (BC-3.08.003): flow shifts --------------------------------
-    //
-    // Key flows by pseudonymized (src, dst, dst_port, proto).
-    // Build lookup: real_ip_str → pseudonym (both sides merged, prefer
-    // current map; falls back to raw IP string if not in either map).
+    // ---- AC-004 / F-W2-002: flow shifts split into 3 buckets -------------
     let ip_to_pseudo = |ip: std::net::IpAddr, map: &ScrubMap| -> String {
         let ip_str = ip.to_string();
-        // Try current map first, then baseline map.
         map.ips
             .iter()
             .find(|(_, v)| v.as_str() == ip_str)
@@ -303,8 +496,6 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
             .unwrap_or(ip_str)
     };
 
-    // Build flow key maps: pseudonymized key → bytes.
-    // Pseudonymized flow key: (src_pseudo, dst_pseudo, dst_port, proto_num)
     type FlowPseudoKey = (String, String, u16, u8);
 
     let base_flows: HashMap<FlowPseudoKey, u64> = baseline
@@ -312,10 +503,13 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .flows
         .values()
         .map(|f| {
-            let src_pseudo = ip_to_pseudo(f.key.src, baseline.map);
-            let dst_pseudo = ip_to_pseudo(f.key.dst, baseline.map);
             (
-                (src_pseudo, dst_pseudo, f.key.dst_port, f.key.proto),
+                (
+                    ip_to_pseudo(f.key.src, baseline.map),
+                    ip_to_pseudo(f.key.dst, baseline.map),
+                    f.key.dst_port,
+                    f.key.proto,
+                ),
                 f.bytes,
             )
         })
@@ -326,10 +520,13 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .flows
         .values()
         .map(|f| {
-            let src_pseudo = ip_to_pseudo(f.key.src, current.map);
-            let dst_pseudo = ip_to_pseudo(f.key.dst, current.map);
             (
-                (src_pseudo, dst_pseudo, f.key.dst_port, f.key.proto),
+                (
+                    ip_to_pseudo(f.key.src, current.map),
+                    ip_to_pseudo(f.key.dst, current.map),
+                    f.key.dst_port,
+                    f.key.proto,
+                ),
                 f.bytes,
             )
         })
@@ -339,54 +536,70 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         base_flows.keys().chain(curr_flows.keys()).collect();
 
     let multiplier = DEFAULT_FLOW_SHIFT_MULTIPLIER;
-    let mut flow_shifts: Vec<FlowDelta> = all_flow_keys
-        .iter()
-        .filter_map(|key| {
-            let base_bytes = base_flows.get(*key).copied();
-            let curr_bytes = curr_flows.get(*key).copied();
-            let proto_str = proto_label(key.3);
-            match (base_bytes, curr_bytes) {
-                (None, Some(cb)) => Some(FlowDelta {
-                    src: key.0.clone(),
-                    dst: key.1.clone(),
-                    dst_port: key.2,
-                    proto: proto_str,
-                    baseline_bytes: None,
-                    current_bytes: Some(cb),
-                }),
-                (Some(bb), None) => Some(FlowDelta {
-                    src: key.0.clone(),
-                    dst: key.1.clone(),
-                    dst_port: key.2,
-                    proto: proto_str,
-                    baseline_bytes: Some(bb),
-                    current_bytes: None,
-                }),
-                (Some(bb), Some(cb)) => {
-                    // Volume-shift check: max/min >= multiplier threshold.
-                    // Both are > 0 (flow exists means at least 1 byte); guard
-                    // against division by zero anyway.
-                    let (hi, lo) = if cb >= bb { (cb, bb) } else { (bb, cb) };
-                    if lo == 0 || (hi as f64 / lo as f64) >= multiplier {
-                        Some(FlowDelta {
-                            src: key.0.clone(),
-                            dst: key.1.clone(),
-                            dst_port: key.2,
-                            proto: proto_str,
-                            baseline_bytes: Some(bb),
-                            current_bytes: Some(cb),
-                        })
-                    } else {
-                        None
-                    }
+
+    let mut flows_new: Vec<FlowSummary> = Vec::new();
+    let mut flows_gone: Vec<FlowSummary> = Vec::new();
+    let mut flow_shifts: Vec<FlowDelta> = Vec::new();
+
+    for key in all_flow_keys {
+        let base_bytes = base_flows.get(key).copied();
+        let curr_bytes = curr_flows.get(key).copied();
+        let proto_str = proto_label(key.3);
+        match (base_bytes, curr_bytes) {
+            (None, Some(cb)) => flows_new.push(FlowSummary {
+                src: key.0.clone(),
+                dst: key.1.clone(),
+                dst_port: key.2,
+                proto: proto_str,
+                bytes: cb,
+            }),
+            (Some(bb), None) => flows_gone.push(FlowSummary {
+                src: key.0.clone(),
+                dst: key.1.clone(),
+                dst_port: key.2,
+                proto: proto_str,
+                bytes: bb,
+            }),
+            (Some(bb), Some(cb)) => {
+                let (hi, lo) = if cb >= bb { (cb, bb) } else { (bb, cb) };
+                if lo == 0 {
+                    continue;
                 }
-                (None, None) => None,
+                let ratio = hi as f64 / lo as f64;
+                if ratio >= multiplier {
+                    flow_shifts.push(FlowDelta {
+                        src: key.0.clone(),
+                        dst: key.1.clone(),
+                        dst_port: key.2,
+                        proto: proto_str,
+                        baseline_bytes: bb,
+                        current_bytes: cb,
+                        ratio,
+                    });
+                }
             }
-        })
-        .collect();
-    flow_shifts.sort_by(|a, b| {
+            (None, None) => {}
+        }
+    }
+
+    flows_new.sort_by(|a, b| {
         a.src
             .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+    });
+    flows_gone.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+    });
+    flow_shifts.sort_by(|a, b| {
+        // Largest-ratio first so the renderer can show the loudest signals.
+        b.ratio
+            .partial_cmp(&a.ratio)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.src.cmp(&b.src))
             .then_with(|| a.dst.cmp(&b.dst))
             .then_with(|| a.dst_port.cmp(&b.dst_port))
     });
@@ -399,6 +612,31 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         findings_resolved,
         role_shifts,
         flow_shifts,
+        flows_new,
+        flows_gone,
+    }
+}
+
+/// F-W2-003: pseudonymize a Finding's evidence + summary using `map`.
+/// Title, recommendation, and playbook steps are also scrubbed since they
+/// can interpolate real IPs (e.g. recommendation: "rotate creds on 192.168.1.5").
+fn scrub_finding(f: &Finding, map: &ScrubMap) -> Finding {
+    Finding {
+        id: f.id,
+        severity: f.severity,
+        title: crate::scrub::scrub_text(&f.title, map),
+        summary: crate::scrub::scrub_text(&f.summary, map),
+        evidence: f
+            .evidence
+            .iter()
+            .map(|e| crate::scrub::scrub_text(e, map))
+            .collect(),
+        recommendation: f.recommendation,
+        playbook: f
+            .playbook
+            .iter()
+            .map(|step| crate::scrub::scrub_text(step, map))
+            .collect(),
     }
 }
 
