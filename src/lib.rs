@@ -2,6 +2,7 @@ pub mod ai;
 pub mod audit;
 pub mod capture_source;
 pub mod cli;
+pub mod diff;
 pub mod error;
 pub mod findings;
 pub mod inventory;

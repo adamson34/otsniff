@@ -82,6 +82,27 @@ pub enum Command {
     /// references. Use this to review what the tool flags without
     /// reading Rust source.
     Rules(RulesArgs),
+    /// Compute the delta between two captures.
+    ///
+    /// AC-001 (BC-9.05.001): subcommand exists, --help documents it.
+    Diff {
+        /// Baseline capture (the "before" PCAP).
+        baseline_pcap: PathBuf,
+        /// Current capture (the "after" PCAP).
+        current_pcap: PathBuf,
+        /// Merged scrub map for the baseline capture.
+        #[arg(long)]
+        baseline_map: PathBuf,
+        /// Merged scrub map for the current capture.
+        #[arg(long)]
+        current_map: PathBuf,
+        /// Output report path (.html or .md).
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Flow-volume multiplier threshold for flow_shifts (AC-004; default 2.0).
+        #[arg(long, default_value_t = crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER)]
+        flow_shift_multiplier: f64,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -204,7 +225,136 @@ pub fn run() -> Result<()> {
         Command::Scrub(a) => run_scrub(a),
         Command::Unscrub(a) => run_unscrub(a),
         Command::Rules(a) => run_rules(a),
+        Command::Diff {
+            baseline_pcap,
+            current_pcap,
+            baseline_map,
+            current_map,
+            output,
+            flow_shift_multiplier,
+        } => run_diff(
+            baseline_pcap,
+            current_pcap,
+            baseline_map,
+            current_map,
+            output,
+            flow_shift_multiplier,
+        ),
     }
+}
+
+/// Run the `diff` subcommand (AC-001 / BC-9.05.001).
+///
+/// Loads both PCAPs and their scrub maps, builds observations + findings for
+/// each side, calls `crate::diff::compute`, and writes the result. For `.json`
+/// outputs the `Diff` is serialized as pretty JSON. For `.html` and `.md`
+/// outputs a placeholder is written — full rendering arrives in S-6.03.
+fn run_diff(
+    baseline_pcap: PathBuf,
+    current_pcap: PathBuf,
+    baseline_map_path: PathBuf,
+    current_map_path: PathBuf,
+    output: PathBuf,
+    flow_shift_multiplier: f64,
+) -> Result<()> {
+    let ot_subnets = ot_or_default(&[]);
+
+    // Load and validate both scrub maps.
+    let base_map_bytes =
+        std::fs::read(&baseline_map_path).map_err(|source| OtError::InputOpen {
+            path: baseline_map_path.clone(),
+            source,
+        })?;
+    let base_map: ScrubMap = serde_json::from_slice(&base_map_bytes)?;
+    base_map.validate()?;
+
+    let curr_map_bytes = std::fs::read(&current_map_path).map_err(|source| OtError::InputOpen {
+        path: current_map_path.clone(),
+        source,
+    })?;
+    let curr_map: ScrubMap = serde_json::from_slice(&curr_map_bytes)?;
+    curr_map.validate()?;
+
+    // Parse both PCAPs.
+    let base_obs = analyze(&baseline_pcap, &ot_subnets, false, None)?;
+    let curr_obs = analyze(&current_pcap, &ot_subnets, false, None)?;
+
+    // Run findings for each side.
+    let base_findings = crate::findings::run_all(&base_obs, &ot_subnets);
+    let curr_findings = crate::findings::run_all(&curr_obs, &ot_subnets);
+
+    // Compute the diff.
+    let mut diff = crate::diff::compute(
+        crate::diff::DiffInput {
+            observations: &base_obs,
+            map: &base_map,
+            findings: &base_findings,
+        },
+        crate::diff::DiffInput {
+            observations: &curr_obs,
+            map: &curr_map,
+            findings: &curr_findings,
+        },
+    );
+
+    // Apply the user-supplied multiplier threshold (AC-004).
+    // `diff::compute` uses DEFAULT_FLOW_SHIFT_MULTIPLIER internally; if the
+    // caller wants a different threshold we post-filter here.
+    if (flow_shift_multiplier - crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER).abs() > f64::EPSILON {
+        diff.flow_shifts.retain(|fs| {
+            match (fs.baseline_bytes, fs.current_bytes) {
+                (Some(bb), Some(cb)) if bb > 0 => {
+                    let (hi, lo) = if cb >= bb { (cb, bb) } else { (bb, cb) };
+                    (hi as f64 / lo as f64) >= flow_shift_multiplier
+                }
+                // New / disappeared flows always pass through regardless of multiplier.
+                _ => true,
+            }
+        });
+    }
+
+    // Render output based on file extension.
+    let ext = output
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let content = match ext.as_str() {
+        "json" => serde_json::to_string_pretty(&diff)?,
+        "md" => format!(
+            "# Diff (raw)\n\nFull rendering arrives in S-6.03.\n\n```json\n{}\n```\n",
+            serde_json::to_string_pretty(&diff)?
+        ),
+        _ => {
+            // HTML placeholder; full rendering arrives in S-6.03.
+            format!(
+                "<!-- S-6.02 diff JSON; full HTML rendering arrives in S-6.03 -->\n<pre>{}</pre>\n",
+                html_escape(&serde_json::to_string_pretty(&diff)?)
+            )
+        }
+    };
+
+    std::fs::write(&output, content).map_err(|source| OtError::WriteOutput {
+        path: output.clone(),
+        source,
+    })?;
+    eprintln!(
+        "wrote {} ({} new hosts, {} gone, {} new findings, {} resolved)",
+        output.display(),
+        diff.hosts_new.len(),
+        diff.hosts_gone.len(),
+        diff.findings_new.len(),
+        diff.findings_resolved.len(),
+    );
+    Ok(())
+}
+
+/// Escape `<`, `>`, and `&` for safe embedding in an HTML `<pre>` block.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn ot_or_default(supplied: &[IpNet]) -> Vec<IpNet> {
