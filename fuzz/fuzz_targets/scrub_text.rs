@@ -71,5 +71,28 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let text = String::from_utf8_lossy(data);
-    let _ = otsniff::scrub::scrub_text(&text, &map);
+    let scrubbed = otsniff::scrub::scrub_text(&text, &map);
+
+    // F-ADV-P2-005: previously the harness discarded the output
+    // (`let _ = scrub_text(...)`), so the only thing detected was a
+    // panic. Now we assert the leak-detector's substring sweep finds
+    // nothing — if scrub_text left any real value from the map in the
+    // output, this panics and libFuzzer records the failing input.
+    //
+    // Skip the assertion when the fuzzer-generated map happened to
+    // include a real value that is a substring of one of its own
+    // pseudonyms (e.g. real value "01" mapped to "host_001" trivially
+    // contains "01" — not a scrub bug, just a fuzzer-generated map
+    // shape the production build_map flow would never produce).
+    let any_real_is_substring_of_pseudo = map.ips.iter().any(|(pseudo, real)| {
+        !real.is_empty() && pseudo.contains(real.as_str())
+    });
+    if !any_real_is_substring_of_pseudo {
+        if let Err(e) = otsniff::ai::leak_detector::ensure_no_map_values(&scrubbed, &map) {
+            panic!(
+                "F-ADV-P2-005 oracle: scrub_text left a real value from the map \
+                 in its output: {e}"
+            );
+        }
+    }
 });

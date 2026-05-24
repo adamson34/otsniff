@@ -251,10 +251,23 @@ pub fn build_map_at(obs: &Observations, now: DateTime<Utc>) -> ScrubMap {
         ips.insert(pseudo, ip.to_string());
     }
 
-    // Walk MACs in the order their owning host was assigned. Skips the
-    // all-zero placeholder MAC which is used by the observer when it
-    // doesn't see a real Ethernet header.
+    // Walk MACs in the order their owning host was assigned, THEN sweep up
+    // every other MAC the observer saw on the wire (F-ADV-P2-008). The
+    // capture-source detector (`report_line()`) uses
+    // `obs.mac_frame_counts` which can include MACs that are NOT in any
+    // host's `host.macs` list — for example, a passive observer running
+    // tcpdump on a SPAN port (its MAC appears as the dominant source MAC
+    // but its IP was never seen on the wire), or SVI / VRRP virtual MACs.
+    // If such a MAC ended up in the report's capture-source line without
+    // a pseudonym, `scrub_text` would leave it as-is and the leak-detector
+    // regex would fire defensively (returning `OtError::PrivacyLeak`),
+    // which is a confusing failure mode for a real capture.
+    //
+    // Skips the all-zero placeholder MAC which the observer uses when it
+    // can't read a real Ethernet header.
     let mut mac_seen: BTreeMap<[u8; 6], usize> = BTreeMap::new();
+    // Phase 1: host-associated MACs (preserves the existing pseudonym
+    // numbering for round-trip stability with prior maps).
     for ip in &sorted_ips {
         if let Some(host) = obs.hosts.get(ip) {
             for mac in &host.macs {
@@ -265,6 +278,18 @@ pub fn build_map_at(obs: &Observations, now: DateTime<Utc>) -> ScrubMap {
                 mac_seen.entry(*mac).or_insert(next);
             }
         }
+    }
+    // Phase 2 (F-ADV-P2-008): sweep observer-side MACs that didn't end up
+    // attached to a host. `mac_frame_counts` keys are every MAC the
+    // observer saw, regardless of whether the parser could associate the
+    // MAC with an IP. New entries get pseudonyms appended after the
+    // host-associated ones.
+    for mac in obs.mac_frame_counts.keys() {
+        if *mac == [0u8; 6] {
+            continue;
+        }
+        let next = mac_seen.len() + 1;
+        mac_seen.entry(*mac).or_insert(next);
     }
     let mut macs: BTreeMap<String, String> = BTreeMap::new();
     for (mac, idx) in &mac_seen {

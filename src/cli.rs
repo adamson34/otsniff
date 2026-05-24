@@ -349,6 +349,16 @@ fn run_diff(
         }
     };
 
+    // F-ADV-P2-002: fail-closed leak detection on the rendered diff content
+    // before write. The diff pipeline previously had NO ensure_clean gate
+    // (asymmetric to the analyze --ai pipeline), so a mismatched / stale
+    // scrub map would emit raw IPs straight into the JSON output via the
+    // `unwrap_or(ip_str)` fallback in `ip_to_pseudo` (diff.rs). This pass
+    // catches the residue before any write happens.
+    crate::ai::leak_detector::ensure_clean(&content)?;
+    crate::ai::leak_detector::ensure_no_map_values(&content, &base_map)?;
+    crate::ai::leak_detector::ensure_no_map_values(&content, &curr_map)?;
+
     std::fs::write(&output, content).map_err(|source| OtError::WriteOutput {
         path: output.clone(),
         source,
@@ -551,11 +561,24 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
 
     // Always build the rules-based markdown — used both as the AI's
     // input (when --ai is on) and as the --md sidecar.
+    //
+    // F-ADV-P2-009: use the PCAP basename only, not the full path. The
+    // full path can leak the operator's username, the plant name, embedded
+    // IPs, and other privacy-sensitive identifiers — none of which the
+    // scrub layer knows about because they're outside the parsed PCAP
+    // bytes. The audit log (cli.rs:730-735) carries the SHA-256 for
+    // chain-of-custody; the markdown only needs an identifier the
+    // analyst recognises.
+    let source_label = args
+        .input
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "<unknown>".to_string());
     let raw_md = render_markdown(
         &inventory,
         &findings,
         &obs,
-        &args.input.display().to_string(),
+        &source_label,
         generated_at,
         Some(&classification),
     )?;

@@ -9,6 +9,12 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
+// F-ADV-P2-015: tests below depend on `tests/fixtures/synthetic-1mb.pcap`
+// which is committed (per .gitignore exception). Each test's skip branch is
+// guarded with an `assert!` that fails when `CI` is set in the environment,
+// so the silent-skip pattern can never recur in CI even if the fixture is
+// accidentally removed from the .gitignore exception list.
+
 #[test]
 fn help_flag_succeeds() {
     Command::cargo_bin("otsniff")
@@ -107,9 +113,16 @@ fn analyze_malformed_input_exits_2() {
 
 #[test]
 fn analyze_valid_pcap_produces_html_and_exits_0() {
-    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
     if !pcap.exists() {
-        eprintln!("skipping: tests/fixtures/Modbus.pcap not present");
+        // F-ADV-P2-015: missing fixture in CI is a hard failure (not silent skip).
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: tests/fixtures/synthetic-1mb.pcap missing in CI; \
+             check .gitignore exception"
+        );
+        eprintln!("skipping: tests/fixtures/synthetic-1mb.pcap not present");
         return;
     }
     let tmp = TempDir::new().unwrap();
@@ -129,9 +142,16 @@ fn analyze_valid_pcap_produces_html_and_exits_0() {
 
 #[test]
 fn scrub_round_trip_via_pcap() {
-    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
     if !pcap.exists() {
-        eprintln!("skipping: tests/fixtures/Modbus.pcap not present");
+        // F-ADV-P2-015: missing fixture in CI is a hard failure (not silent skip).
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: tests/fixtures/synthetic-1mb.pcap missing in CI; \
+             check .gitignore exception"
+        );
+        eprintln!("skipping: tests/fixtures/synthetic-1mb.pcap not present");
         return;
     }
     let tmp = TempDir::new().unwrap();
@@ -152,14 +172,20 @@ fn scrub_round_trip_via_pcap() {
     let scrubbed = std::fs::read_to_string(&md).unwrap();
     let map_text = std::fs::read_to_string(&map).unwrap();
 
-    // The Modbus.pcap fixture has 192.168.110.131 and 192.168.110.138 — neither
-    // should appear in the scrubbed report.
-    assert!(!scrubbed.contains("192.168.110.131"));
-    assert!(!scrubbed.contains("192.168.110.138"));
+    // F-ADV-P2-015: synthetic-1mb.pcap (committed) has 10.10.0.* IPs;
+    // neither should appear in the scrubbed report.
+    assert!(
+        !scrubbed.contains("10.10.0.1"),
+        "scrub round-trip: raw 10.10.0.1 leaked into scrubbed report"
+    );
+    assert!(
+        !scrubbed.contains("10.10.0.2"),
+        "scrub round-trip: raw 10.10.0.2 leaked into scrubbed report"
+    );
     assert!(scrubbed.contains("host_001"));
     // Map should mention both real IPs.
-    assert!(map_text.contains("192.168.110.131"));
-    assert!(map_text.contains("192.168.110.138"));
+    assert!(map_text.contains("10.10.0.1"));
+    assert!(map_text.contains("10.10.0.2"));
 
     // Now unscrub a synthetic AI response.
     let llm_response = tmp.path().join("ai.txt");
@@ -179,7 +205,10 @@ fn scrub_round_trip_via_pcap() {
         .assert()
         .success();
     let final_text = std::fs::read_to_string(&final_out).unwrap();
-    assert!(final_text.contains("192.168.110.131"));
+    assert!(
+        final_text.contains("10.10.0.1"),
+        "unscrub: host_001 should resolve to 10.10.0.1"
+    );
     assert!(final_text.contains("host_999")); // unmapped pseudonym left as-is
 }
 
@@ -195,13 +224,20 @@ fn scrub_round_trip_via_pcap() {
 ///    numeric suffixes strictly greater than the baseline maximum (here 1).
 ///
 /// Fixture dependency: this test guards against false-passes by skipping
-/// gracefully if `tests/fixtures/Modbus.pcap` is absent (same pattern as
+/// gracefully if `tests/fixtures/synthetic-1mb.pcap` is absent (same pattern as
 /// other fixture-dependent tests in this file).
 #[test]
 fn test_bc_5_03_001_baseline_map_flag_extends_pseudonyms() {
-    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
     if !pcap.exists() {
-        eprintln!("skipping: tests/fixtures/Modbus.pcap not present");
+        // F-ADV-P2-015: missing fixture in CI is a hard failure (not silent skip).
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: tests/fixtures/synthetic-1mb.pcap missing in CI; \
+             check .gitignore exception"
+        );
+        eprintln!("skipping: tests/fixtures/synthetic-1mb.pcap not present");
         return;
     }
 
@@ -292,9 +328,16 @@ fn test_bc_9_06_001_analyze_help_lists_review_scrub_flag() {
 ///   • stderr does NOT contain the word "AI analysis" (invocation aborted)
 #[test]
 fn test_bc_9_06_001_review_scrub_aborts_on_n() {
-    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
     if !pcap.exists() {
-        eprintln!("skipping test_bc_9_06_001_review_scrub_aborts_on_n: Modbus.pcap not present");
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: synthetic-1mb.pcap missing in CI"
+        );
+        eprintln!(
+            "skipping test_bc_9_06_001_review_scrub_aborts_on_n: synthetic-1mb.pcap not present"
+        );
         return;
     }
     let tmp = TempDir::new().unwrap();
@@ -315,9 +358,16 @@ fn test_bc_9_06_001_review_scrub_aborts_on_n() {
 /// also abort with exit 70 — EC-003 edge case.
 #[test]
 fn test_bc_9_06_001_review_scrub_aborts_on_eof() {
-    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
     if !pcap.exists() {
-        eprintln!("skipping test_bc_9_06_001_review_scrub_aborts_on_eof: Modbus.pcap not present");
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: synthetic-1mb.pcap missing in CI"
+        );
+        eprintln!(
+            "skipping test_bc_9_06_001_review_scrub_aborts_on_eof: synthetic-1mb.pcap not present"
+        );
         return;
     }
     let tmp = TempDir::new().unwrap();
@@ -417,11 +467,12 @@ fn recon_port_scan_4sics_22_caps_at_20_findings() {
 /// `src/progress.rs` are the load-bearing cadence tests.
 #[test]
 fn test_bc_9_04_001_verbose_mode_emits_progress_to_stderr() {
-    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
     if !pcap.exists() {
         eprintln!(
             "skipping test_bc_9_04_001_verbose_mode_emits_progress_to_stderr: \
-             tests/fixtures/Modbus.pcap not present"
+             tests/fixtures/synthetic-1mb.pcap not present"
         );
         return;
     }
@@ -455,11 +506,12 @@ fn test_bc_9_04_001_verbose_mode_emits_progress_to_stderr() {
 /// after implementation.
 #[test]
 fn test_bc_9_04_001_no_verbose_no_progress_lines() {
-    let pcap = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Modbus.pcap");
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
     if !pcap.exists() {
         eprintln!(
             "skipping test_bc_9_04_001_no_verbose_no_progress_lines: \
-             tests/fixtures/Modbus.pcap not present"
+             tests/fixtures/synthetic-1mb.pcap not present"
         );
         return;
     }
