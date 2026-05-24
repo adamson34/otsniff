@@ -362,11 +362,15 @@ stories:
     merged_at: 2026-05-23T02:53:00Z
     notes: "Composed Kani harness composed_privacy_invariant in src/kani_proofs.rs proves BC-5.02.003 (post-scrub bytes either contain no map values OR substring scan catches them). Local cargo kani: VERIFICATION:- SUCCESSFUL in 9.99s with unwind=13. Uses local proof-model copies (SEMPORT-REVIEW markers) to avoid wave-1 helper visibility changes. Reviewer doc at docs/proofs/privacy-invariant.md. 12 acceptance tests; suite 329 → 341. kani.yml extended to 7 harnesses."
   S-6.02:
-    status: pending  # 2026-05-22: flipped from blocked — S-6.01 completed via PR #76
+    status: completed
     wave: 2
     blocked_by: [S-6.01]
-    branch: null
+    branch: feature/S-6.02-diff-subcommand
     worktree: null
+    merge_sha: 5f9963a
+    pr: 97
+    merged_at: 2026-05-23T03:25:00Z
+    notes: "New src/diff.rs (Diff, RoleShift, FlowDelta, DiffInput, compute) + `otsniff diff` CLI subcommand. Implements BC-9.05.001 (subcommand exists), BC-3.08.001 (hosts new/gone by pseudonym), BC-3.08.002 ((rule_id, src_pseudo, dst_pseudo, port) tuple match), BC-3.08.003 (role + flow shifts, default 2× multiplier). 16 acceptance tests; suite 341 → 357. Placeholder rendering (JSON/HTML/MD); full HTML report is S-6.03's scope. Zero new deps."
 
   # ===== Wave 3 (depends on Wave 1 or 2) =====
   S-5.03:
