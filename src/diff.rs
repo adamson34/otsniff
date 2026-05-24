@@ -306,7 +306,24 @@ fn resolve_ip_to_pseudonym(ip: &str, map: &ScrubMap) -> Option<String> {
 ///   (F-W2-002 split); `flow_shifts` is reserved for both-sides shifts at
 ///   or above the multiplier threshold.
 /// - **EC-002:** when maps share no pseudonyms, warns to stderr and proceeds.
+///
+/// Uses `DEFAULT_FLOW_SHIFT_MULTIPLIER` for the flow-shift threshold. For a
+/// custom threshold call [`compute_with_multiplier`].
 pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
+    compute_with_multiplier(baseline, current, DEFAULT_FLOW_SHIFT_MULTIPLIER)
+}
+
+/// Same as [`compute`] but with a caller-supplied flow-shift multiplier.
+///
+/// **F-ADV-P1-002:** the CLI previously only post-filtered `flow_shifts` for a
+/// user-supplied multiplier, which silently no-op'd values < 2.0 (the dropped
+/// flows were already gone). Now the multiplier flows into `compute` and is
+/// applied inside the ratio loop, so any value ≥ 1.0 behaves correctly.
+pub fn compute_with_multiplier(
+    baseline: DiffInput<'_>,
+    current: DiffInput<'_>,
+    flow_shift_multiplier: f64,
+) -> Diff {
     // ---- EC-002 ----------------------------------------------------------
     let base_pseudo_set: HashSet<&str> = baseline.map.ips.keys().map(String::as_str).collect();
     let curr_pseudo_set: HashSet<&str> = current.map.ips.keys().map(String::as_str).collect();
@@ -535,7 +552,7 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
     let all_flow_keys: HashSet<&FlowPseudoKey> =
         base_flows.keys().chain(curr_flows.keys()).collect();
 
-    let multiplier = DEFAULT_FLOW_SHIFT_MULTIPLIER;
+    let multiplier = flow_shift_multiplier;
 
     let mut flows_new: Vec<FlowSummary> = Vec::new();
     let mut flows_gone: Vec<FlowSummary> = Vec::new();

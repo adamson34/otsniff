@@ -71,7 +71,8 @@ pub fn build_findings(obs: &Observations) -> Vec<Finding> {
     let pair_count = by_pair.len();
     let event_count = plaintext_events.len();
 
-    // Build evidence lines: "(src_label → dst_label):port" per unique pair.
+    // Build evidence lines: "src_label -> dst_label:port" per unique pair.
+    // F-ADV-P1-003: use ASCII `->` so the diff key extractor can parse the line.
     // Cap at 5 evidence samples to match story guidance.
     let evidence: Vec<String> = by_pair
         .iter()
@@ -89,8 +90,12 @@ pub fn build_findings(obs: &Observations) -> Vec<Finding> {
                 .map(|p| p.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
+            // F-ADV-P1-003: use ASCII `->` so the diff key extractors
+            // (src/diff.rs:166-179) can parse src/dst pseudonyms from the
+            // evidence line. The other engineering-class detectors emit `->`;
+            // this matches them.
             format!(
-                "{} → {}:{}",
+                "{} -> {}:{}",
                 host_label(*src, obs),
                 host_label(*dst, obs),
                 port_str

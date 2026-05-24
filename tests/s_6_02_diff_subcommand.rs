@@ -1050,3 +1050,190 @@ fn test_f_w2_004_same_dst_across_captures_is_recurring() {
         "F-W2-004: recurring case should not produce findings_new/resolved"
     );
 }
+
+// ============================================================================
+// F-ADV-P1-001..005 regression tests (adversarial review pass 1)
+// ============================================================================
+
+/// F-ADV-P1-001: `otsniff diff --help` documents the `--ot-subnet` flag,
+/// proving the CLI surface accepts user OT subnet configuration. Without
+/// this, the findings layer always ran with RFC1918 defaults regardless
+/// of the user's network topology.
+#[test]
+fn test_f_adv_p1_001_diff_documents_ot_subnet_flag() {
+    use assert_cmd::Command;
+
+    let output = Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["diff", "--help"])
+        .output()
+        .expect("otsniff binary should run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--ot-subnet"),
+        "F-ADV-P1-001 regression: `otsniff diff --help` must document --ot-subnet \
+         so users can declare non-RFC1918 OT zones (the analyze subcommand has \
+         it; the diff subcommand was missing it). Output:\n{stdout}"
+    );
+}
+
+/// F-ADV-P1-002: `compute_with_multiplier(_, _, 1.5)` retains flows with ratio
+/// in `[1.5, 2.0)`. The previous CLI post-filter could only RAISE the
+/// threshold above 2.0; values below 2.0 were silently no-ops because
+/// `compute()` had already discarded the smaller-ratio flows.
+#[test]
+fn test_f_adv_p1_002_flow_shift_multiplier_below_default_retains_flows() {
+    use otsniff::diff::compute_with_multiplier;
+
+    let src: IpAddr = "10.5.0.1".parse().unwrap();
+    let dst: IpAddr = "10.5.0.2".parse().unwrap();
+
+    let mut base_obs = Observations::default();
+    let (fk_b, fv_b) = flow_obs(src, dst, 502, 6, 100);
+    base_obs.flows.insert(fk_b, fv_b);
+    let base_map = scrub_map_with_ips(&[("host_500", "10.5.0.1"), ("host_501", "10.5.0.2")]);
+
+    let mut curr_obs = Observations::default();
+    // 1.7x ratio — below the default 2.0 threshold, above the user-supplied 1.5.
+    let (fk_c, fv_c) = flow_obs(src, dst, 502, 6, 170);
+    curr_obs.flows.insert(fk_c, fv_c);
+    let curr_map = scrub_map_with_ips(&[("host_500", "10.5.0.1"), ("host_501", "10.5.0.2")]);
+
+    let diff = compute_with_multiplier(
+        DiffInput {
+            observations: &base_obs,
+            map: &base_map,
+            findings: &[],
+        },
+        DiffInput {
+            observations: &curr_obs,
+            map: &curr_map,
+            findings: &[],
+        },
+        1.5, // user threshold below the DEFAULT
+    );
+
+    assert_eq!(
+        diff.flow_shifts.len(),
+        1,
+        "F-ADV-P1-002: 1.7x ratio with user threshold 1.5 should appear in \
+         flow_shifts. Previous CLI post-filter could not recover flows that \
+         compute() had already dropped because compute() always used the \
+         hardcoded DEFAULT (2.0). Got {} flow_shifts.",
+        diff.flow_shifts.len()
+    );
+    let _ = DEFAULT_FLOW_SHIFT_MULTIPLIER; // referenced for clarity that we're below it
+}
+
+/// F-ADV-P1-003: LDAP creds evidence must use ASCII `->`, not Unicode `→`,
+/// so the diff key extractors (which only match ASCII) can identify the
+/// source and destination pseudonyms.
+#[test]
+fn test_f_adv_p1_003_ldap_creds_evidence_uses_ascii_arrow() {
+    use chrono::Utc;
+    use otsniff::observe::{LdapBindEvent, Observations};
+
+    let src: IpAddr = "192.168.10.5".parse().unwrap();
+    let dst: IpAddr = "192.168.10.10".parse().unwrap();
+
+    let mut obs = Observations::default();
+    obs.ldap_bind_events.push(LdapBindEvent {
+        ts: Utc::now(),
+        src,
+        dst,
+        dst_port: 389,
+        version: 3,
+        used_starttls: false,
+        anonymous: false,
+    });
+
+    let findings = otsniff::findings::ldap_creds::build_findings(&obs);
+    assert!(
+        !findings.is_empty(),
+        "fixture should produce a creds.ldap_simple_bind finding"
+    );
+    let f = &findings[0];
+    assert!(!f.evidence.is_empty(), "finding should have evidence lines");
+    let ev = &f.evidence[0];
+    assert!(
+        !ev.contains('→'),
+        "F-ADV-P1-003 regression: ldap_creds evidence must NOT use Unicode \
+         arrow `→` (defeats diff key extractor's ASCII pattern). Got: {ev}"
+    );
+    assert!(
+        ev.contains("->"),
+        "F-ADV-P1-003 regression: ldap_creds evidence must use ASCII `->`. \
+         Got: {ev}"
+    );
+}
+
+// F-ADV-P1-004 (scrub_text fuzz uses empty ScrubMap) is verified by the
+// rewrite of fuzz/fuzz_targets/scrub_text.rs itself — the harness file IS
+// the test. A unit test here would essentially re-run the fuzz construction,
+// which is what cargo-fuzz already does. We assert structurally that the
+// harness file references a non-empty `ips` insertion.
+#[test]
+fn test_f_adv_p1_004_scrub_fuzz_harness_uses_non_empty_map() {
+    let harness = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fuzz/fuzz_targets/scrub_text.rs"
+    ))
+    .expect("scrub_text fuzz harness file must exist");
+
+    assert!(
+        harness.contains("ips.insert"),
+        "F-ADV-P1-004 regression: fuzz_targets/scrub_text.rs must insert at \
+         least one entry into the ScrubMap.ips BTreeMap so the substitution \
+         branch in scrub_text is exercised on every iteration. The empty-map \
+         version of the harness provided ZERO coverage of the replacement \
+         algorithm."
+    );
+    // The fixed-entry guarantee — even when carved-from-fuzzer slices are
+    // empty, `host_000 → 192.168.255.254` must always be present.
+    assert!(
+        harness.contains("host_000"),
+        "F-ADV-P1-004: fuzz harness must include a fixed map entry (e.g. \
+         host_000) that guarantees the substitution branch runs even on \
+         empty fuzzer input. Got harness without that fallback."
+    );
+}
+
+// F-ADV-P1-005 (composed Kani proof was tautological) is verified by reading
+// the harness body: the new version must NOT compare byte_contains_model
+// against an identical hand-written brute-force, and the doc must
+// acknowledge the scope.
+#[test]
+fn test_f_adv_p1_005_composed_kani_proof_is_non_tautological() {
+    let harness =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/kani_proofs.rs"))
+            .expect("kani_proofs.rs must exist");
+
+    // The new harness must prove either idempotence (calls replace_first_model
+    // twice) or structural soundness (uses slice equality `&out[..] == real`),
+    // or both. The OLD tautological version only had one replace_first_model
+    // call followed by a hand-written brute-force loop.
+    let has_idempotence_check = harness.matches("replace_first_model").count() >= 2;
+    let has_slice_eq_check = harness.contains("&out1_slice[i..i + real_len] == real")
+        || harness.contains("&scrubbed[i..i + real_len] == real");
+    assert!(
+        has_idempotence_check || has_slice_eq_check,
+        "F-ADV-P1-005 regression: composed_privacy_invariant must prove a \
+         non-trivial property (idempotence via two replace_first_model calls, \
+         or structural soundness via slice equality). The OLD version only \
+         compared byte_contains_model against an identical brute-force loop \
+         — a tautology that proved nothing about production scrub_text or \
+         ensure_clean."
+    );
+
+    let doc = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/proofs/privacy-invariant.md"
+    ))
+    .expect("docs/proofs/privacy-invariant.md must exist");
+    assert!(
+        doc.contains("Honest scope") || doc.contains("F-ADV-P1-005"),
+        "F-ADV-P1-005: docs/proofs/privacy-invariant.md must acknowledge the \
+         scope of what's actually proved (idempotence and structural \
+         soundness, NOT end-to-end byte equivalence with production)."
+    );
+}

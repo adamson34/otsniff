@@ -103,9 +103,16 @@ pub enum Command {
         /// Output report path (.html, .md, or .json).
         #[arg(short, long)]
         output: PathBuf,
+        /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
+        /// MUST match the value passed to `analyze` for the same captures, or
+        /// the findings layer will classify hosts differently and produce
+        /// spurious findings_new/findings_resolved entries (F-ADV-P1-001).
+        #[arg(long = "ot-subnet", value_name = "CIDR")]
+        ot_subnets: Vec<IpNet>,
         /// Ratio threshold for flow-volume shift detection (default 2.0).
         /// A flow appearing in both captures is reported as a shift when
         /// the larger byte count is at least this multiple of the smaller.
+        /// Values < 1.0 are rejected at parse time.
         #[arg(long, default_value_t = crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER)]
         flow_shift_multiplier: f64,
     },
@@ -237,6 +244,7 @@ pub fn run() -> Result<()> {
             baseline_map,
             current_map,
             output,
+            ot_subnets,
             flow_shift_multiplier,
         } => run_diff(
             baseline_pcap,
@@ -244,6 +252,7 @@ pub fn run() -> Result<()> {
             baseline_map,
             current_map,
             output,
+            ot_subnets,
             flow_shift_multiplier,
         ),
     }
@@ -261,9 +270,22 @@ fn run_diff(
     baseline_map_path: PathBuf,
     current_map_path: PathBuf,
     output: PathBuf,
+    user_ot_subnets: Vec<IpNet>,
     flow_shift_multiplier: f64,
 ) -> Result<()> {
-    let ot_subnets = ot_or_default(&[]);
+    // F-ADV-P1-002: validate the user-supplied multiplier at parse time so a
+    // bogus value (e.g. 0 or negative) fails early instead of silently
+    // producing zero shifts.
+    if !flow_shift_multiplier.is_finite() || flow_shift_multiplier < 1.0 {
+        return Err(OtError::Parse(format!(
+            "--flow-shift-multiplier must be a finite value ≥ 1.0; got {flow_shift_multiplier}"
+        )));
+    }
+
+    // F-ADV-P1-001: use the user-supplied OT subnets (or RFC1918 defaults).
+    // Without this, the findings layer always treated non-RFC1918 plants as
+    // non-OT, producing spurious findings_new/findings_resolved entries.
+    let ot_subnets = ot_or_default(&user_ot_subnets);
 
     // Load and validate both scrub maps.
     let base_map_bytes =
@@ -289,8 +311,9 @@ fn run_diff(
     let base_findings = crate::findings::run_all(&base_obs, &ot_subnets);
     let curr_findings = crate::findings::run_all(&curr_obs, &ot_subnets);
 
-    // Compute the diff.
-    let mut diff = crate::diff::compute(
+    // Compute the diff using the user-supplied multiplier directly
+    // (F-ADV-P1-002: post-filter was silently a no-op for values < 2.0).
+    let diff = crate::diff::compute_with_multiplier(
         crate::diff::DiffInput {
             observations: &base_obs,
             map: &base_map,
@@ -301,18 +324,8 @@ fn run_diff(
             map: &curr_map,
             findings: &curr_findings,
         },
+        flow_shift_multiplier,
     );
-
-    // Apply the user-supplied multiplier threshold (AC-004).
-    // `diff::compute` uses DEFAULT_FLOW_SHIFT_MULTIPLIER internally; if the
-    // caller wants a different threshold we post-filter `flow_shifts` here.
-    // After F-W2-002, `flow_shifts` only contains two-sided shifts (new and
-    // gone flows live in their own buckets) so the ratio check is always
-    // well-defined.
-    if (flow_shift_multiplier - crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER).abs() > f64::EPSILON {
-        diff.flow_shifts
-            .retain(|fs| fs.ratio >= flow_shift_multiplier);
-    }
 
     // Render output based on file extension.
     let ext = output
