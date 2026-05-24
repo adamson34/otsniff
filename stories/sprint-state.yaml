@@ -352,11 +352,15 @@ stories:
     merged_at: 2026-05-22T21:56:58Z
     notes: "fuzz/ isolated cargo package + 6 libFuzzer harnesses (parse_modbus/enip/s7comm/dhcp/dnp3 + scrub_text), each bounded to 64 KB per EC-001. Weekly .github/workflows/fuzz.yml (Sun 02:00 UTC) + tests/fuzz_regressions.rs replay dispatch. 14 acceptance tests; suite 314 → 329. Zero src/ changes, zero new main-crate deps."
   S-4.04:
-    status: pending  # 2026-05-22: flipped from blocked — S-4.01..03 all completed via PR #80/#81/#82
+    status: completed
     wave: 2
     blocked_by: [S-4.01, S-4.02, S-4.03]
-    branch: null
+    branch: feature/S-4.04-kani-composed-proof
     worktree: null
+    merge_sha: 5aaaff7
+    pr: 96
+    merged_at: 2026-05-23T02:53:00Z
+    notes: "Composed Kani harness composed_privacy_invariant in src/kani_proofs.rs proves BC-5.02.003 (post-scrub bytes either contain no map values OR substring scan catches them). Local cargo kani: VERIFICATION:- SUCCESSFUL in 9.99s with unwind=13. Uses local proof-model copies (SEMPORT-REVIEW markers) to avoid wave-1 helper visibility changes. Reviewer doc at docs/proofs/privacy-invariant.md. 12 acceptance tests; suite 329 → 341. kani.yml extended to 7 harnesses."
   S-6.02:
     status: pending  # 2026-05-22: flipped from blocked — S-6.01 completed via PR #76
     wave: 2
