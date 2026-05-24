@@ -82,9 +82,13 @@ pub enum Command {
     /// references. Use this to review what the tool flags without
     /// reading Rust source.
     Rules(RulesArgs),
-    /// Compute the delta between two captures.
-    ///
-    /// AC-001 (BC-9.05.001): subcommand exists, --help documents it.
+    /// Compare two captures and emit a delta report: new and gone hosts,
+    /// finding deltas, role inference shifts, and flow-volume shifts.
+    /// Identification is by pseudonym from the merged scrub maps, so the
+    /// comparison is stable across captures of the same network.
+    //
+    // Internal traceability: BC-9.05.001 (subcommand surface),
+    // BC-3.08.001..003 (delta shape). See docs/ROADMAP.md P1-3.
     Diff {
         /// Baseline capture (the "before" PCAP).
         baseline_pcap: PathBuf,
@@ -96,10 +100,12 @@ pub enum Command {
         /// Merged scrub map for the current capture.
         #[arg(long)]
         current_map: PathBuf,
-        /// Output report path (.html or .md).
+        /// Output report path (.html, .md, or .json).
         #[arg(short, long)]
         output: PathBuf,
-        /// Flow-volume multiplier threshold for flow_shifts (AC-004; default 2.0).
+        /// Ratio threshold for flow-volume shift detection (default 2.0).
+        /// A flow appearing in both captures is reported as a shift when
+        /// the larger byte count is at least this multiple of the smaller.
         #[arg(long, default_value_t = crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER)]
         flow_shift_multiplier: f64,
     },
@@ -299,18 +305,13 @@ fn run_diff(
 
     // Apply the user-supplied multiplier threshold (AC-004).
     // `diff::compute` uses DEFAULT_FLOW_SHIFT_MULTIPLIER internally; if the
-    // caller wants a different threshold we post-filter here.
+    // caller wants a different threshold we post-filter `flow_shifts` here.
+    // After F-W2-002, `flow_shifts` only contains two-sided shifts (new and
+    // gone flows live in their own buckets) so the ratio check is always
+    // well-defined.
     if (flow_shift_multiplier - crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER).abs() > f64::EPSILON {
-        diff.flow_shifts.retain(|fs| {
-            match (fs.baseline_bytes, fs.current_bytes) {
-                (Some(bb), Some(cb)) if bb > 0 => {
-                    let (hi, lo) = if cb >= bb { (cb, bb) } else { (bb, cb) };
-                    (hi as f64 / lo as f64) >= flow_shift_multiplier
-                }
-                // New / disappeared flows always pass through regardless of multiplier.
-                _ => true,
-            }
-        });
+        diff.flow_shifts
+            .retain(|fs| fs.ratio >= flow_shift_multiplier);
     }
 
     // Render output based on file extension.
