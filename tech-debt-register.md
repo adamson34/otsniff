@@ -11,7 +11,32 @@ Status: OPEN / IN-PROGRESS / CLOSED
 
 ## OPEN entries
 
-Sourced from ADV-P1 (2026-05-23, develop tip `7c98a3a`, full implementation review against 12-policy rubric). See `.factory/cycles/v0.4.0-feature/adversarial-reviews/pass-1.md` for full evidence + remediation per finding.
+Sourced from ADV-P1 (2026-05-23, develop tip `7c98a3a`) and ADV-P2 (2026-05-24, develop tip `f8e34d7`). See `.factory/cycles/v0.4.0-feature/adversarial-reviews/pass-{1,2}.md` for full evidence + remediation per finding.
+
+### ADV-P2 escalations + new findings (priority order)
+
+| ID | Priority | Source | Status | Description | Suggested fix |
+|---|---|---|---|---|---|
+| F-ADV-P2-014 | HIGH | ADV-P2 | OPEN | **`perf.yml` uses `actions/upload-artifact@v7` — version does NOT exist; CI step fails silently if `if: always()`** | Pin to `@v4` (or current major). Add CI lint for action versions. |
+| F-ADV-P2-001 | **CRITICAL** | ADV-P2 (escalation of F-ADV-P1-014) | OPEN | `javascript:`/`data:` URLs in AI-rendered markdown link → live href in shipped HTML report → data-exfil on user click | Post-process pulldown-cmark HTML to strip unsafe URL schemes from href attributes. Flip the test to assert stripping. |
+| F-ADV-P2-002 | **CRITICAL** | ADV-P2 (escalation of F-ADV-P1-007) | OPEN | `run_diff` has no `ensure_clean` post-render; `ip_to_pseudo` falls back to raw IP string on map miss; mismatched/stale maps emit raw IPs into Diff output | Add `ensure_clean(&content)` + map-value sweep before `std::fs::write` in `run_diff`. Change fallback to hash-based opaque label and stderr-warn (or fail-closed in strict mode). |
+| F-ADV-P2-003 | HIGH | ADV-P2 (partial F-ADV-P1-005) | OPEN | Composed Kani proof rewrite added vacuous-case + structural-soundness but the non-vacuous branch (where scrub actually replaced bytes) is still unasserted — the load-bearing case | Rewrite to assert: "for any input with at most one occurrence of real, after one replace_first_model pass, byte_contains_model(out, real) == false" |
+| F-ADV-P2-004 | HIGH | ADV-P2 | OPEN | `OtError::Parse` used for leak/parse/CLI-arg/user-abort — exit code 70 indistinguishable; CI scripts can't branch on "leak vs render failure"; subsumes F-ADV-P2-021 (display says "pcap parse error:" for non-parse) | Add `OtError::PrivacyLeak { kind, pattern, byte_offset }` with distinct exit code (e.g. 75). Migrate leak_detector callsites. |
+| F-ADV-P2-005 | HIGH | ADV-P2 (partial F-ADV-P1-004) | OPEN | `scrub_text` fuzz rewrite added non-empty map but discards output — `let _ = otsniff::scrub::scrub_text(&text, &map)` — no oracle | Run `ensure_no_map_values(&scrubbed, &map)` after `scrub_text`; panic on Err so libfuzzer records it |
+| F-ADV-P2-007 | HIGH | ADV-P2 | OPEN | Leak-detector error message format echoes the leaked value into stderr → CI logs → world-readable for public repos. Different egress path than the AI provider but still a leak | Replace `'{}'` with `'<redacted len={}>'`; optional debug-gated diagnostic |
+| F-ADV-P2-008 | HIGH | ADV-P2 | OPEN | Capture-source report_line() MAC can be unscrubbed when dominant MAC isn't in any host's `host.macs` list (passive observer, SVI/VRRP virtual). Defense-in-depth catches it but layered assertion fails on realistic input | When building scrub map, include every MAC in `obs.mac_frame_counts`, not just `host.macs` |
+| F-ADV-P2-009 | HIGH | ADV-P2 | OPEN | PCAP path passed by user is fed verbatim into AI markdown header (`_Source: \`{path}\`_`) — leaks username + plant name + embedded IPs to AI | Use `args.input.file_name()` only OR drop path from AI-bound markdown (audit log already has SHA-256) |
+| F-ADV-P2-015 | HIGH | ADV-P2 | OPEN | Tests gated on `tests/fixtures/*.pcap` existence silently no-op in CI (fixtures gitignored). "Passing" without doing anything | Commit synthetic PCAP fixture, OR fail when `pcap.exists() == false && env::var("CI").is_ok()` |
+| F-ADV-P2-010 | MEDIUM | ADV-P2 | OPEN | DHCP hostname filter drops non-ASCII bytes silently — `LINE-3-Ümlaut` → `LINE-3-mlaut`; breaks merge-map identity; 1-letter survivors become regex-friendly scrub targets | Decode via `String::from_utf8_lossy`; reject if any control character or shorter than 2 graphemes |
+| F-ADV-P2-012 | MEDIUM | ADV-P2 | OPEN | `ipv6_regex` blind to `::1`, `fe80::1`, `2001:db8::`, `::ffff:192.0.2.1`, zoned `fe80::1%eth0` — leak detector blind spot | Use `Ipv6Addr::from_str` on colon-containing tokens; add tests for the missed forms |
+| F-ADV-P2-013 | MEDIUM | ADV-P2 | OPEN | `ensure_no_map_values` blocks on first hit; multi-leak inputs under-reported; substring matching false-positives on short (< 4 char) real values | Collect all leaks into Vec; iterate reverse-length order; skip real values < 4 chars |
+| F-ADV-P2-016 | LOW | ADV-P2 | OPEN | `unscrub_text` regex unbounded digit suffix; `unmapped` uses O(n²) Vec::contains | Limit suffix to `[0-9]{1,9}`; use `HashSet<String>` for unmapped |
+| F-ADV-P2-017 | LOW | ADV-P2 | OPEN | cargo-deny CI step has no positive-coverage assertion (extension of POL-11 theme) | Configure with explicit command + arguments; grep advisory-count line |
+| F-ADV-P2-018 | LOW | ADV-P2 | OPEN | `--review-scrub` prints full scrubbed payload to stderr → terminal history / session logs (tmux/screen) capture it | Write payload to temp file; print path + first/last 20 lines |
+| F-ADV-P2-019 | LOW | ADV-P2 | OPEN | `which_claude` skips Windows `.exe`/`.cmd`/`.bat` — false-negative pre-flight on shipped Windows target | Use `which` crate or expand candidate names on Windows |
+| F-ADV-P2-020 | LOW | ADV-P2 | OPEN | ENIP `engineering_class_cip` heuristic sweeps fixed offset range; can flag benign CPF item bytes (0x05, 0x06, 0x07) as engineering services | Decode CPF item structure properly; restrict scan window |
+
+### ADV-P1 still-OPEN (from 2026-05-23 pass)
 
 | ID | Priority | Source | Status | Description | Suggested fix |
 |---|---|---|---|---|---|
