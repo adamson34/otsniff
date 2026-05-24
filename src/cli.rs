@@ -82,6 +82,27 @@ pub enum Command {
     /// references. Use this to review what the tool flags without
     /// reading Rust source.
     Rules(RulesArgs),
+    /// Compute the delta between two captures.
+    ///
+    /// AC-001 (BC-9.05.001): subcommand exists, --help documents it.
+    Diff {
+        /// Baseline capture (the "before" PCAP).
+        baseline_pcap: PathBuf,
+        /// Current capture (the "after" PCAP).
+        current_pcap: PathBuf,
+        /// Merged scrub map for the baseline capture.
+        #[arg(long)]
+        baseline_map: PathBuf,
+        /// Merged scrub map for the current capture.
+        #[arg(long)]
+        current_map: PathBuf,
+        /// Output report path (.html or .md).
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Flow-volume multiplier threshold for flow_shifts (AC-004; default 2.0).
+        #[arg(long, default_value_t = crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER)]
+        flow_shift_multiplier: f64,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -204,6 +225,9 @@ pub fn run() -> Result<()> {
         Command::Scrub(a) => run_scrub(a),
         Command::Unscrub(a) => run_unscrub(a),
         Command::Rules(a) => run_rules(a),
+        Command::Diff { .. } => {
+            todo!("S-6.02 step 4: wire the diff subcommand to crate::diff::compute and emit output")
+        }
     }
 }
 
