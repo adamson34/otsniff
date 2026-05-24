@@ -33,50 +33,68 @@ semantics without invoking the `regex` crate, which CBMC cannot unwind.
 
 ## The Composed Proof
 
-The composed proof, `composed_privacy_invariant` (story S-4.04), proves the
-end-to-end behavioral contract **BC-5.02.003**: *for any bounded input string
-containing real plant data, after scrubbing and then leak-checking, either all
-real values are absent from the output OR the leak detector returns an error.*
+The composed proof, `composed_privacy_invariant` (story S-4.04), is the wave-2
+verification capstone for **BC-5.02.003**. It uses the three component-proof
+models together — `replace_first_model` (scrub) and `byte_contains_model`
+(leak-check) — and asserts properties that hold across them.
 
-In other words: there is no execution path where scrubbed bytes pass the leak
-detector (appear "clean") while still containing a real value.
+### Honest scope (F-ADV-P1-005 rewrite, 2026-05-23)
 
-### How the composition works
+The original wave-2 version of this proof asserted `byte_contains_model`
+against a hand-written brute-force substring search. Adversarial review pass
+ADV-P1 correctly flagged that those two implementations are the same algorithm
+written twice — the assertion was a tautology and the proof was contributing
+no new verification beyond the component proofs.
 
-The proof uses three proof-model helpers copied from wave-1:
+This version asserts **two non-trivial composed properties:**
 
-1. `symbolic_ascii_bytes()` — generates a symbolic bounded ASCII byte slice
-   (≤ 4 bytes, printable ASCII range). Used for both the input and the real value.
-2. `replace_first_model(haystack, needle, replacement)` — mirrors
-   `scrub_text`'s first-occurrence replacement logic without regex.
-3. `byte_contains_model(haystack, needle)` — mirrors the substring scan inside
-   `ensure_no_map_values` without `str::contains` (which requires UTF-8
-   validation that CBMC cannot unwind).
+#### Property 1 — Vacuous-case idempotence
+If the input does NOT contain `real`, then:
+- `replace_first_model(input, real, pseudo)` returns `input` unchanged
+- Re-scrubbing the output returns it unchanged again
+- `len`, byte-by-byte equality of the output to the input, and equality of
+  the twice-scrubbed output to the once-scrubbed output are all proved
 
-The harness:
-1. Creates a symbolic input (≤ 4 bytes) and a symbolic real value (≤ 4 bytes).
-2. Assumes the real value is non-empty and does not contain the pseudonym
-   (matching the `build_map` invariant: real values are never pseudonym-shaped).
-3. Runs `replace_first_model(input, real, "host_001")` to get the scrubbed output.
-4. Calls `byte_contains_model(scrubbed, real)` — the leak-check model.
-5. Independently recomputes "does scrubbed contain real?" using a direct byte
-   loop (NOT `byte_contains_model`) to avoid a tautological assertion.
-6. Asserts that both views of the scrubbed bytes are always consistent.
+This formalises the contract that `scrub_text` is the identity function on
+already-clean inputs. A regression that changed even one byte of input not
+containing a map value would be caught.
 
-### Why the full privacy claim follows
+#### Property 2 — Leak-detector structural soundness
+For ANY scrubbed output (replaced or not), `byte_contains_model(out, real)`
+must agree with a **structurally different** independent check — one using
+Rust slice equality (`&out[i..i+n] == real`, compiled by CBMC to a
+memcmp-equivalent) rather than `byte_contains_model`'s manual byte-by-byte
+loop. The two implementations have different unrolling shapes in CBMC, so the
+assertion is genuinely non-tautological: it proves that two different ways of
+asking "does this slice appear in this haystack?" always agree.
 
-- **S-4.01** proved that `replace_first_model` correctly scrubs input — no real
-  value remains in the output after a successful replacement.
-- **S-4.03** proved that `byte_contains_model` is internally consistent (both
-  the forward and backward invariants hold for all symbolic inputs).
-- **S-4.04** (this proof) proves that the scrub output and the leak-check input
-  are the **same bytes** — there is no encoding gap, no intermediate
-  representation, no transformation between the scrub stage and the leak-check
-  stage that could hide a real value from the detector.
+### Preconditions (matching production `build_map` invariants)
 
-Therefore: if `replace_first_model` fails to remove a real value (regression),
-`byte_contains_model` (i.e., `ensure_clean`) will catch it and return `Err`.
-There is no third case.
+1. `real` is non-empty (matches `scrub_text`'s assumption that real values
+   are never empty strings — enforced by `ScrubMap::validate`).
+2. `real` does not contain the pseudonym `host_001` as a substring (matches
+   `build_map`'s rule that real values are never pseudonym-shaped).
+3. `pseudo` (`host_001`) does not contain `real` as a substring (matches
+   the structural impossibility that a pseudonym shape contains an IP /
+   MAC / hostname shape — relied on by the production `scrub_text` loop
+   to terminate after one pass per (real, pseudo) entry).
+
+### What's NOT proved (acknowledged gap)
+
+- **Production-code equivalence.** `replace_first_model` is a hand-rolled
+  byte-level model; production `scrub_text` is a `str::replace` loop. The
+  proof models intentionally avoid `regex` and UTF-8 paths CBMC cannot
+  unwind. Model-to-production equivalence is verified by the cargo-fuzz
+  harness `fuzz_targets/scrub_text.rs` (story S-3.04), now updated to
+  carry a real symbolic ScrubMap so the substitution branch is actually
+  exercised on every iteration (F-ADV-P1-004).
+- **Multi-occurrence case.** When `input` contains `real` two or more times,
+  `replace_first_model` only replaces the first. The output still contains
+  `real`, and the leak detector catches it. This is a *runtime* property of
+  the composition rather than a Kani assertion: production `scrub_text`
+  iterates `.replace()` (which is itself iterative) and the leak detector's
+  substring scan catches the residue if scrub left any. The Kani proof
+  scope is limited to the single-occurrence semantics by design.
 
 **Test:** `cargo kani --harness composed_privacy_invariant`
 
