@@ -51,10 +51,17 @@ pub struct Diff {
     pub flow_shifts: Vec<FlowDelta>,
 }
 
-/// Inputs to `compute`: each side carries its own observations + merged map.
+/// Inputs to `compute`: each side carries its own observations + merged map
+/// plus the pre-computed findings for that capture (AC-003, BC-3.08.002).
+///
+/// Findings are passed in here (rather than re-derived inside `compute`)
+/// because the findings layer already ran as part of the normal report
+/// pipeline and the diff doesn't need to re-parse the PCAP.
 pub struct DiffInput<'a> {
     pub observations: &'a Observations,
     pub map: &'a ScrubMap,
+    /// Pre-computed findings for this capture side.
+    pub findings: &'a [Finding],
 }
 
 /// Compute the delta between two captures.
