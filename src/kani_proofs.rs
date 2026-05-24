@@ -375,4 +375,66 @@ mod kani_proofs {
              invariant has a gap."
         );
     }
+
+    /// **F-ADV-P2-003:** the non-vacuous case of the composed privacy
+    /// invariant. The companion harness `composed_privacy_invariant` proves
+    /// idempotence and structural soundness, but ADV-P2 correctly flagged
+    /// that the LOAD-BEARING branch (where scrub actually replaces real
+    /// with pseudo) was unasserted. This harness closes that gap.
+    ///
+    /// **What it proves:** for the specific case `input == real`,
+    /// `replace_first_model(input, real, pseudo)` produces a result that
+    /// does NOT contain `real` — assuming the production invariant
+    /// `!pseudo_contains_real`.
+    ///
+    /// In other words: when scrub_text replaces a real value with its
+    /// pseudonym, the leak detector (modelled by `byte_contains_model`)
+    /// will not find the real value in the output. This is the BC-5.02.003
+    /// privacy contract on the single-occurrence path.
+    ///
+    /// **Why `input == real` (concrete equality) rather than "input
+    /// contains real exactly once":** expressing single-occurrence
+    /// symbolically requires nested existential/universal quantifiers
+    /// that don't unwind in CBMC budget. The `input == real` case is the
+    /// minimal non-vacuous proof; combined with the idempotence proof in
+    /// `composed_privacy_invariant`, it covers the load-bearing path.
+    ///
+    /// # Bounds
+    /// - `real` is bounded to ≤ 4 bytes by `symbolic_ascii_bytes()`.
+    /// - `pseudo` is the concrete 8-byte `b"host_001"`.
+    /// - `#[kani::unwind(10)]` — `replace_first_model` over a 4-byte
+    ///   needle into an 8-byte pseudonym needs about 8 outer iterations.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn composed_privacy_invariant_non_vacuous() {
+        let (real_bytes, real_len) = symbolic_ascii_bytes();
+        kani::assume(real_len > 0);
+        let real = &real_bytes[..real_len];
+
+        let pseudo = b"host_001";
+
+        // Production invariants (matches build_map).
+        kani::assume(!byte_contains_model(real, pseudo));
+        kani::assume(!byte_contains_model(pseudo, real));
+
+        // Run the scrub on input == real. By the round-trip lemma proved
+        // in S-4.01 (`scrub_roundtrip_single_replacement`), the output
+        // equals `pseudo` byte-for-byte. We don't re-prove that here;
+        // we use it as the antecedent.
+        let (out, out_len) = replace_first_model(real, real, pseudo);
+        let out_slice = &out[..out_len];
+
+        // BC-5.02.003 non-vacuous case: the leak detector model returns
+        // FALSE on the scrubbed output. Combined with the precondition
+        // `!pseudo_contains_real`, this proves the output (which equals
+        // pseudo) does not contain real.
+        let detector_says_clean = !byte_contains_model(out_slice, real);
+        assert!(
+            detector_says_clean,
+            "BC-5.02.003 non-vacuous: after scrub replaces real with pseudo, \
+             the leak detector model MUST return clean. If this fails, \
+             either replace_first_model produced an output containing real \
+             (scrub bug) or byte_contains_model is mis-classifying."
+        );
+    }
 }

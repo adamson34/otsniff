@@ -53,16 +53,22 @@ jobs:
         run: cargo kani --harness composed_privacy_invariant --unwind 13
         timeout-minutes: 30
         continue-on-error: true
+      - name: Run composed privacy invariant non-vacuous proof (F-ADV-P2-003)
+        id: composed_privacy_nv
+        run: cargo kani --harness composed_privacy_invariant_non_vacuous --unwind 10
+        timeout-minutes: 30
+        continue-on-error: true
       - name: Summarize harness outcomes
         run: |
           echo "Harness outcomes:"
-          echo "  scrub_roundtrip_bounded:            ${{ steps.scrub_roundtrip.outcome }}"
-          echo "  scrub_roundtrip_single_replacement: ${{ steps.scrub_single.outcome }}"
-          echo "  leak_regex_ipv4:                    ${{ steps.leak_ipv4.outcome }}"
-          echo "  leak_regex_ipv6:                    ${{ steps.leak_ipv6.outcome }}"
-          echo "  leak_regex_mac:                     ${{ steps.leak_mac.outcome }}"
-          echo "  map_value_substring:                ${{ steps.map_value.outcome }}"
-          echo "  composed_privacy_invariant:         ${{ steps.composed_privacy.outcome }}"
+          echo "  scrub_roundtrip_bounded:               ${{ steps.scrub_roundtrip.outcome }}"
+          echo "  scrub_roundtrip_single_replacement:    ${{ steps.scrub_single.outcome }}"
+          echo "  leak_regex_ipv4:                       ${{ steps.leak_ipv4.outcome }}"
+          echo "  leak_regex_ipv6:                       ${{ steps.leak_ipv6.outcome }}"
+          echo "  leak_regex_mac:                        ${{ steps.leak_mac.outcome }}"
+          echo "  map_value_substring:                   ${{ steps.map_value.outcome }}"
+          echo "  composed_privacy_invariant:            ${{ steps.composed_privacy.outcome }}"
+          echo "  composed_privacy_invariant_non_vacuous:${{ steps.composed_privacy_nv.outcome }}"
           # Fail the job if any harness didn't succeed
           fail=0
           for outcome in \
@@ -72,7 +78,8 @@ jobs:
             "${{ steps.leak_ipv6.outcome }}" \
             "${{ steps.leak_mac.outcome }}" \
             "${{ steps.map_value.outcome }}" \
-            "${{ steps.composed_privacy.outcome }}"; do
+            "${{ steps.composed_privacy.outcome }}" \
+            "${{ steps.composed_privacy_nv.outcome }}"; do
             if [ "$outcome" != "success" ]; then fail=1; fi
           done
           exit $fail

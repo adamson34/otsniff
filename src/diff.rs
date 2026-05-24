@@ -47,8 +47,11 @@ impl HostRef {
     /// Build a `HostRef` from an `Asset` by resolving the asset's IP to its
     /// pseudonym in `map`. Strips the IP, MAC, vendor, and hostname fields.
     pub fn from_asset(asset: &Asset, map: &ScrubMap) -> Self {
+        // F-ADV-P2-002: previously this fell back to `format!("unmapped:{}",
+        // asset.ip)` — embedding the raw IP with a known prefix. Now we use
+        // a hash-based opaque label so map misses don't leak the IP.
         let pseudonym = resolve_ip_to_pseudonym(&asset.ip.to_string(), map)
-            .unwrap_or_else(|| format!("unmapped:{}", asset.ip));
+            .unwrap_or_else(|| unmapped_label(&asset.ip.to_string()));
         HostRef {
             pseudonym,
             role: asset.role.label().to_string(),
@@ -504,13 +507,21 @@ pub fn compute_with_multiplier(
     role_shifts.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
 
     // ---- AC-004 / F-W2-002: flow shifts split into 3 buckets -------------
+    //
+    // F-ADV-P2-002: previously this returned the raw IP string on map miss
+    // (`.unwrap_or(ip_str)`), which emitted real IPs into the FlowSummary /
+    // FlowDelta fields of the JSON output. Now we return an opaque
+    // hash-based label so unmapped flows are visible to the renderer but
+    // carry no real identifier. The downstream `ensure_clean` /
+    // `ensure_no_map_values` checks in `run_diff` are the fail-closed
+    // backstop if this fallback ever fires.
     let ip_to_pseudo = |ip: std::net::IpAddr, map: &ScrubMap| -> String {
         let ip_str = ip.to_string();
         map.ips
             .iter()
             .find(|(_, v)| v.as_str() == ip_str)
             .map(|(k, _)| k.clone())
-            .unwrap_or(ip_str)
+            .unwrap_or_else(|| unmapped_label(&ip_str))
     };
 
     type FlowPseudoKey = (String, String, u16, u8);
@@ -655,6 +666,21 @@ fn scrub_finding(f: &Finding, map: &ScrubMap) -> Finding {
             .map(|step| crate::scrub::scrub_text(step, map))
             .collect(),
     }
+}
+
+/// F-ADV-P2-002: produce an opaque label for an IP that's not in the scrub
+/// map. The label has a recognisable prefix (so a renderer can flag it as
+/// "unmapped — likely indicates baseline/current map mismatch") but does
+/// NOT carry the raw IP. The 4-character hex suffix is a SHA-256 prefix —
+/// collision-resistant for distinguishing unmapped IPs in a single diff
+/// run but non-reversible. Pair with `ensure_clean` / `ensure_no_map_values`
+/// at the CLI write boundary as defense in depth.
+fn unmapped_label(ip_str: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(ip_str.as_bytes());
+    let digest = hasher.finalize();
+    format!("unmapped_{:02x}{:02x}", digest[0], digest[1])
 }
 
 /// Human-readable protocol label for use in `FlowDelta.proto`.

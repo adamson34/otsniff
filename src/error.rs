@@ -36,6 +36,23 @@ pub enum OtError {
 
     #[error("internal: failed to serialize JSON")]
     Json(#[from] serde_json::Error),
+
+    /// **F-ADV-P2-004:** distinct variant for the fail-closed privacy
+    /// invariant. Previously these errors used `OtError::Parse` which is the
+    /// same variant pcap-parse + askama-render + CLI-arg-validation use, so
+    /// CI scripts couldn't branch on "privacy leak" vs "render bug." The
+    /// `pattern` field intentionally does NOT carry the raw leaked value —
+    /// see [`leak_detector::ensure_clean`] which redacts it before
+    /// constructing the error (F-ADV-P2-007).
+    #[error("privacy invariant tripped: {kind}: {message}")]
+    PrivacyLeak {
+        /// What kind of identifier shape triggered the leak detector
+        /// (e.g. "ipv4", "ipv6", "mac", "map_value").
+        kind: String,
+        /// User-facing diagnostic that does NOT contain the leaked value.
+        /// Length, byte offset, and hash prefix only.
+        message: String,
+    },
 }
 
 impl OtError {
@@ -46,6 +63,12 @@ impl OtError {
             Self::InputOpen { .. } | Self::BadInput { .. } => 2,
             Self::UnsupportedLinkType(_) => 65, // EX_DATAERR
             Self::WriteOutput { .. } => 73,     // EX_CANTCREAT
+            // F-ADV-P2-004: distinct exit code so CI scripts can detect a
+            // privacy-invariant trip without grepping stderr. 75 = EX_TEMPFAIL
+            // in sysexits.h — semantically "the action couldn't be completed
+            // and a retry under different conditions might succeed" (e.g.
+            // re-run after fixing the scrub map).
+            Self::PrivacyLeak { .. } => 75,
             Self::Parse(_) | Self::Render(_) | Self::Json(_) => 70, // EX_SOFTWARE
         }
     }
