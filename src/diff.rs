@@ -85,9 +85,7 @@ fn finding_diff_key(finding: &Finding) -> (String, String, String, u16) {
 
     let src = extract_kv(evidence, "src");
     let dst = extract_kv(evidence, "dst");
-    let port: u16 = extract_kv(evidence, "port")
-        .parse()
-        .unwrap_or(0);
+    let port: u16 = extract_kv(evidence, "port").parse().unwrap_or(0);
 
     (rule_id, src, dst, port)
 }
@@ -174,12 +172,15 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .hosts
         .keys()
         .filter(|ip| {
-            let pseudo = curr_ip_to_pseudo.get(ip.to_string().as_str()).copied().unwrap_or("");
+            let pseudo = curr_ip_to_pseudo
+                .get(ip.to_string().as_str())
+                .copied()
+                .unwrap_or("");
             !base_pseudonyms.contains(pseudo)
         })
         .filter_map(|ip| curr_asset_by_ip.get(ip).copied().cloned())
         .collect();
-    hosts_new.sort_by(|a, b| a.ip.cmp(&b.ip));
+    hosts_new.sort_by_key(|a| a.ip);
 
     // hosts_gone = baseline pseudonyms not in current pseudonym set.
     let mut hosts_gone: Vec<Asset> = baseline
@@ -187,12 +188,15 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .hosts
         .keys()
         .filter(|ip| {
-            let pseudo = base_ip_to_pseudo.get(ip.to_string().as_str()).copied().unwrap_or("");
+            let pseudo = base_ip_to_pseudo
+                .get(ip.to_string().as_str())
+                .copied()
+                .unwrap_or("");
             !curr_pseudonyms.contains(pseudo)
         })
         .filter_map(|ip| base_asset_by_ip.get(ip).copied().cloned())
         .collect();
-    hosts_gone.sort_by(|a, b| a.ip.cmp(&b.ip));
+    hosts_gone.sort_by_key(|a| a.ip);
 
     // ---- AC-003 (BC-3.08.002): finding deltas -----------------------------
     //
@@ -241,7 +245,9 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .ips
         .iter()
         .filter_map(|(pseudo, real)| {
-            real.parse::<std::net::IpAddr>().ok().map(|ip| (pseudo.as_str(), ip))
+            real.parse::<std::net::IpAddr>()
+                .ok()
+                .map(|ip| (pseudo.as_str(), ip))
         })
         .collect();
     let curr_pseudo_to_ip: HashMap<&str, std::net::IpAddr> = current
@@ -249,7 +255,9 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .ips
         .iter()
         .filter_map(|(pseudo, real)| {
-            real.parse::<std::net::IpAddr>().ok().map(|ip| (pseudo.as_str(), ip))
+            real.parse::<std::net::IpAddr>()
+                .ok()
+                .map(|ip| (pseudo.as_str(), ip))
         })
         .collect();
 
@@ -306,7 +314,10 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .map(|f| {
             let src_pseudo = ip_to_pseudo(f.key.src, baseline.map);
             let dst_pseudo = ip_to_pseudo(f.key.dst, baseline.map);
-            ((src_pseudo, dst_pseudo, f.key.dst_port, f.key.proto), f.bytes)
+            (
+                (src_pseudo, dst_pseudo, f.key.dst_port, f.key.proto),
+                f.bytes,
+            )
         })
         .collect();
 
@@ -317,7 +328,10 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         .map(|f| {
             let src_pseudo = ip_to_pseudo(f.key.src, current.map);
             let dst_pseudo = ip_to_pseudo(f.key.dst, current.map);
-            ((src_pseudo, dst_pseudo, f.key.dst_port, f.key.proto), f.bytes)
+            (
+                (src_pseudo, dst_pseudo, f.key.dst_port, f.key.proto),
+                f.bytes,
+            )
         })
         .collect();
 
@@ -371,7 +385,8 @@ pub fn compute(baseline: DiffInput<'_>, current: DiffInput<'_>) -> Diff {
         })
         .collect();
     flow_shifts.sort_by(|a, b| {
-        a.src.cmp(&b.src)
+        a.src
+            .cmp(&b.src)
             .then_with(|| a.dst.cmp(&b.dst))
             .then_with(|| a.dst_port.cmp(&b.dst_port))
     });

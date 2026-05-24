@@ -67,13 +67,9 @@ fn make_finding(
     Finding {
         id: rule_id,
         severity: Severity::Medium,
-        title: format!(
-            "{rule_id}: {src_pseudo} → {dst_pseudo}:{dst_port}"
-        ),
+        title: format!("{rule_id}: {src_pseudo} → {dst_pseudo}:{dst_port}"),
         summary: format!("test finding {src_pseudo} → {dst_pseudo}:{dst_port}"),
-        evidence: vec![format!(
-            "src={src_pseudo} dst={dst_pseudo} port={dst_port}"
-        )],
+        evidence: vec![format!("src={src_pseudo} dst={dst_pseudo} port={dst_port}")],
         recommendation: "investigate",
         playbook: vec![],
     }
@@ -130,8 +126,12 @@ fn test_ac_001_diff_subcommand_help_documents_args() {
         .args(["diff", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("baseline-pcap").or(predicate::str::contains("BASELINE_PCAP")))
-        .stdout(predicate::str::contains("current-pcap").or(predicate::str::contains("CURRENT_PCAP")))
+        .stdout(
+            predicate::str::contains("baseline-pcap").or(predicate::str::contains("BASELINE_PCAP")),
+        )
+        .stdout(
+            predicate::str::contains("current-pcap").or(predicate::str::contains("CURRENT_PCAP")),
+        )
         .stdout(predicate::str::contains("--baseline-map"))
         .stdout(predicate::str::contains("--current-map"))
         .stdout(predicate::str::contains("--output").or(predicate::str::contains("-o")))
@@ -533,13 +533,15 @@ fn test_ac_004_role_shift_detected() {
     );
     // Old role should be "IT endpoint" or equivalent label
     assert!(
-        rs.old_role.to_lowercase().contains("it") || rs.old_role.to_lowercase().contains("endpoint"),
+        rs.old_role.to_lowercase().contains("it")
+            || rs.old_role.to_lowercase().contains("endpoint"),
         "BC-3.08.003 AC-004: old_role should describe IT endpoint, got '{}'",
         rs.old_role
     );
     // New role should be "PLC" or equivalent label
     assert!(
-        rs.new_role.to_lowercase().contains("plc") || rs.new_role.to_lowercase().contains("controller"),
+        rs.new_role.to_lowercase().contains("plc")
+            || rs.new_role.to_lowercase().contains("controller"),
         "BC-3.08.003 AC-004: new_role should describe PLC/controller, got '{}'",
         rs.new_role
     );
