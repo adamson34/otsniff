@@ -16,6 +16,23 @@ use crate::audit::{
 use crate::capture_source::DeclaredSource;
 use crate::error::{OtError, Result};
 
+/// Source-label sentinel used in the markdown payload sent to the AI
+/// provider.
+///
+/// **F-ADV-P5-001:** the PCAP basename is operator BCSI (NERC CIP-011
+/// protected info) — names like `acme-plant-alpha-line3-2026-05-22.pcap`
+/// embed plant / line / facility identifiers that the scrub layer
+/// cannot pseudonymize because they sit outside the parsed PCAP bytes.
+/// The leak detector's regex matches IP/MAC shape only, and the
+/// map-value check only knows DHCP-derived hostnames. So we substitute
+/// a constant sentinel before the scrub-and-send step. The HTML report
+/// and local sidecar still display the real basename — the sentinel
+/// applies only to bytes destined for the external AI provider.
+///
+/// Mirrors the existing pattern in `run_scrub` (cli.rs:525) where the
+/// markdown bound for the user's external AI also uses `"<scrubbed>"`.
+pub const AI_INPUT_LABEL: &str = "<scrubbed>";
+
 /// CLI form of `DeclaredSource`. Separate enum so we own the clap
 /// `ValueEnum` derive without polluting the core type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -654,10 +671,27 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
 
     // ---- --ai path: scrub → leak-check → invoke claude → unscrub → embed
 
+    // F-ADV-P5-001: re-render the markdown with the AI sentinel as the
+    // source label. The basename version of `raw_md` is retained for the
+    // local sidecar (line ~763) and HTML report, where the operator
+    // wants to see which capture this report came from. But the bytes
+    // sent to the external AI provider must not carry the basename —
+    // names like `acme-plant-alpha-line3-secret.pcap` embed plant /
+    // line / facility identifiers that the scrub layer cannot detect
+    // because they sit outside the parsed PCAP bytes.
+    let raw_md_for_ai = render_markdown(
+        &inventory,
+        &findings,
+        &obs,
+        AI_INPUT_LABEL,
+        generated_at,
+        Some(&classification),
+    )?;
+
     // 2. Mint pseudonyms and produce the scrubbed payload that will go
     //    to the AI.
     let map = build_map(&obs);
-    let scrubbed_md = scrub_text(&raw_md, &map);
+    let scrubbed_md = scrub_text(&raw_md_for_ai, &map);
     let scrub_summary = ScrubSummary {
         ip_pseudonyms: map.ips.len(),
         mac_pseudonyms: map.macs.len(),
@@ -1043,6 +1077,71 @@ mod tests {
             result.iter().filter(|n| matches!(n, IpNet::V6(_))).count(),
             0,
             "one or more default OT subnets are IPv6; AC-005 requires IPv4-only RFC1918 defaults"
+        );
+    }
+
+    /// F-ADV-P5-001: the AI-bound markdown source label must be a constant
+    /// sentinel that carries no operator-identifying tokens. The PCAP
+    /// basename is BCSI under NERC CIP-011 — a name like
+    /// `acme-plant-alpha-line3-2026-05-22.pcap` ships plant / line /
+    /// facility identifiers into the AI provider's prompt that the
+    /// scrub layer cannot detect or pseudonymize.
+    #[test]
+    fn f_adv_p5_001_ai_input_label_is_sentinel_not_basename() {
+        // Contract: the constant exists and equals "<scrubbed>".
+        assert_eq!(AI_INPUT_LABEL, "<scrubbed>");
+
+        // Contract: the sentinel has no path-shape and no alphabetic
+        // tokens an operator might use in plant / line / facility names.
+        // Any sensitive basename token slipping into the constant would
+        // immediately leak via the markdown header to the AI.
+        for forbidden in [
+            "acme", "plant", "line", "site", "facility", "secret", ".pcap",
+        ] {
+            assert!(
+                !AI_INPUT_LABEL.contains(forbidden),
+                "AI_INPUT_LABEL contains forbidden token '{forbidden}' — \
+                 sentinel must be a constant, not a derived value"
+            );
+        }
+    }
+
+    /// F-ADV-P5-001 (cont.): rendering markdown with the AI sentinel as
+    /// `input_label` must not embed any operator-identifying basename
+    /// token in the output bytes. Test verifies the contract by rendering
+    /// against an empty observation set and grepping for sensitive
+    /// tokens. If the renderer ever starts embedding the input path
+    /// elsewhere (e.g. a footer), this test catches it.
+    #[test]
+    fn f_adv_p5_001_render_with_ai_label_carries_no_basename_token() {
+        use crate::report_md::render_markdown;
+        use chrono::TimeZone;
+
+        let obs = crate::observe::Observations::default();
+        let inventory = crate::inventory::build(&obs);
+        let findings: Vec<crate::findings::Finding> = Vec::new();
+        let ts = chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+
+        let rendered = render_markdown(&inventory, &findings, &obs, AI_INPUT_LABEL, ts, None)
+            .expect("render_markdown should succeed on empty fixture");
+
+        for forbidden in [
+            "acme-plant",
+            "line3",
+            "secret",
+            "/Users/",
+            "/home/",
+            ".pcap",
+        ] {
+            assert!(
+                !rendered.contains(forbidden),
+                "AI-bound markdown contains forbidden token '{forbidden}' — \
+                 something other than input_label is leaking the path"
+            );
+        }
+        assert!(
+            rendered.contains(AI_INPUT_LABEL),
+            "expected sentinel '{AI_INPUT_LABEL}' to appear in rendered markdown header"
         );
     }
 }

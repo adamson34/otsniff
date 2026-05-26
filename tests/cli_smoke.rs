@@ -385,6 +385,76 @@ fn test_bc_9_06_001_review_scrub_aborts_on_eof() {
         .stderr(predicate::str::contains("scrubbed prompt to claude"));
 }
 
+/// F-ADV-P5-001: when `analyze --ai` is invoked with a PCAP whose basename
+/// embeds operator BCSI (plant/line/facility identifiers), those tokens
+/// must NOT appear in the bytes sent to the AI provider. The basename is
+/// outside the scrub map's domain, so the scrub/leak-detector pair cannot
+/// catch this — the fix is to substitute a constant sentinel for the
+/// markdown header's `input_label` before the scrub-and-send step.
+///
+/// `--review-scrub` prints the exact AI-bound payload to stderr, which
+/// gives the test a direct view into what the AI would receive.
+#[test]
+fn test_f_adv_p5_001_pcap_basename_does_not_leak_to_ai() {
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
+    if !pcap.exists() {
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: synthetic-1mb.pcap missing in CI"
+        );
+        eprintln!(
+            "skipping test_f_adv_p5_001_pcap_basename_does_not_leak_to_ai: \
+             synthetic-1mb.pcap not present"
+        );
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    // Sensitive basename simulating an operator-named capture. If the fix
+    // regresses, these tokens reach the AI provider via the markdown
+    // header.
+    let sensitive = tmp.path().join("acme-plant-alpha-line3-secret.pcap");
+    std::fs::copy(&pcap, &sensitive).unwrap();
+    let out = tmp.path().join("report.html");
+
+    let assert = Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze", "--ai", "--review-scrub"])
+        .arg(&sensitive)
+        .arg("-o")
+        .arg(&out)
+        .write_stdin("n\n")
+        .assert()
+        .code(70)
+        .stderr(predicate::str::contains("scrubbed prompt to claude"));
+
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+
+    // Extract just the AI-bound payload between the `--- scrubbed prompt ...`
+    // and `--- end scrubbed prompt ---` sentinels emitted by review_scrub_gate.
+    let payload_start = stderr
+        .find("--- scrubbed prompt to claude")
+        .expect("--review-scrub did not emit the expected header");
+    let payload_end = stderr
+        .find("--- end scrubbed prompt ---")
+        .expect("--review-scrub did not emit the expected footer");
+    let payload = &stderr[payload_start..payload_end];
+
+    for forbidden in [
+        "acme-plant",
+        "alpha-line3",
+        "line3",
+        "secret",
+        "acme-plant-alpha-line3-secret.pcap",
+    ] {
+        assert!(
+            !payload.contains(forbidden),
+            "F-ADV-P5-001 regression: AI-bound payload contains operator BCSI \
+             token '{forbidden}'.\nFull payload was:\n{payload}"
+        );
+    }
+}
+
 // ── Group C: ADR-0007 amendment (AC-003) ──────────────────────────────────────
 
 /// AC-003: ADR-0007 must be amended to document --disallowed-tools and
