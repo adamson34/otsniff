@@ -20,9 +20,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@nightly
+      # Pin the nightly toolchain. Unpinned `@nightly` broke the job:
+      # cargo-fuzz's `rustix` dep stopped compiling on bleeding-edge nightly
+      # (HS-006 / wave-2 gate). nightly-2025-11-21 is verified to build
+      # cargo-fuzz 0.13.1. Bump deliberately when a newer nightly is validated.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-11-21
 
-      - run: cargo install --locked cargo-fuzz
+      - run: cargo install --locked cargo-fuzz --version "=0.13.1"
 
       - name: Seed corpus from fuzz/corpus if present
         run: |
@@ -39,7 +45,7 @@ jobs:
           cd fuzz
           # Capture libFuzzer stdout so we can extract the per-second exec rate
           # and the total `Done X runs in Y second(s)` line.
-          cargo +nightly fuzz run ${{ matrix.harness }} -- -max_total_time=60 2>&1 | tee fuzz-run.log
+          cargo +nightly-2025-11-21 fuzz run ${{ matrix.harness }} -- -max_total_time=60 2>&1 | tee fuzz-run.log
 
           # libFuzzer prints either `Done <N> runs in <S> second(s)` (when it
           # exits due to -max_total_time) or `#NNN INITED` pulses during the
