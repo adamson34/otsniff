@@ -1199,13 +1199,19 @@ fn test_f_adv_p1_004_scrub_fuzz_harness_uses_non_empty_map() {
          version of the harness provided ZERO coverage of the replacement \
          algorithm."
     );
-    // The fixed-entry guarantee — even when carved-from-fuzzer slices are
-    // empty, `host_000 → 192.168.255.254` must always be present.
+    // The substitution guarantee (post wave-2 HS-006 refactor): host_001 is
+    // inserted UNCONDITIONALLY with a sentinel-framed, always-non-empty real
+    // value, and that value is fed into the fuzzed input — so scrub_text's
+    // replacement branch runs every iteration regardless of the carved bytes.
     assert!(
-        harness.contains("host_000"),
-        "F-ADV-P1-004: fuzz harness must include a fixed map entry (e.g. \
-         host_000) that guarantees the substitution branch runs even on \
-         empty fuzzer input. Got harness without that fallback."
+        harness.contains("ips.insert(\"host_001\""),
+        "F-ADV-P1-004: fuzz harness must unconditionally insert a host_001 \
+         map entry so the substitution branch runs on every iteration."
+    );
+    assert!(
+        harness.contains("real_1"),
+        "F-ADV-P1-004: fuzz harness must feed the map's real value(s) into \
+         the input text so scrub_text always has something to substitute."
     );
 }
 
