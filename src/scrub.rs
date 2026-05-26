@@ -66,38 +66,54 @@ impl ScrubMap {
         // three families. Two pseudonyms mapping to the same real value would
         // cause `forward()` to silently keep only one — the round-trip would
         // then be lossy for whichever pseudonym got overwritten.
+        // Third pass (F-ADV-P3-005): every pseudonym key must match the
+        // canonical `(host|mac|name)_NNN` shape for its family. A malformed
+        // baseline map (e.g. `"FOOBAR": "10.0.0.1"` in `ips`) would otherwise
+        // pass validation, get used by `scrub_text` to substitute, and break
+        // `unscrub_text`'s regex extraction silently.
         let mut seen_reals: std::collections::BTreeMap<&str, &str> =
             std::collections::BTreeMap::new();
-        for (pseudo, real) in self
-            .ips
-            .iter()
-            .chain(self.macs.iter())
-            .chain(self.names.iter())
-        {
-            if pseudo.is_empty() {
-                return Err(crate::error::OtError::Parse(format!(
-                    "scrub map has empty pseudonym key for real value '{}'; \
-                     the map is corrupted (EC-001). \
-                     Regenerate the map with `otsniff scrub`.",
-                    real
-                )));
-            }
-            if real.is_empty() {
-                return Err(crate::error::OtError::Parse(format!(
-                    "scrub map has empty real value for pseudonym '{}'; \
-                     the map is corrupted (EC-001). \
-                     Regenerate the map with `otsniff scrub`.",
-                    pseudo
-                )));
-            }
-            // F-W1-003: duplicate real-value detection.
-            if let Some(first_pseudo) = seen_reals.insert(real.as_str(), pseudo.as_str()) {
-                return Err(crate::error::OtError::Parse(format!(
-                    "scrub map maps two pseudonyms ('{}' and '{}') to the same \
-                     real value '{}'; the map is corrupted (F-W1-003 / duplicate \
-                     real value). Regenerate the map with `otsniff scrub`.",
-                    first_pseudo, pseudo, real
-                )));
+        for (family, prefix, entries) in [
+            ("ips", "host_", &self.ips),
+            ("macs", "mac_", &self.macs),
+            ("names", "name_", &self.names),
+        ] {
+            for (pseudo, real) in entries {
+                if pseudo.is_empty() {
+                    return Err(crate::error::OtError::Parse(format!(
+                        "scrub map has empty pseudonym key for real value '{}'; \
+                         the map is corrupted (EC-001). \
+                         Regenerate the map with `otsniff scrub`.",
+                        real
+                    )));
+                }
+                if real.is_empty() {
+                    return Err(crate::error::OtError::Parse(format!(
+                        "scrub map has empty real value for pseudonym '{}'; \
+                         the map is corrupted (EC-001). \
+                         Regenerate the map with `otsniff scrub`.",
+                        pseudo
+                    )));
+                }
+                // F-ADV-P3-005: pseudonym shape must be `<prefix>NNN` where
+                // NNN is one or more decimal digits.
+                if !is_canonical_pseudonym(pseudo, prefix) {
+                    return Err(crate::error::OtError::Parse(format!(
+                        "scrub map has non-canonical pseudonym '{pseudo}' in \
+                         family '{family}'; expected '{prefix}NNN' where NNN \
+                         is one or more decimal digits. Regenerate the map \
+                         with `otsniff scrub` (F-ADV-P3-005)."
+                    )));
+                }
+                // F-W1-003: duplicate real-value detection.
+                if let Some(first_pseudo) = seen_reals.insert(real.as_str(), pseudo.as_str()) {
+                    return Err(crate::error::OtError::Parse(format!(
+                        "scrub map maps two pseudonyms ('{}' and '{}') to the same \
+                         real value '{}'; the map is corrupted (F-W1-003 / duplicate \
+                         real value). Regenerate the map with `otsniff scrub`.",
+                        first_pseudo, pseudo, real
+                    )));
+                }
             }
         }
         Ok(())
@@ -149,6 +165,19 @@ impl ScrubMap {
 /// Parse the numeric suffix from a pseudonym such as `host_003` → `3`.
 /// Returns `None` if the pseudonym doesn't start with `prefix` or the
 /// suffix isn't a valid decimal integer.
+/// F-ADV-P3-005: a pseudonym matches the canonical shape `<prefix>NNN`
+/// where NNN is one or more decimal digits AND `prefix` ends in `_`.
+/// Examples: `is_canonical_pseudonym("host_001", "host_")` → true;
+/// `is_canonical_pseudonym("FOOBAR", "host_")` → false;
+/// `is_canonical_pseudonym("host_abc", "host_")` → false;
+/// `is_canonical_pseudonym("host_", "host_")` → false (empty suffix).
+fn is_canonical_pseudonym(pseudo: &str, prefix: &str) -> bool {
+    let Some(suffix) = pseudo.strip_prefix(prefix) else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit())
+}
+
 fn parse_pseudonym_index(p: &str, prefix: &str) -> Option<u32> {
     p.strip_prefix(prefix).and_then(|n| n.parse().ok())
 }
@@ -314,6 +343,26 @@ pub fn build_map_at(obs: &Observations, now: DateTime<Utc>) -> ScrubMap {
         names.insert(pseudo, name.clone());
     }
 
+    // F-ADV-P3-002: invariant — every IP that appears in `obs.flows` (used
+    // by the rendered top-flows table) must be in the scrub map. The
+    // `top_flows_emit_pseudonyms_only` test in tests/snapshot.rs covers
+    // the happy path; this debug-assert catches a regression where a
+    // future refactor populates `obs.flows` with IPs not in `obs.hosts`.
+    // Run only in debug builds — production builds rely on the
+    // leak-detector kill switch as the fail-closed backstop.
+    debug_assert!(
+        obs.flows.values().all(|flow| {
+            ips.values().any(|real| real == &flow.key.src.to_string())
+                && ips.values().any(|real| real == &flow.key.dst.to_string())
+        }),
+        "F-ADV-P3-002: a flow's src or dst IP is not in the scrub map. \
+         This means scrub_text would render the IP unscrubbed in the \
+         top-flows table. Either the observer populated flows with an \
+         IP that wasn't observed as a host, or build_map missed an IP. \
+         The fail-closed leak detector should catch this at write time, \
+         but it's a bug worth surfacing in debug builds."
+    );
+
     ScrubMap {
         version: 1,
         created_at: now,
@@ -323,26 +372,72 @@ pub fn build_map_at(obs: &Observations, now: DateTime<Utc>) -> ScrubMap {
     }
 }
 
-/// Replace every real IP/MAC in `text` with its pseudonym.
+/// Replace every real IP/MAC/hostname in `text` with its pseudonym.
+///
+/// Single-pass replacement using a regex alternation, ordered by descending
+/// length. The regex crate's leftmost-first matching means at each position
+/// the longest matching real value is chosen, and the cursor advances past
+/// the entire match (not past a single character). This avoids the
+/// substring-shadowing bug from the sequential-replace implementation.
+///
+/// **F-ADV-P3-004:** the previous sequential `String::replace` loop was
+/// vulnerable to shadowing when a real value was a prefix substring of a
+/// pseudonym. E.g. map `{"host_001" → "10.0.0.1", "name_001" → "host"}`:
+/// sequential replace of `10.0.0.1` produced `host_001`, then sequential
+/// replace of `host` (a real value) corrupted the just-inserted pseudonym
+/// to `name_001_001`. Single-pass replacement avoids this because the
+/// regex alternation matches one real at each position, and the cursor
+/// advances past the entire matched span.
 ///
 /// Safe by construction: only values present in the map (i.e., things we
-/// actually observed during parse) are eligible for replacement, so an
-/// IP-shaped substring inside an unrelated identifier won't get rewritten
-/// by accident.
+/// actually observed during parse, or carried in via `--baseline-map`) are
+/// eligible for replacement.
 pub fn scrub_text(text: &str, map: &ScrubMap) -> String {
     let forward = map.forward();
-    // Sort by descending length so longer values are replaced before
-    // shorter ones (e.g., `192.168.1.10` before `192.168.1.1`).
+    if forward.is_empty() {
+        return text.to_string();
+    }
+    // Sort by descending length so the regex alternation tries longer
+    // values first. Combined with regex-crate's leftmost-first matching,
+    // this gives us longest-match-at-each-position semantics — the same
+    // outcome the sequential-replace tried to achieve via length sort,
+    // but in a single pass that's robust to substring shadowing.
     let mut entries: Vec<(&String, &String)> = forward.iter().collect();
     entries.sort_by_key(|e| std::cmp::Reverse(e.0.len()));
 
-    let mut out = text.to_string();
-    for (real, pseudo) in entries {
-        if out.contains(real.as_str()) {
-            out = out.replace(real.as_str(), pseudo);
+    let pattern = entries
+        .iter()
+        .map(|(real, _)| regex::escape(real))
+        .collect::<Vec<_>>()
+        .join("|");
+    let re = match regex::Regex::new(&pattern) {
+        Ok(re) => re,
+        Err(_) => {
+            // Pattern construction can in theory fail (e.g. if `forward()`
+            // ever produces a real value that escapes to invalid regex —
+            // not possible today since `regex::escape` is total). Fall
+            // back to the conservative sequential implementation rather
+            // than silently leaving the text unscrubbed.
+            let mut out = text.to_string();
+            for (real, pseudo) in &entries {
+                if out.contains(real.as_str()) {
+                    out = out.replace(real.as_str(), pseudo);
+                }
+            }
+            return out;
         }
-    }
-    out
+    };
+
+    re.replace_all(text, |caps: &regex::Captures| {
+        // Look up the pseudonym for the matched real value. This must
+        // succeed because the regex is built from forward.keys().
+        let matched = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+        forward
+            .get(matched)
+            .cloned()
+            .unwrap_or_else(|| matched.to_string())
+    })
+    .into_owned()
 }
 
 /// Replace pseudonyms in `text` with their real values.

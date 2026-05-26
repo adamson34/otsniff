@@ -90,5 +90,20 @@ jobs:
             echo "See the \`mutants-results\` artifact for the full report."
             echo ""
             echo "> Baseline: 84.1% (wave-1, effective kill rate after disposition)."
-            echo "> A drop > 5% below baseline is a soft signal for review (see docs/MUTANTS.md)."
+            echo "> Threshold: 79.1% (5pp below baseline). Below threshold fails CI."
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # F-ADV-P3-007: POL-11 — fail CI on kill-rate regression instead of
+          # writing a "soft signal" to the step summary that nobody reads.
+          # Threshold is 5pp below the 84.1% baseline = 79.1%.
+          if [ "$KILL_PCT" = "n/a" ]; then
+            echo "::warning::mutation testing produced no outcomes.json (cargo-mutants may have failed early); not gating"
+            exit 0
+          fi
+          THRESHOLD_OK=$(python3 -c "print(1 if $KILL_PCT >= 79.1 else 0)")
+          if [ "$THRESHOLD_OK" = "1" ]; then
+            echo "Check passed: kill rate ${KILL_PCT}% (>= 79.1% threshold), ${KILLED}/${TOTAL} mutants killed"
+          else
+            echo "::error::F-ADV-P3-007: kill rate ${KILL_PCT}% is below threshold 79.1% (5pp below 84.1% baseline). See mutants-results artifact for surviving mutants."
+            exit 1
+          fi
