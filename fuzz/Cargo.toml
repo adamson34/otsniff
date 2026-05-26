@@ -10,6 +10,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 otsniff = { path = ".." }
+# scrub_text harness constructs a ScrubMap (created_at: DateTime<Utc>).
+# chrono is transitive via otsniff but must be a direct dep to be named here.
+chrono = "0.4"
 
 [workspace]
 # This empty workspace table isolates the fuzz package from the main crate's
