@@ -14,8 +14,8 @@
 
 <p align="center">
   <a href="https://github.com/adamson34/otsniff/actions/workflows/ci.yml"><img src="https://github.com/adamson34/otsniff/actions/workflows/ci.yml/badge.svg?branch=develop" alt="CI"></a>
-  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?label=release&color=2e7d4a" alt="Release"></a>
-  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?include_prereleases&label=pre-release&color=b87325" alt="Pre-release"></a>
+  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?label=release&color=2e7d4a&cacheSeconds=86400" alt="Release"></a>
+  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?include_prereleases&label=pre-release&color=b87325&cacheSeconds=86400" alt="Pre-release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/MSRV-1.85-blue" alt="MSRV 1.85">
   <a href="https://codecov.io/gh/adamson34/otsniff"><img src="https://codecov.io/gh/adamson34/otsniff/graph/badge.svg" alt="codecov"></a>
