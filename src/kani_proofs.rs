@@ -417,17 +417,40 @@ mod kani_proofs {
         kani::assume(!byte_contains_model(real, pseudo));
         kani::assume(!byte_contains_model(pseudo, real));
 
-        // Run the scrub on input == real. By the round-trip lemma proved
-        // in S-4.01 (`scrub_roundtrip_single_replacement`), the output
-        // equals `pseudo` byte-for-byte. We don't re-prove that here;
-        // we use it as the antecedent.
+        // Run the scrub on input == real.
         let (out, out_len) = replace_first_model(real, real, pseudo);
         let out_slice = &out[..out_len];
 
-        // BC-5.02.003 non-vacuous case: the leak detector model returns
-        // FALSE on the scrubbed output. Combined with the precondition
-        // `!pseudo_contains_real`, this proves the output (which equals
-        // pseudo) does not contain real.
+        // F-ADV-P4-004: assert that the scrubbed output IS the pseudonym
+        // byte-for-byte. The previous version of this proof only checked
+        // `!byte_contains_model(out_slice, real)` — which would hold
+        // vacuously for any output that doesn't contain `real` (including
+        // pathological outputs like an empty slice or arbitrary garbage).
+        // Re-proving the round-trip lemma inline here removes the
+        // cross-harness dependency and tightens the proof scope.
+        assert_eq!(
+            out_len,
+            pseudo.len(),
+            "BC-5.02.003 non-vacuous: replace_first_model(real, real, pseudo) \
+             must produce output of length pseudo.len() ({}); got {}",
+            pseudo.len(),
+            out_len
+        );
+        let mut k = 0;
+        while k < out_len {
+            assert_eq!(
+                out_slice[k], pseudo[k],
+                "BC-5.02.003 non-vacuous: replace_first_model(real, real, pseudo) \
+                 must produce output equal to pseudo byte-for-byte"
+            );
+            k += 1;
+        }
+
+        // BC-5.02.003 leak-detector check: with the output equal to pseudo,
+        // and the precondition `!byte_contains_model(pseudo, real)`, the
+        // leak detector model must return clean. This combines the
+        // identity-style equality above with the byte_contains_model
+        // postcondition to give the full composition.
         let detector_says_clean = !byte_contains_model(out_slice, real);
         assert!(
             detector_says_clean,

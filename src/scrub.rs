@@ -204,7 +204,7 @@ fn merge_family(
     baseline: &mut BTreeMap<String, String>,
     current_entries: impl Iterator<Item = (String, String)>,
     prefix: &str,
-) {
+) -> crate::error::Result<()> {
     // Build the set of real values already covered by the baseline.
     let existing_reals: std::collections::BTreeSet<&str> =
         baseline.values().map(|s| s.as_str()).collect();
@@ -223,7 +223,7 @@ fn merge_family(
         .collect();
 
     if new_reals.is_empty() {
-        return;
+        return Ok(());
     }
 
     let start = max_index(baseline, prefix) + 1;
@@ -231,33 +231,40 @@ fn merge_family(
         let pseudo = format!("{prefix}{idx:03}");
         // EC-002: if this pseudonym already maps to a *different* real value
         // that's a bug — the invariant has been violated.
+        //
+        // F-ADV-P4-009: previously this was a `panic!` which is unreachable
+        // in correct code (max_index + 1 is always greater than all
+        // existing keys with the prefix). However, a corrupted on-disk
+        // baseline map could trigger it. Per the project convention "no
+        // panic on user input," we return a typed error instead. The
+        // signature ripple is contained — merge_map and its callers now
+        // return Result.
         if let Some(existing_real) = baseline.get(&pseudo) {
             if existing_real != &real {
-                panic!(
-                    "EC-002: pseudonym collision — '{pseudo}' maps to both \
-                     '{existing_real}' (baseline) and '{real}' (current). \
-                     This is a bug; please report it."
-                );
+                return Err(crate::error::OtError::Parse(format!(
+                    "EC-002: pseudonym collision in baseline map — '{pseudo}' \
+                     maps to both '{existing_real}' (baseline) and '{real}' \
+                     (current). The baseline map may have been hand-edited or \
+                     corrupted. Regenerate the map with `otsniff scrub` \
+                     (F-ADV-P4-009)."
+                )));
             }
         }
         baseline.insert(pseudo, real);
     }
+    Ok(())
 }
 
-pub fn merge_map(mut baseline: ScrubMap, current: &Observations) -> ScrubMap {
+pub fn merge_map(mut baseline: ScrubMap, current: &Observations) -> crate::error::Result<ScrubMap> {
     let current_map = build_map(current);
 
     // Merge each family independently so their suffix counters don't interfere.
-    // Pass `.into_iter()` (pseudonym-key order, which is the canonical
-    // assignment order from `build_map`) so new assignments continue in the
-    // same sorted order as a fresh `build_map` call would produce.
-    merge_family(&mut baseline.ips, current_map.ips.into_iter(), "host_");
-    merge_family(&mut baseline.macs, current_map.macs.into_iter(), "mac_");
-    merge_family(&mut baseline.names, current_map.names.into_iter(), "name_");
+    merge_family(&mut baseline.ips, current_map.ips.into_iter(), "host_")?;
+    merge_family(&mut baseline.macs, current_map.macs.into_iter(), "mac_")?;
+    merge_family(&mut baseline.names, current_map.names.into_iter(), "name_")?;
 
-    // Stamp the merge time so the on-disk map reflects when it was last updated.
     baseline.created_at = Utc::now();
-    baseline
+    Ok(baseline)
 }
 
 /// Walk observations and mint stable pseudonyms for every observed IP and MAC.
@@ -480,6 +487,15 @@ fn pseudonym_regex() -> Regex {
     // The earlier `[0-9a-f]+` was overly permissive and could spuriously
     // match real values that happened to look pseudonym-shaped (e.g. a
     // legitimate hostname `host_abc01`). F-W1-002 (wave-1 adversarial review).
+    //
+    // F-ADV-P4-012: trailing `\b` retained for safety. The Rust `regex`
+    // crate doesn't support lookahead, so we can't express "end at word
+    // boundary OR start of next pseudonym". The pathological case
+    // `host_001host_002` (zero-separator concatenation) only resolves the
+    // first pseudonym; the trailing `host_002` remains as text. Documented
+    // in `tests/s_6_02_diff_subcommand.rs::test_f_adv_p4_012_*`. AIs in
+    // practice emit separated tokens (space/comma/newline), all of which
+    // do produce word boundaries and resolve correctly.
     Regex::new(r"\b(?:host|mac|name)_[0-9]+\b").expect("valid regex")
 }
 
@@ -981,7 +997,7 @@ mod tests {
         let obs = fixture(); // 10.10.0.5 (mac AA:BB:CC:DD:EE:01) and 10.10.0.20
 
         let baseline = empty_scrub_map();
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
         let fresh = build_map(&obs);
 
         // Same IP entries (pseudonym → real).
@@ -1017,7 +1033,7 @@ mod tests {
         // 10.0.0.2 is NOT in current — EC-003 scenario.
         let obs = obs_with_ips(&["10.0.0.1", "10.0.0.99"]);
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // Baseline pseudonym for 10.0.0.1 must be preserved.
         assert_eq!(
@@ -1079,7 +1095,7 @@ mod tests {
         // Three brand-new IPs not in baseline.
         let obs = obs_with_ips(&["10.2.0.1", "10.2.0.2", "10.2.0.3"]);
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // Collect pseudonym suffixes for the three new IPs.
         let mut new_suffixes: Vec<u32> = ["10.2.0.1", "10.2.0.2", "10.2.0.3"]
@@ -1115,7 +1131,7 @@ mod tests {
 
         // Step 2: merge b1 with obs containing IP_A and IP_B.
         let obs_step2 = obs_with_ips(&["10.0.0.1", "10.0.0.2"]);
-        let b2 = merge_map(b1, &obs_step2);
+        let b2 = merge_map(b1, &obs_step2).expect("merge_map should succeed on test fixture");
 
         // After step 2: host_001 → 10.0.0.1 preserved; 10.0.0.2 gets host_002.
         assert_eq!(b2.ips.get("host_001").map(String::as_str), Some("10.0.0.1"));
@@ -1129,7 +1145,7 @@ mod tests {
 
         // Step 3: merge b2 with obs containing IP_B and IP_C.
         let obs_step3 = obs_with_ips(&["10.0.0.2", "10.0.0.3"]);
-        let b3 = merge_map(b2, &obs_step3);
+        let b3 = merge_map(b2, &obs_step3).expect("merge_map should succeed on test fixture");
 
         // All three identities must be stable and non-colliding.
         assert_eq!(b3.ips.get("host_001").map(String::as_str), Some("10.0.0.1"));
@@ -1174,7 +1190,7 @@ mod tests {
         obs.hosts.get_mut(&new_ip).unwrap().macs = vec![[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x99]];
         obs.hostnames.insert(new_ip, "HMI-WEST".to_string());
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // New IP must get host_006.
         assert_eq!(
@@ -1209,7 +1225,7 @@ mod tests {
         );
         let obs = obs_with_ips(&["10.0.0.1", "10.0.0.99"]);
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // Build a text that contains both the baseline real IP and the new one.
         let text = "Baseline host 10.0.0.1 communicated with new host 10.0.0.99 on port 502.";
@@ -1301,7 +1317,7 @@ mod tests {
         );
         let obs = obs_with_ips(&["10.0.0.1", "10.0.0.99"]);
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // Text that references both a baseline IP and the new IP.
         let text = "PLC-NORTH at 10.0.0.1 (AA:BB:CC:DD:EE:01) reached 10.0.0.99.";

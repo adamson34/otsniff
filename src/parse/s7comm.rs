@@ -72,9 +72,20 @@ pub fn parse(payload: &[u8]) -> Option<S7Pdu> {
 
     // COTP: first byte after TPKT is the COTP header length byte (the
     // count excludes itself).
+    //
+    // F-ADV-P3-011: bound `cotp_len_byte` to 17 — RFC 905 COTP class-0
+    // header is at most ~6 bytes. Accepting larger values gives a hostile
+    // packet free bytes to position a synthetic S7_PROTO_ID at a chosen
+    // offset.
     let cotp_len_byte = *payload.get(4)? as usize;
+    if cotp_len_byte > 17 {
+        return None;
+    }
     let s7_offset = 5 + cotp_len_byte;
-    if payload.len() < s7_offset + 10 {
+
+    // We need at least 2 bytes for protocol ID + rosctr to decide
+    // s7_header_len. After that, the size-dependent guard takes over.
+    if payload.len() < s7_offset + 2 {
         return None;
     }
 
@@ -90,6 +101,16 @@ pub fn parse(payload: &[u8]) -> Option<S7Pdu> {
         _ => 10,
     };
 
+    // F-ADV-P4-006: size-dependent min-length guard. Previously we used a
+    // hardcoded `+10` which was safe by accident (subsequent reads were
+    // length-checked) but would silently break if a future change read
+    // payload[s7_offset + 11] before the second guard for an Ack/Ack_Data
+    // ROSCTR. The right guard requires the full header AND at least one
+    // parameter byte.
+    if payload.len() < s7_offset + s7_header_len + 1 {
+        return None;
+    }
+
     // Parameter length is at offset s7_offset + 6 (big-endian u16).
     let param_len = u16::from_be_bytes([payload[s7_offset + 6], payload[s7_offset + 7]]) as usize;
     if param_len == 0 {
@@ -97,9 +118,6 @@ pub fn parse(payload: &[u8]) -> Option<S7Pdu> {
     }
 
     let param_offset = s7_offset + s7_header_len;
-    if payload.len() <= param_offset {
-        return None;
-    }
     let function_code = payload[param_offset];
 
     Some(S7Pdu {

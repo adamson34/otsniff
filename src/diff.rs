@@ -190,10 +190,19 @@ fn finding_diff_key(finding: &Finding, map: &ScrubMap) -> (String, String, Strin
     let evidence = finding.evidence.first().map(String::as_str).unwrap_or("");
 
     // Test-helper format (back-compat): "src=X dst=Y port=Z"
+    //
+    // F-ADV-P4-003: require ALL THREE tokens to be present before taking
+    // this branch. The previous OR-condition would short-circuit on any
+    // future production evidence that happened to contain a whitespace-
+    // delimited `port=NNN` token (e.g. a recommendation string referencing
+    // a port number), producing a wrong tuple key. Requiring all three
+    // makes the test format unambiguous and the production-collision
+    // surface vanishingly small.
     let test_src = extract_kv(evidence, "src");
     let test_dst = extract_kv(evidence, "dst");
-    let test_port: u16 = extract_kv(evidence, "port").parse().unwrap_or(0);
-    if !test_src.is_empty() || !test_dst.is_empty() || test_port != 0 {
+    let test_port_str = extract_kv(evidence, "port");
+    if !test_src.is_empty() && !test_dst.is_empty() && !test_port_str.is_empty() {
+        let test_port: u16 = test_port_str.parse().unwrap_or(0);
         return (
             rule_id,
             resolve_endpoint(&test_src, map),

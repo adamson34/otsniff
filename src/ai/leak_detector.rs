@@ -542,14 +542,27 @@ mod kani_proofs {
     #[kani::proof]
     #[kani::unwind(9)]
     fn leak_regex_mac() {
-        // Helper: map 0–15 to lower-case hex ASCII.
-        fn nibble_to_hex(n: u8) -> u8 {
+        // F-ADV-P4-011: helper that emits the chosen case (lower or upper)
+        // for a hex nibble. The production regex `[0-9a-fA-F]` is
+        // case-insensitive, but the previous proof only exercised
+        // lowercase. We add ONE symbolic case bit that applies uniformly to
+        // all nibbles in this proof — proving the model recognises BOTH
+        // all-lowercase AND all-uppercase MACs. (Mixed-case MACs in the
+        // same string are a documented gap: per-nibble case bits would
+        // double the symbolic state space and stress CBMC's unwind budget.
+        // Production regex covers it; the fuzz suite is the documented
+        // fallback for that equivalence class.)
+        fn nibble_to_hex(n: u8, uppercase: bool) -> u8 {
             if n < 10 {
                 b'0' + n
+            } else if uppercase {
+                b'A' + (n - 10)
             } else {
                 b'a' + (n - 10)
             }
         }
+
+        let uppercase: bool = kani::any();
 
         // Twelve symbolic hex nibbles (two per octet, six octets).
         // Unrolled explicitly to avoid the `for i in 0..12` loop confusing
@@ -572,23 +585,23 @@ mod kani_proofs {
 
         // Assemble "HH:HH:HH:HH:HH:HH" (17 bytes).
         let bytes = [
-            nibble_to_hex(n[0]),
-            nibble_to_hex(n[1]),
+            nibble_to_hex(n[0], uppercase),
+            nibble_to_hex(n[1], uppercase),
             b':',
-            nibble_to_hex(n[2]),
-            nibble_to_hex(n[3]),
+            nibble_to_hex(n[2], uppercase),
+            nibble_to_hex(n[3], uppercase),
             b':',
-            nibble_to_hex(n[4]),
-            nibble_to_hex(n[5]),
+            nibble_to_hex(n[4], uppercase),
+            nibble_to_hex(n[5], uppercase),
             b':',
-            nibble_to_hex(n[6]),
-            nibble_to_hex(n[7]),
+            nibble_to_hex(n[6], uppercase),
+            nibble_to_hex(n[7], uppercase),
             b':',
-            nibble_to_hex(n[8]),
-            nibble_to_hex(n[9]),
+            nibble_to_hex(n[8], uppercase),
+            nibble_to_hex(n[9], uppercase),
             b':',
-            nibble_to_hex(n[10]),
-            nibble_to_hex(n[11]),
+            nibble_to_hex(n[10], uppercase),
+            nibble_to_hex(n[11], uppercase),
         ];
 
         // The model must recognise this as MAC-shaped.
