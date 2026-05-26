@@ -282,14 +282,28 @@ fn extract_kv(text: &str, key: &str) -> String {
 }
 
 /// Resolve a raw IP (or pseudonym) to its pseudonym via the map.
-/// - Already-pseudonymized strings (`host_NNN`) pass through unchanged.
+/// - Already-pseudonymized strings (`host_NNN` / `mac_NNN` / `name_NNN`)
+///   pass through unchanged.
 /// - Empty strings pass through unchanged.
-/// - Raw IPs are looked up in `map.ips`; if absent, the raw IP is returned.
+/// - Raw IPs are looked up in `map.ips`; if absent, an opaque
+///   `unmapped_<hash>` label is returned — never the raw value.
+///
+/// ADV-W2-001: the map-miss fallback emits `unmapped_label` rather than
+/// returning the raw input, matching the `ip_to_pseudo` closure used on the
+/// serialized-output path. This keeps the function fail-closed on its own,
+/// so a diff key can never carry a real IP even if a future caller routes
+/// its return value into serialized output.
 fn resolve_endpoint(s: &str, map: &ScrubMap) -> String {
-    if s.is_empty() || s.starts_with("host_") {
+    if s.is_empty() || is_pseudonym(s) {
         return s.to_string();
     }
-    resolve_ip_to_pseudonym(s, map).unwrap_or_else(|| s.to_string())
+    resolve_ip_to_pseudonym(s, map).unwrap_or_else(|| unmapped_label(s))
+}
+
+/// True if `s` already carries a canonical scrub pseudonym prefix
+/// (`host_` / `mac_` / `name_`) and must pass through unchanged.
+fn is_pseudonym(s: &str) -> bool {
+    s.starts_with("host_") || s.starts_with("mac_") || s.starts_with("name_")
 }
 
 /// Look up an IP string in the map and return its pseudonym if present.
@@ -829,12 +843,22 @@ mod tests {
     #[test]
     fn resolve_endpoint_passes_through_pseudonym_unchanged() {
         let map = scrub_map(&[("host_001", "10.0.0.1")]);
+        // ADV-W2-004: all canonical pseudonym prefixes pass through unchanged.
         assert_eq!(resolve_endpoint("host_005", &map), "host_005");
+        assert_eq!(resolve_endpoint("mac_005", &map), "mac_005");
+        assert_eq!(resolve_endpoint("name_005", &map), "name_005");
     }
 
     #[test]
-    fn resolve_endpoint_unmapped_ip_returns_itself() {
+    fn resolve_endpoint_unmapped_ip_yields_opaque_label_not_raw() {
         let map = scrub_map(&[("host_001", "10.0.0.1")]);
-        assert_eq!(resolve_endpoint("192.168.1.1", &map), "192.168.1.1");
+        // ADV-W2-001: a genuine map-miss must NOT leak the raw IP; it emits an
+        // opaque unmapped_<hash> label instead (fail-closed, like ip_to_pseudo).
+        let out = resolve_endpoint("192.168.1.1", &map);
+        assert_ne!(out, "192.168.1.1", "map-miss must not return the raw IP");
+        assert!(
+            out.starts_with("unmapped_"),
+            "map-miss must yield an unmapped_<hash> label, got {out}"
+        );
     }
 }
