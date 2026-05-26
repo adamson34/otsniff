@@ -690,6 +690,17 @@ fn test_ac_004_flow_volume_doubled_triggers_shift() {
         "BC-3.08.003 AC-004: ratio for 300/100 should be 3.0, got {}",
         fs.ratio
     );
+    // F-W2-003: the shifted flow must carry the *correct* pseudonyms, not the
+    // raw IPs and not a neighbour's pseudonym. Guards the IP→pseudonym lookup
+    // (`real == ip`) inside the flow-shift computation.
+    assert_eq!(
+        fs.src, "host_010",
+        "BC-3.08.003 AC-004: flow_shift src must resolve 10.1.0.1 → host_010"
+    );
+    assert_eq!(
+        fs.dst, "host_011",
+        "BC-3.08.003 AC-004: flow_shift dst must resolve 10.1.0.2 → host_011"
+    );
 }
 
 /// AC-004 | BC-3.08.003

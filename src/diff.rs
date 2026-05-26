@@ -738,3 +738,103 @@ fn proto_label(proto: u8) -> String {
         _ => format!("ip/{proto}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::findings::Severity;
+    use chrono::Utc;
+    use std::collections::BTreeMap;
+
+    fn scrub_map(entries: &[(&str, &str)]) -> ScrubMap {
+        ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: entries
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        }
+    }
+
+    fn finding_with_evidence(evidence: &str) -> Finding {
+        Finding {
+            id: "test.rule",
+            severity: Severity::Medium,
+            title: "t".to_string(),
+            summary: "s".to_string(),
+            evidence: vec![evidence.to_string()],
+            recommendation: "r",
+            playbook: vec![],
+        }
+    }
+
+    // finding_diff_key: the test-format branch (F-ADV-P4-003) requires ALL
+    // THREE of src/dst/port to be present. Each `&&` in that guard must hold;
+    // mutating either to `||` would let partial-field evidence wrongly take
+    // the branch and produce a mismatched tuple key.
+
+    #[test]
+    fn finding_diff_key_test_format_requires_all_three_tokens() {
+        let map = scrub_map(&[("host_001", "10.0.0.1"), ("host_002", "10.0.0.2")]);
+        let f = finding_with_evidence("src=10.0.0.1 dst=10.0.0.2 port=502");
+        assert_eq!(
+            finding_diff_key(&f, &map),
+            (
+                "test.rule".to_string(),
+                "host_001".to_string(),
+                "host_002".to_string(),
+                502
+            ),
+            "all three tokens present should take the test-format branch and resolve endpoints",
+        );
+    }
+
+    #[test]
+    fn finding_diff_key_missing_dst_does_not_take_test_branch() {
+        let map = scrub_map(&[("host_001", "10.0.0.1")]);
+        // dst token absent → the all-three guard must be false → fall through
+        // to the degenerate default (no IP-arrow / IP:port shape present).
+        let f = finding_with_evidence("src=10.0.0.1 port=502");
+        assert_eq!(
+            finding_diff_key(&f, &map),
+            ("test.rule".to_string(), String::new(), String::new(), 0),
+            "missing dst must NOT take the test-format branch (guards the && in the all-three check)",
+        );
+    }
+
+    #[test]
+    fn finding_diff_key_missing_port_does_not_take_test_branch() {
+        let map = scrub_map(&[("host_001", "10.0.0.1"), ("host_002", "10.0.0.2")]);
+        let f = finding_with_evidence("src=10.0.0.1 dst=10.0.0.2");
+        assert_eq!(
+            finding_diff_key(&f, &map),
+            ("test.rule".to_string(), String::new(), String::new(), 0),
+            "missing port must NOT take the test-format branch (guards the second && in the check)",
+        );
+    }
+
+    // resolve_endpoint: pseudonymizes raw IPs, passes `host_NNN` and empty
+    // strings through unchanged. Asserting concrete non-empty returns kills
+    // whole-body replacement mutants (String::new() / "xyzzy".into()).
+
+    #[test]
+    fn resolve_endpoint_maps_raw_ip_to_pseudonym() {
+        let map = scrub_map(&[("host_001", "10.0.0.1")]);
+        assert_eq!(resolve_endpoint("10.0.0.1", &map), "host_001");
+    }
+
+    #[test]
+    fn resolve_endpoint_passes_through_pseudonym_unchanged() {
+        let map = scrub_map(&[("host_001", "10.0.0.1")]);
+        assert_eq!(resolve_endpoint("host_005", &map), "host_005");
+    }
+
+    #[test]
+    fn resolve_endpoint_unmapped_ip_returns_itself() {
+        let map = scrub_map(&[("host_001", "10.0.0.1")]);
+        assert_eq!(resolve_endpoint("192.168.1.1", &map), "192.168.1.1");
+    }
+}
