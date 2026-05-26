@@ -13,6 +13,23 @@ Status: OPEN / IN-PROGRESS / CLOSED
 
 Sourced from ADV-P1 (2026-05-23, develop tip `7c98a3a`) and ADV-P2 (2026-05-24, develop tip `f8e34d7`). See `.factory/cycles/v0.4.0-feature/adversarial-reviews/pass-{1,2}.md` for full evidence + remediation per finding.
 
+### ADV-P4 findings (2026-05-26, develop tip 1f7d4cf, post-F-ADV-P3 fix burst)
+
+| ID | Priority | Source | Status | Description | Suggested fix |
+|---|---|---|---|---|---|
+| F-ADV-P4-001 | **CRITICAL** | ADV-P4 | OPEN | LDAP STARTTLS suppression functionally inert — `dst_port == 389` gate only admits client→server; STARTTLS ExtendedResponse goes server→client; `ldap_starttls_flows` never populated; `used_starttls` always false; AC-003 STARTTLS suppression is dead code; real STARTTLS-then-Bind traffic falsely flagged as plaintext creds | Add `pkt.src_port == 389/3268` branch for response direction; use direction-agnostic flow key (canonical min/max); add regression test that constructs both packets at `Packet` level |
+| F-ADV-P4-002 | HIGH | ADV-P4 (partial F-ADV-P3-007) | OPEN | `mutants.yml` kill-rate parser uses wrong cargo-mutants schema strings (`'MissedMutations'` plural, `'killed'`, `'caught'` — none match v27's `CaughtMutant`/`MissedMutation`); `killed=0` always; F-ADV-P3-007 gate exits 1 on every successful run | Update parser to match cargo-mutants v27 schema; add sanity guard for `total > 0 && killed == 0 && survived == 0` → fail with schema-mismatch error; emit positive-coverage `Check passed: parsed N outcomes` |
+| F-ADV-P4-003 | MEDIUM | ADV-P4 | OPEN | `extract_kv` test-helper format runs FIRST in production code; future detector emitting `port=NNN` token in evidence would short-circuit real regex extraction | Gate behind `#[cfg(test)]` OR require all 3 tokens before taking branch |
+| F-ADV-P4-004 | MEDIUM | ADV-P4 | OPEN | `composed_privacy_invariant_non_vacuous` Kani harness doesn't assert `out_slice == pseudo` — only that output lacks `real`, which holds vacuously for empty output | Add `assert!(out_slice == pseudo)` inside the harness |
+| F-ADV-P4-005 | MEDIUM | ADV-P4 | OPEN | `kani.yml` has no positive-coverage assertion any harness ran; `steps.<id>.outcome=success` doesn't prove a harness was matched and verified | Parse `VERIFICATION:- SUCCESSFUL` count per harness; assert `Check passed: N/N harnesses verified` |
+| F-ADV-P4-006 | MEDIUM | ADV-P4 | OPEN | `parse::s7comm` min-length guard hardcoded `+10` but rosctr 0x02/0x03 needs `+12`; safe today (subsequent guards), fragile to future changes | Compute `s7_header_len` first, then guard `payload.len() >= s7_offset + s7_header_len + 1` |
+| F-ADV-P4-007 | MEDIUM | ADV-P4 (escalated from F-ADV-P1-020 LOW) | OPEN | ENIP CIP scan: 18-byte window matching any byte with engineering-class service code (0x05-0x09 etc.); ~30% false-positive rate per random ENIP payload (math: 1 - (251/256)^18 ≈ 0.30) | Parse CPF item structure properly; OR narrow scan to documented offsets; add snapshot test asserting benign payload doesn't fire |
+| F-ADV-P4-008 | MEDIUM | ADV-P4 | OPEN | `unscrub_text` returns `(text, 0, [])` silently when map is empty; user sees `wrote out (0 replaced)` and ships AI response with pseudonyms intact | Print stronger stderr warning when `map.is_empty()`; promote to `Err` under `--strict` |
+| F-ADV-P4-009 | LOW | ADV-P4 (duplicate F-ADV-P1-017) | OPEN | `merge_map` EC-002 uses `panic!` instead of typed `OtError::Parse` | Replace with `Err(OtError::Parse(...))`; propagate through merge_map signature |
+| F-ADV-P4-010 | MEDIUM | ADV-P4 | OPEN | `run_diff` doesn't validate map coverage of observed hosts; operator swapping --baseline-map and --current-map produces 100% `unmapped_<hash>` output silently | Compute % of obs.hosts resolvable in map; emit `WARNING: only N% of hosts covered` when <50% on either side |
+| F-ADV-P4-011 | LOW | ADV-P4 | OPEN | Kani MAC model only covers lowercase hex; production regex case-insensitive | Add per-nibble case bit; OR document lowercase-only scope explicitly |
+| F-ADV-P4-012 | LOW | ADV-P4 | OPEN | `pseudonym_regex` `\b` boundary doesn't handle concatenated pseudonyms (`host_001host_002` — second token unmatched) | Decide desired behavior (split or fail); add regression test; document |
+
 ### ADV-P3 findings (2026-05-26, develop tip 2ac8f2e, post-F-ADV-P2 fix burst)
 
 | ID | Priority | Source | Status | Description | Suggested fix |
