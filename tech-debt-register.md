@@ -13,6 +13,23 @@ Status: OPEN / IN-PROGRESS / CLOSED
 
 Sourced from ADV-P1 (2026-05-23, develop tip `7c98a3a`) and ADV-P2 (2026-05-24, develop tip `f8e34d7`). See `.factory/cycles/v0.4.0-feature/adversarial-reviews/pass-{1,2}.md` for full evidence + remediation per finding.
 
+### ADV-P3 findings (2026-05-26, develop tip 2ac8f2e, post-F-ADV-P2 fix burst)
+
+| ID | Priority | Source | Status | Description | Suggested fix |
+|---|---|---|---|---|---|
+| F-ADV-P3-001 | **CRITICAL** | ADV-P3 | OPEN | `run_scrub` writes to disk WITHOUT `ensure_clean` / `ensure_no_map_values` — asymmetric with `analyze --ai` and `diff`; scrub subcommand is the manual AI-safe path and lacks the fail-closed gate | Add both checks immediately after `scrub_text` in `run_scrub` before either write |
+| F-ADV-P3-002 | HIGH | ADV-P3 | OPEN | `report_md.rs` Top-flows table interpolates raw IPs unconditionally; robust by accidental ordering (relies on flow keys always being in obs.hosts) | Add `debug_assert!` in `build_map` that all flow-key IPs are in the map; combined with F-ADV-P3-001 becomes real check |
+| F-ADV-P3-003 | HIGH | ADV-P3 (partial F-ADV-P2-001) | OPEN | `html_render::url_is_unsafe` only strips LEADING whitespace; WHATWG URL spec §4.4.3 removes embedded tab/LF/CR before scheme parsing → `java\tscript:` bypasses | Strip ALL ASCII whitespace + control chars from URL before scheme compare; add tests for embedded-tab/LF/CR variants |
+| F-ADV-P3-004 | HIGH | ADV-P3 | OPEN | `scrub_text` substring shadowing when real value is a prefix of any pseudonym (e.g. DHCP hostname `"host"`); fuzz harness explicitly excludes this case with claim "production never produces" — false since DHCP hostnames are user-controlled | In `build_map`, validate names don't equal any pseudonym prefix; OR rewrite `scrub_text` to single-pass longest-match (Aho-Corasick) |
+| F-ADV-P3-005 | HIGH | ADV-P3 | OPEN | `ScrubMap::validate` doesn't check pseudonym shape; user-supplied baseline with `"FOOBAR": "10.0.0.1"` in ips passes validation, breaks `unscrub_text` regex extraction | Require keys match `^(host\|mac\|name)_[0-9]+$` in `validate()`; reject otherwise |
+| F-ADV-P3-006 | HIGH | ADV-P3 (partial F-ADV-P2-002) | OPEN | `diff::unmapped_label` uses only 4 hex chars (16 bits) — trivially brute-forceable against any small IP candidate space (a /24 = 256 candidates, sub-second recovery) | Use ≥8 hex chars (32 bits) + per-run random salt mixed into hash; OR fail-closed when unmapped IP encountered |
+| F-ADV-P3-007 | HIGH | ADV-P3 | OPEN | `mutants.yml` writes "drop > 5% is a soft signal" to step summary but never `exit 1` when KILL_PCT < 79.1 — POL-11 false-green (this is the exact anti-pattern POL-11 targets) | Add `if KILL_PCT < 79.1 then exit 1 else echo "Check passed:..."` after the kill-rate computation |
+| F-ADV-P3-008 | MEDIUM | ADV-P3 | OPEN | `kani.yml` runs only on weekly cron + manual dispatch; composed privacy proof is not gated on PR → privacy-affecting regression could land for ≤7 days before detection | Add `pull_request:` trigger with `paths:` filter for scrub/leak_detector/diff/html_render/kani_proofs |
+| F-ADV-P3-009 | MEDIUM | ADV-P3 (related F-ADV-P1-019) | OPEN | `which_claude` checks `is_file()` but not Unix executable bit; non-executable file at $PATH/claude passes check then `cmd.spawn()` fails cryptically | Check `meta.permissions().mode() & 0o111 != 0` on Unix; expand candidate names on Windows |
+| F-ADV-P3-010 | MEDIUM | ADV-P3 (≈F-ADV-P1-015) | OPEN | `audit::AuditLog.input_pcap.path` records full filesystem path — same defect as F-ADV-P2-009 fixed for markdown header, but audit log was not updated; chain-of-custody artifact leaks operator username + plant name | Record only basename + SHA-256 (already present); drop the full path |
+| F-ADV-P3-011 | MEDIUM | ADV-P3 | OPEN | `parse::s7comm` doesn't bound `cotp_len_byte`; RFC 905 COTP class-0 header max is ~6 bytes, accepting up to 255 gives malicious packet 248 free bytes to position synthetic `0x32` at S7 offset | Add `if cotp_len_byte > 17 { return None; }` early bound |
+| F-ADV-P3-012 | MEDIUM | ADV-P3 (≈F-ADV-P1-008) | OPEN | `diff::compute` EC-002 warning silenced when either map empty (`!base_pseudo_set.is_empty() && !curr_pseudo_set.is_empty()`); empty map is a more plausible bug than non-empty disjoint | Add separate empty-map warning before the disjointness check |
+
 ### ADV-P2 still-OPEN (post-PR #100)
 
 | ID | Priority | Source | Status | Description | Suggested fix |
