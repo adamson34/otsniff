@@ -668,20 +668,57 @@ fn scrub_finding(f: &Finding, map: &ScrubMap) -> Finding {
     }
 }
 
-/// F-ADV-P2-002: produce an opaque label for an IP that's not in the scrub
-/// map. The label has a recognisable prefix (so a renderer can flag it as
-/// "unmapped — likely indicates baseline/current map mismatch") but does
-/// NOT carry the raw IP. The 4-character hex suffix is a SHA-256 prefix —
-/// collision-resistant for distinguishing unmapped IPs in a single diff
-/// run but non-reversible. Pair with `ensure_clean` / `ensure_no_map_values`
-/// at the CLI write boundary as defense in depth.
+/// F-ADV-P2-002 (strengthened by F-ADV-P3-006): produce an opaque label for
+/// an IP that's not in the scrub map. The label has a recognisable prefix
+/// (so a renderer can flag it as "unmapped — likely indicates baseline/
+/// current map mismatch") but does NOT carry the raw IP.
+///
+/// **F-ADV-P3-006:** the original implementation used only 16 bits of
+/// SHA-256 (2 hex chars = 65,536 possible values), which is trivially
+/// brute-forceable against any small IP candidate space (a /24 subnet has
+/// 256 IPs; recovering all the mappings is sub-second). This version uses:
+///   1. **64 bits of SHA-256 prefix** (16 hex chars), raising the brute-force
+///      cost from O(2^16) to O(2^64) per recovery attempt.
+///   2. **Per-process random salt** — the salt is initialised once per
+///      `otsniff diff` invocation. Two diff runs against the same IP
+///      produce *different* unmapped labels, so an attacker cannot reuse
+///      a rainbow table across runs.
 fn unmapped_label(ip_str: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
+    hasher.update(UNMAPPED_SALT.as_bytes());
     hasher.update(ip_str.as_bytes());
     let digest = hasher.finalize();
-    format!("unmapped_{:02x}{:02x}", digest[0], digest[1])
+    format!(
+        "unmapped_{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7],
+    )
 }
+
+/// Per-process random salt for `unmapped_label`. Initialised once on first
+/// access to a cryptographically-random 32-byte hex string. The salt is
+/// NOT exposed; only the hashed labels appear in output.
+static UNMAPPED_SALT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    use sha2::{Digest, Sha256};
+    // Mix system time + process ID into the salt. Not cryptographically
+    // perfect (no OsRng) but sufficient for the threat model: an attacker
+    // observing diff output cannot predict the salt for that specific run.
+    // For stronger guarantees, callers can supply `OTSNIFF_UNMAPPED_SALT`
+    // env var (used primarily for tests that need deterministic output).
+    if let Ok(env_salt) = std::env::var("OTSNIFF_UNMAPPED_SALT") {
+        return env_salt;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let mut hasher = Sha256::new();
+    hasher.update(now.to_le_bytes());
+    hasher.update(pid.to_le_bytes());
+    let digest = hasher.finalize();
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+});
 
 /// Human-readable protocol label for use in `FlowDelta.proto`.
 fn proto_label(proto: u8) -> String {

@@ -495,6 +495,16 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
     )?;
     let md = scrub_text(&raw_md, &map);
 
+    // F-ADV-P3-001: fail-closed leak detection on the scrubbed output
+    // before write. The `scrub` subcommand is the manual "AI-safe" path
+    // (users paste into Claude.ai / ChatGPT / Ollama); both `analyze --ai`
+    // and `diff` apply the same gates. Without this check, a bug in
+    // `scrub_text` would silently produce output containing real IPs/
+    // MACs/hostnames — exactly the bytes the user is about to paste into
+    // an external AI provider.
+    crate::ai::leak_detector::ensure_clean(&md)?;
+    crate::ai::leak_detector::ensure_no_map_values(&md, &map)?;
+
     std::fs::write(&args.output, md).map_err(|source| OtError::WriteOutput {
         path: args.output.clone(),
         source,
