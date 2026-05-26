@@ -85,6 +85,8 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.sha256
-          draft: true
+          # Stable releases (tag has no '-') draft for human review before
+          # publish; dev/pre-releases (tag like vX.Y.Z-dev.N) auto-publish.
+          draft: ${{ !contains(github.ref_name, '-') }}
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
