@@ -7,7 +7,7 @@
 # ---------------------------------------------------------------------------
 # Scope — only high-value modules per AC-001
 # ---------------------------------------------------------------------------
-# We restrict mutation testing to the four modules where a missed mutation
+# We restrict mutation testing to the modules where a missed mutation
 # would represent a real security regression:
 #
 #   src/findings/   — detection rules whose correctness is security-critical;
@@ -18,6 +18,9 @@
 #                     to the AI provider.
 #   src/ai/leak_detector.rs — fail-closed kill switch; must never allow a
 #                             scrub bypass through.
+#   src/diff.rs     — cross-capture diff carries the same privacy logic
+#                     (scrub_finding / unmapped_label / resolve_endpoint);
+#                     a missed mutation could leak a real IP into diff output.
 #
 # Modules excluded from scope:
 #   src/main.rs     — entry point; exit-code mapping, not business logic.
@@ -32,6 +35,7 @@ examine_globs = [
     "src/parse/**/*.rs",
     "src/scrub.rs",
     "src/ai/leak_detector.rs",
+    "src/diff.rs",
 ]
 
 # ---------------------------------------------------------------------------
