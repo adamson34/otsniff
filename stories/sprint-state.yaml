@@ -3,13 +3,17 @@
 # This file is mutated by the orchestrator as waves progress. Initial state is "pending" for Wave 1, "blocked" for later waves.
 
 cycle: v0.4.0-feature
-current_wave: 2
+current_wave: 3
 total_waves: 3
 total_stories: 38
 wave_1_status: completed
 wave_1_gate_passed_at: 2026-05-19T20:30:07Z
 wave_1_merge_sha: dd69ff8
 wave_1_notes: "All 6 gates pass. Mutation testing PASSED-WITH-DISPOSITIONS (84.1% effective kill rate after PR #83). 2 HIGH adversary findings (F-W1-001 run_unscrub validate, F-W1-002 pseudonym regex) tracked for tech debt."
+wave_2_status: completed
+wave_2_gate_passed_at: 2026-05-26T21:31:54Z
+wave_2_merge_sha: c8c231a
+wave_2_notes: "All 6 gates pass (run retroactively; stories S-3.03/3.04/4.04/6.02 had merged earlier without a gate). Gate1 tests 393->399. Gate2 DTU skipped (no clones/criticality manifest). Gate2b mutation on src/diff.rs PASS-WITH-DISPOSITIONS 83.9% (PR #107, report logs/mutation-report-wave-2-otsniff.md). Gate3 adversarial: 0 CRITICAL, 2 HIGH addressed (ADV-W2-001 resolve_endpoint fail-closed, ADV-W2-002 diff.rs added to mutation scope) + 2 LOW via PR #108; ADV-W2-003 dismissed. Gate5 holdout HS-005 (kani) 1.00 + HS-006 (fuzz) 1.00; fixed fuzz CI (cargo-fuzz pin + chrono dep + sentinel leak-oracle) via PR #109 — scrub_text confirmed correct, no privacy bug."
 # S-5.04 added mid-cycle 2026-05-12: harden --ai invocation surface (defense-in-depth on scrub privacy contract).
 # S-3.06 added mid-cycle 2026-05-14: investigate + fix recurring macOS CI rustup-init flake (cycle_target: v0.4.1-patch).
 
