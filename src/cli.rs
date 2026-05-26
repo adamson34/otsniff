@@ -307,6 +307,39 @@ fn run_diff(
     let base_obs = analyze(&baseline_pcap, &ot_subnets, false, None)?;
     let curr_obs = analyze(&current_pcap, &ot_subnets, false, None)?;
 
+    // F-ADV-P4-010: validate map coverage of observed hosts. If the operator
+    // swapped --baseline-map and --current-map, or supplied a stale map from
+    // a different capture, `ip_to_pseudo` would fall back to
+    // `unmapped_<hash>` for every host. The privacy invariant is preserved
+    // (no real IPs leak via diff.rs) but utility is destroyed silently.
+    // Warn loudly when coverage falls below 50%.
+    {
+        let report_coverage = |side: &str, obs: &crate::observe::Observations, map: &ScrubMap| {
+            let observed: std::collections::HashSet<String> =
+                obs.hosts.keys().map(|ip| ip.to_string()).collect();
+            if observed.is_empty() {
+                return; // nothing to check
+            }
+            let mapped_count = observed
+                .iter()
+                .filter(|ip| map.ips.values().any(|v| v == *ip))
+                .count();
+            let pct = (mapped_count as f64 / observed.len() as f64) * 100.0;
+            if pct < 50.0 {
+                eprintln!(
+                    "WARNING (F-ADV-P4-010): only {pct:.1}% of {side} hosts are covered by \
+                     --{side}-map ({mapped_count}/{} mapped). Did you swap --baseline-map and \
+                     --current-map, or supply a stale map? The diff output's privacy is \
+                     preserved but coverage is degraded — most hosts will appear as \
+                     `unmapped_*` opaque labels.",
+                    observed.len()
+                );
+            }
+        };
+        report_coverage("baseline", &base_obs, &base_map);
+        report_coverage("current", &curr_obs, &curr_map);
+    }
+
     // Run findings for each side.
     let base_findings = crate::findings::run_all(&base_obs, &ot_subnets);
     let curr_findings = crate::findings::run_all(&curr_obs, &ot_subnets);
@@ -481,7 +514,7 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
         })?;
         let baseline: ScrubMap = serde_json::from_slice(&bytes)?;
         baseline.validate()?;
-        merge_map(baseline, &obs)
+        merge_map(baseline, &obs)?
     } else {
         build_map(&obs)
     };
@@ -891,6 +924,25 @@ fn run_unscrub(args: UnscrubArgs) -> Result<()> {
             buf
         }
     };
+
+    // F-ADV-P4-008: a common operator footgun is loading the wrong map
+    // file. An empty map silently makes unscrub a no-op. Warn loudly to
+    // stderr; promote to Err under --strict.
+    if map.is_empty() {
+        if args.strict {
+            return Err(OtError::Parse(
+                "F-ADV-P4-008: scrub map has zero entries (ips/macs/names all \
+                 empty); unscrub would be a silent no-op. In strict mode this \
+                 is an error — verify the --map path points to a populated map."
+                    .to_string(),
+            ));
+        }
+        eprintln!(
+            "WARNING (F-ADV-P4-008): scrub map has zero entries; unscrub is a no-op. \
+             Verify --map points to a populated map file. Re-run with --strict to \
+             treat this as an error."
+        );
+    }
 
     let (output, replaced, unmapped) = unscrub_text(&input_text, &map);
 

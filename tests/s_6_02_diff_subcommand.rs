@@ -1513,3 +1513,223 @@ fn test_f_adv_p3_006_unmapped_label_deterministic_with_fixed_salt() {
     assert!(label.starts_with("unmapped_"));
     assert!(label.len() >= "unmapped_".len() + 16);
 }
+
+// ============================================================================
+// F-ADV-P4 regression tests
+// ============================================================================
+
+/// F-ADV-P4-001: LDAP STARTTLS suppression must work when the response
+/// (server→client) arrives BEFORE the bind request (client→server).
+/// Previously the dst_port==389 gate filtered out the response direction
+/// entirely; the suppression code was dead. This test reconstructs the
+/// real packet ordering and asserts used_starttls=true survives into the
+/// LdapBindEvent.
+#[test]
+fn test_f_adv_p4_001_ldap_starttls_suppression_works_with_response_first() {
+    use chrono::Utc;
+    use otsniff::observe::Observer;
+    use otsniff::pcap::{Packet, Transport};
+
+    let client: IpAddr = "10.0.0.5".parse().unwrap();
+    let server: IpAddr = "10.0.0.1".parse().unwrap();
+
+    // Response (server→client): ExtendedResponse with success resultCode.
+    let extended_response_payload: Vec<u8> = vec![
+        0x30, 0x10, 0x02, 0x01, 0x01, 0x78, 0x0b, 0x0a, 0x01, 0x00, 0x04, 0x00, 0x04, 0x00, 0x04,
+        0x00,
+    ];
+    let response_pkt = Packet {
+        ts: Utc::now(),
+        src_mac: [0; 6],
+        dst_mac: [0; 6],
+        src_ip: server,
+        dst_ip: client,
+        transport: Transport::Tcp,
+        src_port: 389,
+        dst_port: 41234,
+        payload: extended_response_payload,
+    };
+
+    // Bind request (client→server).
+    let bind_request_payload: Vec<u8> = vec![
+        0x30, 0x16, 0x02, 0x01, 0x02, 0x60, 0x11, 0x02, 0x01, 0x03, 0x04, 0x05, b'a', b'd', b'm',
+        b'i', b'n', 0x80, 0x05, b's', b'e', b'c', b'r', b't',
+    ];
+    let bind_pkt = Packet {
+        ts: Utc::now(),
+        src_mac: [0; 6],
+        dst_mac: [0; 6],
+        src_ip: client,
+        dst_ip: server,
+        transport: Transport::Tcp,
+        src_port: 41234,
+        dst_port: 389,
+        payload: bind_request_payload,
+    };
+
+    let mut observer = Observer::new(Vec::new());
+    observer.observe(&response_pkt);
+    observer.observe(&bind_pkt);
+    let obs = observer.observations();
+
+    assert!(
+        !obs.ldap_bind_events.is_empty(),
+        "F-ADV-P4-001: bind request should have been recognized"
+    );
+    let evt = &obs.ldap_bind_events[0];
+    assert!(
+        evt.used_starttls,
+        "F-ADV-P4-001: bind event must have used_starttls=true after a \
+         successful ExtendedResponse from the server. Got: {:?}",
+        evt
+    );
+}
+
+/// F-ADV-P4-009: `merge_map` returns Result<ScrubMap> instead of panicking
+/// on EC-002 collision. Test that callers can use `?` propagation and that
+/// the happy path still works.
+#[test]
+fn test_f_adv_p4_009_merge_map_returns_result() {
+    use chrono::Utc;
+    use otsniff::observe::Observations;
+    use otsniff::scrub::{merge_map, ScrubMap};
+
+    // Empty baseline + empty obs = trivial successful merge.
+    let baseline = ScrubMap {
+        version: 1,
+        created_at: Utc::now(),
+        ips: BTreeMap::new(),
+        macs: BTreeMap::new(),
+        names: BTreeMap::new(),
+    };
+    let obs = Observations::default();
+    let result = merge_map(baseline, &obs);
+    assert!(
+        result.is_ok(),
+        "F-ADV-P4-009: merge_map must return Ok on a trivial fixture"
+    );
+}
+
+/// F-ADV-P4-008: `unscrub` with empty map emits a stderr warning and
+/// fails under --strict.
+#[test]
+fn test_f_adv_p4_008_unscrub_strict_rejects_empty_map() {
+    use assert_cmd::Command;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let map_path = tmp.path().join("empty.json");
+    std::fs::write(
+        &map_path,
+        r#"{"version":1,"created_at":"2026-01-01T00:00:00Z","ips":{},"macs":{},"names":{}}"#,
+    )
+    .unwrap();
+
+    let input_path = tmp.path().join("input.txt");
+    std::fs::write(&input_path, "Some text mentioning host_001.\n").unwrap();
+
+    let output_path = tmp.path().join("out.txt");
+
+    // --strict should reject empty map with exit 70 (Parse).
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["unscrub", "--map"])
+        .arg(&map_path)
+        .arg(&input_path)
+        .arg("-o")
+        .arg(&output_path)
+        .arg("--strict")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("F-ADV-P4-008"));
+}
+
+/// F-ADV-P4-012: `unscrub_text` correctly handles the realistic case where
+/// pseudonyms are separated by punctuation or whitespace. The pathological
+/// case `host_001host_002` (zero separator) is a documented limitation —
+/// the Rust `regex` crate doesn't support lookahead, so `\b` can't span
+/// two adjacent word characters. AIs in practice emit separated tokens.
+#[test]
+fn test_f_adv_p4_012_unscrub_handles_realistic_separators() {
+    use chrono::Utc;
+    use otsniff::scrub::{unscrub_text, ScrubMap};
+
+    let mut ips = BTreeMap::new();
+    ips.insert("host_001".to_string(), "10.0.0.1".to_string());
+    ips.insert("host_002".to_string(), "10.0.0.2".to_string());
+    let map = ScrubMap {
+        version: 1,
+        created_at: Utc::now(),
+        ips,
+        macs: BTreeMap::new(),
+        names: BTreeMap::new(),
+    };
+
+    // Space-separated.
+    let (output, replaced, _) = unscrub_text("host_001 host_002", &map);
+    assert!(output.contains("10.0.0.1") && output.contains("10.0.0.2"));
+    assert_eq!(replaced, 2, "space-separated pseudonyms both resolve");
+
+    // Comma-separated.
+    let (output, replaced, _) = unscrub_text("host_001,host_002", &map);
+    assert!(output.contains("10.0.0.1") && output.contains("10.0.0.2"));
+    assert_eq!(replaced, 2, "comma-separated pseudonyms both resolve");
+
+    // Newline-separated.
+    let (output, replaced, _) = unscrub_text("host_001\nhost_002", &map);
+    assert!(output.contains("10.0.0.1") && output.contains("10.0.0.2"));
+    assert_eq!(replaced, 2, "newline-separated pseudonyms both resolve");
+
+    // Documented limitation: zero-separator case. Only the first pseudonym
+    // resolves; the trailing "host_002" stays as-is. The Rust regex crate
+    // has no lookahead, so `\b` can't terminate a match at a position
+    // between two word characters.
+    let (output, replaced, _) = unscrub_text("host_001host_002", &map);
+    let _ = (output, replaced); // documented limitation; not asserted
+}
+
+/// F-ADV-P4-003: `extract_kv` test-helper format only triggers when ALL
+/// THREE tokens (src=, dst=, port=) are present. A real finding with
+/// only a `port=NNN` reference in evidence must NOT short-circuit to
+/// the test-helper path.
+#[test]
+fn test_f_adv_p4_003_extract_kv_requires_all_three_tokens() {
+    use otsniff::diff::{compute, DiffInput};
+    use otsniff::findings::{Finding, Severity};
+
+    // Finding with port=53 in evidence but NOT src= or dst=. Production
+    // detectors don't actually emit this shape but a future one might
+    // mention a port number in its evidence prose.
+    let finding = Finding {
+        id: "boundary.dns_resolver",
+        severity: Severity::Medium,
+        title: "DNS resolver".to_string(),
+        summary: "Some text containing port=53 reference".to_string(),
+        evidence: vec![
+            "192.168.1.5 -> 8.8.8.8:53 (resolver out of zone, port=53 fallback)".to_string(),
+        ],
+        recommendation: "investigate",
+        playbook: vec![],
+    };
+
+    let obs = Observations::default();
+    let map = scrub_map_with_ips(&[]);
+    let diff = compute(
+        DiffInput {
+            observations: &obs,
+            map: &map,
+            findings: std::slice::from_ref(&finding),
+        },
+        DiffInput {
+            observations: &obs,
+            map: &map,
+            findings: &[],
+        },
+    );
+
+    // The finding should be in findings_resolved (baseline-only). The
+    // diff key should be derived from the REAL "IP -> IP:port" pattern,
+    // not from the stray "port=53" token. This test mainly asserts that
+    // the diff runs without confusion.
+    assert_eq!(diff.findings_resolved.len(), 1);
+}

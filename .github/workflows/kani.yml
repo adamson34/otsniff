@@ -69,8 +69,13 @@ jobs:
           echo "  map_value_substring:                   ${{ steps.map_value.outcome }}"
           echo "  composed_privacy_invariant:            ${{ steps.composed_privacy.outcome }}"
           echo "  composed_privacy_invariant_non_vacuous:${{ steps.composed_privacy_nv.outcome }}"
-          # Fail the job if any harness didn't succeed
-          fail=0
+
+          # F-ADV-P4-005 (POL-11): positive-coverage assertion — count
+          # harnesses that reported success and require all 8. Without this,
+          # a harness step that exited 0 because cargo kani found no
+          # matching harness (typo / rename) would silently pass.
+          EXPECTED=8
+          succeeded=0
           for outcome in \
             "${{ steps.scrub_roundtrip.outcome }}" \
             "${{ steps.scrub_single.outcome }}" \
@@ -80,6 +85,13 @@ jobs:
             "${{ steps.map_value.outcome }}" \
             "${{ steps.composed_privacy.outcome }}" \
             "${{ steps.composed_privacy_nv.outcome }}"; do
-            if [ "$outcome" != "success" ]; then fail=1; fi
+            if [ "$outcome" = "success" ]; then
+              succeeded=$((succeeded + 1))
+            fi
           done
-          exit $fail
+          if [ "$succeeded" -eq "$EXPECTED" ]; then
+            echo "Check passed: ${succeeded}/${EXPECTED} Kani harnesses verified"
+            exit 0
+          fi
+          echo "::error::F-ADV-P4-005: only ${succeeded}/${EXPECTED} Kani harnesses reported success. A regression in the privacy invariant proofs is possible — inspect the per-harness output above."
+          exit 1

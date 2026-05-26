@@ -45,28 +45,71 @@ pub fn parse_header(payload: &[u8]) -> Option<EnipHeader> {
     })
 }
 
-/// Heuristic: scan past the encapsulation header for a CIP service code in
-/// SendRRData / SendUnitData payloads. CIP requests have the high bit clear;
-/// the service code byte is at varying offsets depending on the CPF item
-/// structure but commonly sits 6–10 bytes into the data portion. We sweep a
-/// short window and return the first plausible engineering-class service.
+/// Heuristic: locate the CIP service code in SendRRData / SendUnitData
+/// payloads by parsing the CPF (Common Packet Format) item structure.
+///
+/// **F-ADV-P4-007:** the previous implementation swept a 24-byte window
+/// looking for any byte whose lower 7 bits matched an engineering-class
+/// service code. With service codes 0x05–0x09 (Reset/Start/Stop/Create/
+/// Delete) being extremely common byte values in any binary protocol
+/// payload (item counts, sequence numbers, type-id low bytes), the
+/// probability of a false positive per random 18-byte window was
+/// `1 - (251/256)^18 ≈ 30%`. This version parses the CPF structure
+/// properly: read item count, walk items reading `(type_id, length)`
+/// pairs, inspect ONLY Connected (0x00B1) or Unconnected (0x00B2) data
+/// items, and read the service code at the documented offset (byte 0 for
+/// Unconnected, byte 2 after the 2-byte sequence count for Connected).
 pub fn engineering_class_cip(payload: &[u8]) -> Option<CipService> {
     let hdr = parse_header(payload)?;
     if !matches!(hdr.command, 0x006F | 0x0070) {
         return None;
     }
     let data = payload.get(HEADER_LEN..)?;
-    // Skip the 4-byte interface handle + 2-byte timeout that precede CPF on
-    // SendRRData. Then sweep offsets 6..=24 for an engineering-class service.
-    let scan_from = if hdr.command == 0x006F { 6 } else { 0 };
-    let end = (scan_from + 24).min(data.len());
-    for byte in data.iter().take(end).skip(scan_from) {
-        let svc = byte & 0x7f;
-        if let Some(s) = CipService::from_code(svc) {
-            if s.is_engineering_class() {
-                return Some(s);
+
+    // SendRRData (0x006F): 4-byte interface handle + 2-byte timeout, then CPF.
+    // SendUnitData (0x0070): same layout (interface handle + timeout = 0
+    // in practice; CPF still starts at offset 6).
+    let cpf_start = 6;
+    let cpf = data.get(cpf_start..)?;
+    // CPF: 2-byte item count, then `count` items of (2-byte type_id,
+    // 2-byte length, length-byte data).
+    if cpf.len() < 2 {
+        return None;
+    }
+    let item_count = u16::from_le_bytes([cpf[0], cpf[1]]) as usize;
+    let mut cursor = 2usize;
+    // Bound the loop defensively — a malicious payload could claim a huge
+    // item count.
+    for _ in 0..item_count.min(16) {
+        if cursor + 4 > cpf.len() {
+            return None;
+        }
+        let type_id = u16::from_le_bytes([cpf[cursor], cpf[cursor + 1]]);
+        let item_len = u16::from_le_bytes([cpf[cursor + 2], cpf[cursor + 3]]) as usize;
+        let item_data_start = cursor + 4;
+        let item_data_end = item_data_start.saturating_add(item_len);
+        if item_data_end > cpf.len() {
+            return None;
+        }
+        // Inspect only data items. Type IDs:
+        //   0x00B1 — Connected Data Item (preceded by a 2-byte sequence count)
+        //   0x00B2 — Unconnected Data Item (CIP message starts at offset 0)
+        let svc_byte_offset = match type_id {
+            0x00B2 => Some(0usize),
+            0x00B1 => Some(2usize), // skip the 2-byte sequence count
+            _ => None,
+        };
+        if let Some(off) = svc_byte_offset {
+            if let Some(&byte) = cpf.get(item_data_start + off) {
+                let svc = byte & 0x7f;
+                if let Some(s) = CipService::from_code(svc) {
+                    if s.is_engineering_class() {
+                        return Some(s);
+                    }
+                }
             }
         }
+        cursor = item_data_end;
     }
     None
 }
