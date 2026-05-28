@@ -378,15 +378,21 @@ stories:
 
   # ===== Wave 3 (depends on Wave 1 or 2) =====
   S-5.03:
-    status: blocked
+    status: completed
     wave: 3
-    blocked_by: [S-2.05, S-2.06, S-2.07]
-    soft_prefers: [S-2.08, S-2.09, S-2.10, S-2.11]
-    branch: null
-    worktree: null
+    blocked_by: [S-2.05, S-2.06, S-2.07]  # all merged in wave 2 (verified 2026-05-28)
+    soft_prefers: [S-2.08, S-2.09, S-2.10, S-2.11]  # all merged in wave 2
+    branch: feature/S-5.03-ai-augmented-findings  # squash-merged, branch deleted
+    worktree: null  # .worktrees/S-5.03 removed
+    unblocked_at: 2026-05-28T00:00:00Z
+    merge_sha: 43fe86d
+    pr: 114
+    merged_at: 2026-05-28T20:51:20Z
+    notes: "Wave-3 first delivery. Adds AI-augmented findings: new src/findings/augmented.rs (augment_findings + parse_augmented_response + dedup_against_rule_findings + AugmentedFinding + Confidence), AiProvider::augment trait method, ClaudeCliProvider::augment shell-out, render_augmented_section in HTML + markdown reports, AuditLog.augment_pass field. Implements BC-6.05.001 (augment request scrubbed), BC-6.05.002 (response shape + parser tolerance), BC-6.05.003 (dedup against rule findings via pseudonym-set subset), BC-3.07.001 (HTML + markdown render section). Privacy invariant extended via invariant_no_real_values_reach_ai_provider_augment canary test. 23 new tests added; suite 400 → 423 → 426 after fix iteration. EC-001..004 covered (malformed JSON → empty, cap@25 stable-sort + truncate, host-pseudonym hallucination filter pre-unscrub, augment-error soft-fail). Required fix iteration after pr-reviewer found 3 CRITICAL + 4 HIGH + 3 MEDIUM (most notably: augment_findings was not wired into cli.rs::run_analyze in first pass — fixed in commit e8e59dd; EC-003 filter ran post-unscrub — fixed in e6b464b; AC-006 was unverifiable — fixed by returning AugmentInvocationSummary tuple). Second pr-reviewer pass: APPROVE. No new deps. Zero regressions to 271 pre-existing tests."
   S-6.03:
-    status: blocked
+    status: pending
     wave: 3
-    blocked_by: [S-6.02]
+    blocked_by: [S-6.02]  # merged 5f9963a (PR #97) on 2026-05-23
     branch: null
     worktree: null
+    unblocked_at: 2026-05-28T00:00:00Z

@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 99  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001
+total_bcs: 104  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -121,11 +121,15 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-6.03.002 Claude invocation always passes `--disallowed-tools` (HIGH, added S-5.04 v0.4.0)
 - BC-6.03.003 `ClaudeCliProvider::analyze` pre-checks `claude` is on `PATH` before invocation and returns `OtError::Parse("claude not on PATH ...")` if absent — avoids cryptic spawn errors (HIGH, promoted from BC-AUDIT-014 in S-1.05 — shifted from suggested .002 due to existing --disallowed-tools BC)
 - BC-6.04.001 `ClaudeCliProvider::analyze` emits stderr heartbeat `[Ns] claude still working...` every 3 seconds of wall-clock time while the subprocess is alive; on completion emits `done in N.Ns, B bytes response`; both lines suppressed when `verbose=false` AND stderr is not a TTY; heartbeat interval is exactly 3 s via injected `Clock` trait so tests can control time without sleeping (HIGH, added S-5.02 v0.4.0)
+- BC-6.05.001 `augment_findings` invokes `AiProvider::augment` exactly once with scrubbed markdown; bytes sent to the provider must pass both leak-detector checks (regex + map-value); called only when `--ai` is set (HIGH, added S-5.03 v0.5.0)
+- BC-6.05.002 `augment_findings` returns `Vec<AugmentedFinding>` (plus `AugmentInvocationSummary`) parsed from the provider's JSON array response; each finding carries `id` (namespaced `ai.<short>`), `severity`, `title`, `evidence`, `confidence`, `reasoning`; response prose preamble/postamble tolerated; cap at top-25 by confidence (High→Medium→Low) via stable sort + truncate; malformed JSON degrades to empty vec (EC-001) (HIGH, added S-5.03 v0.5.0)
+- BC-6.05.003 Augmented findings deduped against rule findings by pseudonym-set subset: an augmented finding is dropped when its pseudonym set (host_NNN, mac_NNN, name_NNN tokens from evidence) is a subset of any rule finding's pseudonym set; disjoint findings survive; common non-pseudonym words (e.g. "Modbus") do not trigger dedup; dedup runs BEFORE unscrub so both sides are in scrubbed vocabulary (HIGH, added S-5.03 v0.5.0)
 
 ### S.7 — Audit log (`src/audit.rs`)
 - BC-7.01.001 Audit log auto-derives path from `-o` (HIGH)
 - BC-7.01.002 Audit log SHA-256s match the bytes sent to Claude (HIGH)
 - BC-7.01.003 Audit log contains no real identifiers (HIGH)
+- BC-7.01.004 `AuditLog.augment_pass` populated with `AugmentInvocationSummary` when `--ai` is set and augment pass succeeds; carries `system_prompt_sha256` / `user_message_sha256` / `response_sha256` (64-char SHA-256 hex), byte counts, elapsed seconds, `raw_finding_count` (before EC-003+dedup), `surviving_finding_count` (after); `None` when augment pass not run or fails (HIGH, added S-5.03 v0.5.0)
 - BC-7.02.001 CredEvent.note never leaks (HIGH)
 
 ### S.8 — Rendering (`src/report*.rs`, `src/rule_catalog.rs`, `src/ai/html_render.rs`)
@@ -134,6 +138,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-8.01.003 Report HTML uses hero band + inline-SVG brand mark + severity-tinted finding cards + dark-mode + print-color-adjust + collapsible table sections (HIGH, added S-5.05 v0.4.0)
 - BC-8.01.004 Report HTML applies the otsniff brand handoff: sniff-trail mark (7 circles), ink/paper/accent palette, JetBrains Mono type system, inline favicon as base64 data URL (HIGH, added S-5.06 v0.4.0; supersedes S-5.05's freehand visual)
 - BC-8.01.005 Finding cards in HTML report wrap in `<details open class="finding sev-...">` with `<summary>` containing severity badge + title; default browser triangle suppressed via `details.finding > summary::-webkit-details-marker { display: none }` + `▾`/`▸` chevron via `::before` using `var(--muted)`; default state is open (`open` attribute); nested `<details>` for evidence/criteria/playbook unaffected; `@media print` forces all finding cards expanded with `details.finding > *:not(summary) { display: block !important }` (HIGH, added S-5.07 v0.4.0)
+- BC-3.07.001 When augmented findings are present, `render_augmented_section` emits an `<h2 class="ai-augmented-heading">AI-augmented findings</h2>` section followed by `<details open class="finding ai-finding ...">` cards with severity badge, "AI" badge, title, evidence `<pre>`, and reasoning rendered via `render_safe` (markdown → HTML, raw-HTML events stripped); section absent when findings is empty; `render_augmented_section_md` emits a `## AI-augmented findings` markdown section with analogous structure (HIGH, added S-5.03 v0.5.0)
 - BC-8.02.001 rule_catalog::render_markdown matches committed RULES.md (HIGH)
 - BC-8.03.001 Scrubbed markdown contains no real identifiers (HIGH)
 

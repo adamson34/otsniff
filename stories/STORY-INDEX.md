@@ -44,7 +44,7 @@ status: draft
 | S-4.04 | Kani: composed privacy invariant | E-4 | 2 | 5 | completed | S-4.01, S-4.02, S-4.03 | S.5 |
 | S-5.01 | Parse progress feedback | E-5 | 1 | 2 | completed (#73, 7556939) | — | S.0, S.9 |
 | S-5.02 | Claude heartbeat | E-5 | 1 | 2 | completed (#74, 62c937d) | — | S.6 |
-| S-5.03 | AI-augmented findings | E-5 | 3 | 8 | draft | S-2.05, S-2.06, S-2.07 (hard); S-2.08..2.11 (soft) | S.3, S.6, S.8 |
+| S-5.03 | AI-augmented findings | E-5 | 3 | 8 | completed (#114, 43fe86d) | S-2.05, S-2.06, S-2.07 (hard); S-2.08..2.11 (soft) | S.3, S.6, S.8 |
 | S-5.04 | Harden `--ai` invocation (disallow-tools + review-scrub) | E-5 | 1 | 3 | merged (#45, 5a1fe21) | — | S.6, S.9 |
 | S-5.05 | Report HTML visual polish (hero band + severity-tinted cards + dark mode + collapsible tables) | E-5 | 1 | 3 | merged (#51, b3de579) | — | S.8 |
 | S-5.06 | Brand handoff application (sniff-trail mark + ink/paper/accent palette + JetBrains Mono + inline favicon) | E-5 | 1 | 5 | merged (#52, d0f2fb0) | S-5.05 | S.8 + docs |
