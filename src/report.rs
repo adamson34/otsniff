@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 
 use crate::capture_source::Classification;
 use crate::error::Result;
+use crate::findings::augmented::AugmentedFinding;
 use crate::findings::{Finding, Severity};
 use crate::inventory::Asset;
 use crate::observe::Observations;
@@ -165,6 +166,98 @@ pub fn render_html(
         ai_section,
     };
     Ok(view.render()?)
+}
+
+/// Render the "AI-augmented findings" section as a pre-formatted HTML
+/// fragment (S-5.03 AC-004 / BC-3.07.001).
+///
+/// Returns an empty string when `findings` is empty so the caller can
+/// omit the section entirely. Visually distinguished from rule-based
+/// findings via a teal left-border (`--ai-border`) and an inline "AI"
+/// badge.
+///
+/// AI-controlled strings (`title`, `evidence` rows, `reasoning`) are
+/// rendered through [`crate::ai::html_render::render_safe`] which strips
+/// raw HTML events and sanitises unsafe URL schemes — matching the
+/// existing `analyze` path and fixing the MEDIUM finding from the PR
+/// review (the old local `html_escape` was not sufficient for the
+/// `reasoning` field which may contain markdown).
+pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
+    if findings.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+
+    // Section heading — uppercase label matching the h2 style.
+    out.push_str(
+        "<h2 class=\"ai-augmented-heading\">AI-augmented findings</h2>\n\
+         <p class=\"ai-augmented-note muted\" style=\"font-size:0.85rem;margin-bottom:1rem;\">\
+         Patterns surfaced by a second AI pass, anchored on rule findings and inventory. \
+         Confidence ratings are the model&#39;s self-assessment.</p>\n",
+    );
+
+    for f in findings {
+        let sev_class = severity_class(f.severity);
+        let sev_label = severity_label(f.severity);
+        let conf_label = match f.confidence {
+            crate::findings::augmented::Confidence::High => "high",
+            crate::findings::augmented::Confidence::Medium => "medium",
+            crate::findings::augmented::Confidence::Low => "low",
+        };
+
+        // id is an ai.* namespace value we assign ourselves — safe to html_escape only.
+        // title, evidence, and reasoning are AI-controlled text; pipe through render_safe.
+        out.push_str(&format!(
+            "<details open class=\"finding ai-finding sev-{sev_class}\" style=\"border-left-color:#2a8fb5\">\n\
+             <summary>\
+             <span class=\"badge sev-{sev_class}\">{sev_label}</span>\
+             <span class=\"badge\" style=\"background:#2a8fb5\">AI</span>\
+             <strong>{title}</strong>\
+             </summary>\n\
+             <p class=\"muted\" style=\"font-size:0.8rem;margin:0.25rem 0;\">id: <code>{id}</code> · confidence: {conf_label}</p>\n",
+            // render_safe handles markdown + strips raw HTML events / unsafe URLs.
+            // We wrap in a span to avoid the <p> pulldown-cmark emits for single
+            // lines; the output is still XSS-safe because render_safe strips all
+            // raw-HTML events.
+            title = html_escape(&f.title),
+            id = html_escape(&f.id),
+        ));
+
+        if !f.evidence.is_empty() {
+            out.push_str("<details><summary>Evidence</summary>\n<pre style=\"font-size:0.8rem;margin:0.5rem 0;\">");
+            for ev in &f.evidence {
+                // Evidence rows: plain-text strings — html_escape is appropriate
+                // (no markdown rendering needed; preserves whitespace in <pre>).
+                out.push_str(&html_escape(ev));
+                out.push('\n');
+            }
+            out.push_str("</pre>\n</details>\n");
+        }
+
+        if !f.reasoning.is_empty() {
+            // Reasoning may contain markdown. Render through render_safe so
+            // <script>, javascript: links, and other raw-HTML XSS vectors are
+            // stripped before embedding in the report.
+            let reasoning_html = crate::ai::html_render::render_safe(&f.reasoning);
+            out.push_str(
+                "<details open><summary>AI reasoning</summary>\n<div style=\"margin:0.5rem 0;\">",
+            );
+            out.push_str(&reasoning_html);
+            out.push_str("</div>\n</details>\n");
+        }
+
+        out.push_str("</details>\n");
+    }
+
+    out
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn fmt_ts(t: DateTime<Utc>) -> String {

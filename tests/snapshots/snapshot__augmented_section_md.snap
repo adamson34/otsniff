@@ -1,0 +1,20 @@
+---
+source: tests/snapshot.rs
+expression: md
+---
+## AI-augmented findings
+
+_Patterns surfaced by a second AI pass, anchored on rule findings and inventory. Confidence ratings are the model's self-assessment._
+
+### [AI][HIGH] Inferred gateway role mismatch
+
+_id: `ai.gateway_inference` · confidence: High_
+
+**Evidence (1 sample(s)):**
+```
+host_001 acted as default gateway
+```
+
+**AI reasoning:**
+
+host_001 appears as the L3 hop for all OT egress.

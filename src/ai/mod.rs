@@ -27,4 +27,15 @@ pub trait AiProvider {
     /// is the analyst persona / instructions. Returns the raw response
     /// text (unmodified, still in pseudonym terms).
     fn analyze(&self, system_prompt: &str, scrubbed_md: &str) -> Result<String>;
+
+    /// Run the AI augment pass (S-5.03).
+    ///
+    /// `system_prompt` is the augment-specific persona; `scrubbed_md` is the
+    /// scrubbed combined context (inventory + rule findings). Returns the raw
+    /// response text — still in pseudonym terms — which is expected to be a
+    /// JSON array of augmented findings (with optional prose preamble).
+    ///
+    /// Mirrors the signature shape of [`analyze`] so callers can substitute
+    /// providers without adaptor code.
+    fn augment(&self, system_prompt: &str, scrubbed_md: &str) -> Result<String>;
 }

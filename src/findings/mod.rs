@@ -4,6 +4,7 @@
 //! zero or more `Finding`s. The CLI runs them all and renders the union into
 //! the report, sorted by severity.
 
+pub mod augmented;
 pub mod dnp3_engineering;
 mod dns_resolver;
 mod engineering_commands;
@@ -23,7 +24,7 @@ pub mod weak_tls_cipher;
 use std::net::IpAddr;
 
 use ipnet::IpNet;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::observe::Observations;
 
@@ -43,7 +44,7 @@ pub fn host_label(ip: IpAddr, obs: &Observations) -> String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Severity {
     Info,
     Medium,
