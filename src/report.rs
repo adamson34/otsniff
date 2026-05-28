@@ -169,16 +169,74 @@ pub fn render_html(
 }
 
 /// Render the "AI-augmented findings" section as a pre-formatted HTML
-/// fragment (S-5.03 AC-004).
+/// fragment (S-5.03 AC-004 / BC-3.07.001).
 ///
-/// The returned string is intended to be embedded in the HTML report after
-/// the rule-based findings section. The caller must pass it through
-/// `ai::html_render::render_safe` before embedding (unscrub applies first).
-///
-/// Body is `todo!()` — implementation lands in S-5.03 Step 4.
-#[allow(dead_code)]
-pub fn render_augmented_section(_findings: &[AugmentedFinding]) -> String {
-    todo!()
+/// Returns an empty string when `findings` is empty so the caller can
+/// omit the section entirely. Visually distinguished from rule-based
+/// findings via a teal left-border (`--ai-border`) and an inline "AI"
+/// badge.
+pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
+    if findings.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+
+    // Section heading — uppercase label matching the h2 style.
+    out.push_str(
+        "<h2 class=\"ai-augmented-heading\">AI-augmented findings</h2>\n\
+         <p class=\"ai-augmented-note muted\" style=\"font-size:0.85rem;margin-bottom:1rem;\">\
+         Patterns surfaced by a second AI pass, anchored on rule findings and inventory. \
+         Confidence ratings are the model&#39;s self-assessment.</p>\n",
+    );
+
+    for f in findings {
+        let sev_class = severity_class(f.severity);
+        let sev_label = severity_label(f.severity);
+        let conf_label = match f.confidence {
+            crate::findings::augmented::Confidence::High => "high",
+            crate::findings::augmented::Confidence::Medium => "medium",
+            crate::findings::augmented::Confidence::Low => "low",
+        };
+
+        out.push_str(&format!(
+            "<details open class=\"finding ai-finding sev-{sev_class}\" style=\"border-left-color:#2a8fb5\">\n\
+             <summary>\
+             <span class=\"badge sev-{sev_class}\">{sev_label}</span>\
+             <span class=\"badge\" style=\"background:#2a8fb5\">AI</span>\
+             <strong>{title}</strong>\
+             </summary>\n\
+             <p class=\"muted\" style=\"font-size:0.8rem;margin:0.25rem 0;\">id: <code>{id}</code> · confidence: {conf_label}</p>\n",
+            title = html_escape(&f.title),
+            id = html_escape(&f.id),
+        ));
+
+        if !f.evidence.is_empty() {
+            out.push_str("<details><summary>Evidence</summary>\n<pre style=\"font-size:0.8rem;margin:0.5rem 0;\">");
+            for ev in &f.evidence {
+                out.push_str(&html_escape(ev));
+                out.push('\n');
+            }
+            out.push_str("</pre>\n</details>\n");
+        }
+
+        if !f.reasoning.is_empty() {
+            out.push_str("<details open><summary>AI reasoning</summary>\n<p style=\"margin:0.5rem 0;\">");
+            out.push_str(&html_escape(&f.reasoning));
+            out.push_str("</p>\n</details>\n");
+        }
+
+        out.push_str("</details>\n");
+    }
+
+    out
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn fmt_ts(t: DateTime<Utc>) -> String {

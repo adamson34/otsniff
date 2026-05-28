@@ -1,0 +1,28 @@
+---
+source: tests/snapshot.rs
+expression: html
+---
+<h2 class="ai-augmented-heading">AI-augmented findings</h2>
+<p class="ai-augmented-note muted" style="font-size:0.85rem;margin-bottom:1rem;">Patterns surfaced by a second AI pass, anchored on rule findings and inventory. Confidence ratings are the model&#39;s self-assessment.</p>
+<details open class="finding ai-finding sev-high" style="border-left-color:#2a8fb5">
+<summary><span class="badge sev-high">high</span><span class="badge" style="background:#2a8fb5">AI</span><strong>Inferred gateway role mismatch</strong></summary>
+<p class="muted" style="font-size:0.8rem;margin:0.25rem 0;">id: <code>ai.gateway_inference</code> · confidence: high</p>
+<details><summary>Evidence</summary>
+<pre style="font-size:0.8rem;margin:0.5rem 0;">host_001 acted as default gateway but not inventoried as a router
+</pre>
+</details>
+<details open><summary>AI reasoning</summary>
+<p style="margin:0.5rem 0;">host_001 appears as the L3 hop for all OT egress.</p>
+</details>
+</details>
+<details open class="finding ai-finding sev-medium" style="border-left-color:#2a8fb5">
+<summary><span class="badge sev-medium">medium</span><span class="badge" style="background:#2a8fb5">AI</span><strong>Possible role misclassification</strong></summary>
+<p class="muted" style="font-size:0.8rem;margin:0.25rem 0;">id: <code>ai.role_misclass</code> · confidence: medium</p>
+<details><summary>Evidence</summary>
+<pre style="font-size:0.8rem;margin:0.5rem 0;">host_002 sends engineering-class commands but is inventoried as workstation
+</pre>
+</details>
+<details open><summary>AI reasoning</summary>
+<p style="margin:0.5rem 0;">host_002 generates Write-Single-Coil and Direct-Operate commands.</p>
+</details>
+</details>

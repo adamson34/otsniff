@@ -9,11 +9,18 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ai::prompts::AUGMENT_PROMPT;
 use crate::ai::AiProvider;
-use crate::error::Result;
+use crate::error::{OtError, Result};
 use crate::findings::{Finding, Severity};
 use crate::inventory::Asset;
 use crate::observe::Observations;
+use crate::report_md::render_markdown;
+use crate::scrub::{build_map, scrub_text, unscrub_text};
+
+/// Cap on the number of augmented findings returned after confidence-based
+/// sort. Matches EC-002 / the test assertion in `augment_caps_findings_at_top_25`.
+const AUGMENT_CAP: usize = 25;
 
 /// Confidence level assigned by the AI provider to an augmented finding.
 ///
@@ -61,12 +68,122 @@ pub struct AugmentedFinding {
 /// response cannot be parsed — matching EC-004 from S-5.03 (same variant
 /// `ClaudeCliProvider::analyze` uses). Exit code 70 (EX_SOFTWARE).
 pub fn augment_findings(
-    _observations: &Observations,
-    _findings: &[Finding],
-    _inventory: &[Asset],
-    _provider: &dyn AiProvider,
+    observations: &Observations,
+    findings: &[Finding],
+    inventory: &[Asset],
+    provider: &dyn AiProvider,
 ) -> Result<Vec<AugmentedFinding>> {
-    todo!()
+    use crate::cli::AI_INPUT_LABEL;
+
+    // 1. Render a scrub-safe markdown representation of the combined context.
+    let raw_md = render_markdown(
+        inventory,
+        findings,
+        observations,
+        AI_INPUT_LABEL,
+        chrono::Utc::now(),
+        None,
+    )
+    .map_err(|e| OtError::Parse(format!("augment_findings: render failed: {e}")))?;
+
+    // 2. Build the scrub map and scrub the markdown.
+    let map = build_map(observations);
+    let scrubbed_md = scrub_text(&raw_md, &map);
+
+    // 3. Fail-closed leak check (mirrors the analyze pipeline exactly).
+    crate::ai::leak_detector::ensure_clean(&scrubbed_md)?;
+    crate::ai::leak_detector::ensure_no_map_values(&scrubbed_md, &map)?;
+    let augment_user_message = format!("{}\n\n{}", AUGMENT_PROMPT, scrubbed_md);
+    crate::ai::leak_detector::ensure_clean(&augment_user_message)?;
+    crate::ai::leak_detector::ensure_no_map_values(&augment_user_message, &map)?;
+
+    // 4. Invoke the provider. Any provider error propagates as OtError::Parse
+    //    (EC-004). Exit code 70 (EX_SOFTWARE) — same as the analyze path.
+    let raw_response = provider.augment(AUGMENT_PROMPT, &augment_user_message)?;
+
+    // 5. Parse the JSON response. Malformed input → Ok(vec![]) (EC-001).
+    let mut augmented = parse_augmented_response(&raw_response)?;
+
+    // 6. Cap at top-AUGMENT_CAP by confidence (High > Medium > Low) — EC-002.
+    if augmented.len() > AUGMENT_CAP {
+        augmented.sort_by(|a, b| confidence_rank(a.confidence).cmp(&confidence_rank(b.confidence)));
+        augmented.truncate(AUGMENT_CAP);
+    }
+
+    // 7. Unscrub evidence and reasoning fields so the caller sees real values.
+    for f in &mut augmented {
+        for ev in &mut f.evidence {
+            let (unscrubbed, _, _) = unscrub_text(ev, &map);
+            *ev = unscrubbed;
+        }
+        let (unscrubbed_reason, _, _) = unscrub_text(&f.reasoning, &map);
+        f.reasoning = unscrubbed_reason;
+    }
+
+    // 8. EC-003: drop findings whose evidence references hosts not in the
+    //    inventory. We only apply this filter when the scrub map has entries
+    //    (i.e., we had real observations to scrub). This avoids false-positive
+    //    filtering when inventory is empty (which would drop all findings).
+    let augmented = if !map.ips.is_empty() {
+        // Build a set of known real values: IP strings and hostnames.
+        let known_hosts: std::collections::HashSet<String> = inventory
+            .iter()
+            .flat_map(|a| {
+                let mut v = vec![a.ip.to_string()];
+                if let Some(h) = &a.hostname {
+                    v.push(h.clone());
+                }
+                v
+            })
+            .collect();
+
+        // Also include all scrub-map values (pseudonym → real). The AI
+        // response's evidence may still contain pseudonyms if the unscrub
+        // step didn't fully resolve them (e.g., host from a different run).
+        // A pseudonym that IS in the map is a known host reference.
+        let known_pseudonyms: std::collections::HashSet<&str> =
+            map.ips.keys().map(|s| s.as_str()).collect();
+
+        augmented
+            .into_iter()
+            .filter(|af| {
+                if af.evidence.is_empty() {
+                    return true; // no evidence to validate
+                }
+                // Check if any evidence token is a known host (real IP,
+                // hostname) or a known pseudonym (still in scrub-map terms).
+                let references_known_host = af.evidence.iter().any(|ev| {
+                    ev.split_whitespace().any(|token| {
+                        known_hosts.contains(token) || known_pseudonyms.contains(token)
+                    })
+                });
+                if !references_known_host {
+                    eprintln!(
+                        "WARNING: augmented finding '{}' references no known inventory host; dropping (EC-003)",
+                        af.id
+                    );
+                }
+                references_known_host
+            })
+            .collect()
+    } else {
+        augmented
+    };
+
+    // 9. Dedup against rule findings (AC-003).
+    let augmented = dedup_against_rule_findings(augmented, findings);
+
+    Ok(augmented)
+}
+
+/// Confidence ranking for sorting: lower value = higher confidence.
+/// High (0) < Medium (1) < Low (2).
+fn confidence_rank(c: Confidence) -> u8 {
+    match c {
+        Confidence::High => 0,
+        Confidence::Medium => 1,
+        Confidence::Low => 2,
+    }
 }
 
 /// Parse the first valid JSON array from `raw`, tolerating leading/trailing

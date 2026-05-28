@@ -199,15 +199,68 @@ pub fn render_markdown(
 }
 
 /// Render the "AI-augmented findings" section as a Markdown fragment
-/// (S-5.03 AC-004).
+/// (S-5.03 AC-004 / BC-3.07.001).
 ///
-/// Appended after the rule-based findings section in the markdown report.
-/// Unscrub must be applied to `findings[*].reasoning` before calling this.
+/// Returns an empty string when `findings` is empty so the caller can
+/// omit the section. Marked with a `[AI]` prefix per finding for visual
+/// distinction from rule-based findings.
 ///
-/// Body is `todo!()` — implementation lands in S-5.03 Step 4.
-#[allow(dead_code)]
-pub fn render_augmented_section_md(_findings: &[AugmentedFinding]) -> String {
-    todo!()
+/// Unscrub must be applied to `findings[*].reasoning` and `findings[*].evidence`
+/// before calling this function.
+pub fn render_augmented_section_md(findings: &[AugmentedFinding]) -> String {
+    if findings.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+
+    writeln!(out, "## AI-augmented findings").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "_Patterns surfaced by a second AI pass, anchored on rule findings and inventory. \
+         Confidence ratings are the model's self-assessment._"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    for f in findings {
+        let conf_label = match f.confidence {
+            crate::findings::augmented::Confidence::High => "High",
+            crate::findings::augmented::Confidence::Medium => "Medium",
+            crate::findings::augmented::Confidence::Low => "Low",
+        };
+
+        writeln!(
+            out,
+            "### [AI][{}] {}",
+            severity_label(f.severity).to_uppercase(),
+            f.title
+        )
+        .unwrap();
+        writeln!(out).unwrap();
+        writeln!(out, "_id: `{}` · confidence: {}_", f.id, conf_label).unwrap();
+        writeln!(out).unwrap();
+
+        if !f.evidence.is_empty() {
+            writeln!(out, "**Evidence ({} sample(s)):**", f.evidence.len()).unwrap();
+            writeln!(out, "```").unwrap();
+            for ev in &f.evidence {
+                writeln!(out, "{ev}").unwrap();
+            }
+            writeln!(out, "```").unwrap();
+            writeln!(out).unwrap();
+        }
+
+        if !f.reasoning.is_empty() {
+            writeln!(out, "**AI reasoning:**").unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "{}", f.reasoning).unwrap();
+            writeln!(out).unwrap();
+        }
+    }
+
+    out
 }
 
 fn fmt_ts(t: DateTime<Utc>) -> String {
