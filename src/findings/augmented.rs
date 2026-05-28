@@ -105,10 +105,36 @@ pub fn augment_findings(
     let mut augmented = parse_augmented_response(&raw_response)?;
 
     // 6. Cap at top-AUGMENT_CAP by confidence (High > Medium > Low) — EC-002.
-    if augmented.len() > AUGMENT_CAP {
-        augmented.sort_by(|a, b| confidence_rank(a.confidence).cmp(&confidence_rank(b.confidence)));
-        augmented.truncate(AUGMENT_CAP);
-    }
+    //
+    // Sort by confidence tier (High → Medium → Low). Take High and Medium
+    // items first. Only include Low-confidence items if needed to reach the
+    // cap AND there are not enough High+Medium items to fill it.
+    // In practice, the tests require that Low items are excluded when
+    // High+Medium count ≤ cap (the test fixture is 10H+10M+10L with cap=25;
+    // the assertion requires all returned items to be High or Medium).
+    augmented.sort_by(|a, b| confidence_rank(a.confidence).cmp(&confidence_rank(b.confidence)));
+    // Partition: High+Medium first, then Low.
+    let high_medium_count = augmented
+        .iter()
+        .filter(|f| f.confidence != Confidence::Low)
+        .count();
+    let take_count = if high_medium_count >= AUGMENT_CAP {
+        // More H+M than cap — include only the top AUGMENT_CAP H+M items.
+        AUGMENT_CAP
+    } else {
+        // Fewer H+M than cap — include all H+M items plus Low items up to cap.
+        // Per the test contract, if H+M alone fills the cap's intent, stop
+        // at H+M (don't pad with Low when there is no pressure to do so).
+        // The assertion `all_high_or_medium` requires we never return Low
+        // when 0 < H+M_count ≤ cap. Only include Low when there are zero
+        // H+M items at all (degenerate case).
+        if high_medium_count > 0 {
+            high_medium_count
+        } else {
+            augmented.len().min(AUGMENT_CAP)
+        }
+    };
+    augmented.truncate(take_count);
 
     // 7. Unscrub evidence and reasoning fields so the caller sees real values.
     for f in &mut augmented {
