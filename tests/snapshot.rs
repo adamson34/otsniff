@@ -2768,7 +2768,7 @@ fn augment_mock_returns_known_response_assert_shape() {
     let findings = run_all(&obs, &ot_subnets());
 
     let mock = MockAiProvider::with_augment(&two_augmented_findings_response());
-    let augmented = augment_findings(&obs, &findings, &inventory, &mock)
+    let (augmented, _summary) = augment_findings(&obs, &findings, &inventory, &mock)
         .expect("BC-6.05.002: augment_findings must succeed with valid mock response");
 
     // The fixture has no overlapping rule findings for host_001/host_002 in the
@@ -2822,27 +2822,35 @@ fn augment_dedup_rule_finding_takes_precedence() {
         "fixture must produce rule findings for dedup test"
     );
 
+    // Build the scrub map so we can produce a mock response in pseudonym form.
+    // The AI always returns pseudonyms (host_NNN), never real IPs — so the
+    // mock response must also use pseudonyms for the dedup to fire correctly.
+    let map = build_map_at(&obs, fixed_ts());
+
     // The mock returns one augmented finding whose evidence contains
-    // a term that overlaps with the first rule finding's evidence.
+    // a host pseudonym that overlaps with the first rule finding's evidence.
+    // We scrub the first rule evidence token to get its pseudonym form, then
+    // build the mock response using that pseudonym.
     let first_rule_evidence = rule_findings[0]
         .evidence
         .first()
         .cloned()
         .unwrap_or_default();
-    // Build a response that copies the first rule finding's first evidence token.
-    // The overlap term is the first whitespace-delimited token (a pseudonym like host_001).
-    let overlap_token = first_rule_evidence
+    // Scrub the entire evidence string to get pseudonym form.  The first
+    // whitespace-delimited token in the scrubbed form is a host_NNN pseudonym.
+    let scrubbed_evidence = scrub_text(&first_rule_evidence, &map);
+    let overlap_pseudonym = scrubbed_evidence
         .split_whitespace()
         .next()
         .unwrap_or("host_001");
     let overlapping_response = format!(
         r#"[{{"id":"ai.overlap_test","severity":"High","title":"Overlap",
-            "evidence":["{overlap_token} did something suspicious"],
+            "evidence":["{overlap_pseudonym} did something suspicious"],
             "confidence":"High","reasoning":"evidence from rule overlap"}}]"#
     );
 
     let mock = MockAiProvider::with_augment(&overlapping_response);
-    let augmented = augment_findings(&obs, &rule_findings, &inventory, &mock)
+    let (augmented, _summary) = augment_findings(&obs, &rule_findings, &inventory, &mock)
         .expect("BC-6.05.003: augment_findings must not error on dedup");
 
     let overlap_finding = augmented.iter().find(|f| f.id == "ai.overlap_test");
@@ -2909,7 +2917,7 @@ fn augment_dedup_disjoint_finding_survives() {
     );
 
     let mock = MockAiProvider::with_augment(&two_augmented_findings_response());
-    let augmented = augment_findings(&obs, &rule_findings, &inventory, &mock)
+    let (augmented, _summary) = augment_findings(&obs, &rule_findings, &inventory, &mock)
         .expect("BC-6.05.003: augment_findings must succeed when no rule findings exist");
 
     // With no rule findings to overlap, and host_001/host_002 registered in
@@ -3263,12 +3271,31 @@ fn audit_log_records_augment_pass_hashes_separately() {
     // The full pipeline test (augment_findings populates augment_pass) is in the
     // TODO block below — the todo!() in augment_findings is the Red Gate signal.
 
-    // Now drive the actual augment_findings to prove it populates the field.
-    let _augmented = augment_findings(&obs, &findings, &inventory, &mock)
+    // Now drive the actual augment_findings to prove it returns a valid summary.
+    let (_augmented, returned_summary) = augment_findings(&obs, &findings, &inventory, &mock)
         .expect("AC-006: augment_findings must succeed");
-    // Implementer: populate AuditLog.augment_pass inside augment_findings and
-    // return it alongside the Vec<AugmentedFinding>. This test will need updating
-    // to capture the returned summary once the return type is finalized.
+    // AC-006: verify the returned summary carries 64-char SHA-256 hashes.
+    assert_eq!(
+        returned_summary.system_prompt_sha256.len(),
+        64,
+        "AC-006: returned system_prompt_sha256 must be a 64-char SHA-256 hex string"
+    );
+    assert_eq!(
+        returned_summary.response_sha256.len(),
+        64,
+        "AC-006: returned response_sha256 must be a 64-char SHA-256 hex string"
+    );
+    assert_eq!(
+        returned_summary.user_message_sha256.len(),
+        64,
+        "AC-006: returned user_message_sha256 must be a 64-char SHA-256 hex string"
+    );
+    // The augment-pass system prompt hash must differ from the analyze-pass hash.
+    let analyze_sha = audit::sha256_hex(otsniff::ai::prompts::SYSTEM_PROMPT);
+    assert_ne!(
+        returned_summary.system_prompt_sha256, analyze_sha,
+        "AC-006: augment system_prompt_sha256 must differ from analyze-pass sha"
+    );
 }
 
 // ── Edge cases ────────────────────────────────────────────────────────────────
@@ -3289,7 +3316,7 @@ fn augment_returns_empty_vec_on_malformed_json_from_provider() {
     let mock = MockAiProvider::with_augment("not json at all, sorry");
     let result = augment_findings(&obs, &findings, &inventory, &mock);
 
-    let augmented =
+    let (augmented, _summary) =
         result.expect("EC-001: malformed JSON from provider must return Ok(vec![]), not an error");
     assert!(
         augmented.is_empty(),
@@ -3333,7 +3360,7 @@ fn augment_caps_findings_at_top_25_by_confidence() {
     let response = format!("[{}]", items.join(","));
 
     let mock = MockAiProvider::with_augment(&response);
-    let augmented = augment_findings(&obs, &findings, &inventory, &mock)
+    let (augmented, _summary) = augment_findings(&obs, &findings, &inventory, &mock)
         .expect("EC-002: augment_findings must not error on 30-finding response");
 
     assert!(
@@ -3342,18 +3369,35 @@ fn augment_caps_findings_at_top_25_by_confidence() {
         augmented.len()
     );
 
-    // The surviving findings must be the highest-confidence ones.
-    let all_high_or_medium = augmented
+    // With 10H + 10M + 10L = 30 findings and cap=25, the surviving set must
+    // be exactly the top-25 by confidence rank: 10H + 10M + 5L.
+    // ALL 10 High and ALL 10 Medium findings must be present.
+    let high_count = augmented
         .iter()
-        .all(|f| f.confidence == Confidence::High || f.confidence == Confidence::Medium);
-    assert!(
-        all_high_or_medium,
-        "EC-002: capped findings must be the highest-confidence ones (High/Medium, not Low); \
-         got: {:?}",
-        augmented
-            .iter()
-            .map(|f| (f.id.as_str(), f.confidence))
-            .collect::<Vec<_>>()
+        .filter(|f| f.confidence == Confidence::High)
+        .count();
+    let med_count = augmented
+        .iter()
+        .filter(|f| f.confidence == Confidence::Medium)
+        .count();
+    assert_eq!(
+        high_count, 10,
+        "EC-002: all 10 High-confidence findings must survive the cap; got {high_count}"
+    );
+    assert_eq!(
+        med_count, 10,
+        "EC-002: all 10 Medium-confidence findings must survive the cap; got {med_count}"
+    );
+    // The remaining 5 slots are filled with Low findings — this is the correct
+    // "top-N" semantics (fixes HIGH finding: old logic dropped ALL Lows even
+    // when below the overall cap count).
+    let low_count = augmented
+        .iter()
+        .filter(|f| f.confidence == Confidence::Low)
+        .count();
+    assert_eq!(
+        low_count, 5,
+        "EC-002: exactly 5 Low-confidence findings should fill the remaining cap slots; got {low_count}"
     );
 }
 
@@ -3384,7 +3428,7 @@ fn augment_drops_finding_referencing_unknown_host() {
     }]"#;
 
     let mock = MockAiProvider::with_augment(response);
-    let augmented = augment_findings(&obs, &findings, &inventory, &mock)
+    let (augmented, _summary) = augment_findings(&obs, &findings, &inventory, &mock)
         .expect("EC-003: augment_findings must not error when dropping unknown-host findings");
 
     let unknown_ref = augmented.iter().find(|f| f.id == "ai.unknown_ref");

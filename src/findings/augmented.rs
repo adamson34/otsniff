@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai::prompts::AUGMENT_PROMPT;
 use crate::ai::AiProvider;
+use crate::audit::AugmentInvocationSummary;
 use crate::error::{OtError, Result};
 use crate::findings::{Finding, Severity};
 use crate::inventory::Asset;
@@ -57,7 +58,8 @@ pub struct AugmentedFinding {
 /// Called after `run_all` and `build_inventory` have produced their outputs.
 /// Scrubs the combined context, calls `AiProvider::augment`, parses the
 /// structured JSON response, deduplicates against `findings`, and returns
-/// the surviving `AugmentedFinding`s.
+/// the surviving `AugmentedFinding`s together with an invocation summary
+/// for the audit log (AC-006).
 ///
 /// The `provider` parameter accepts any `AiProvider` implementation —
 /// production callers pass `&ClaudeCliProvider`, test callers pass a mock.
@@ -72,7 +74,7 @@ pub fn augment_findings(
     findings: &[Finding],
     inventory: &[Asset],
     provider: &dyn AiProvider,
-) -> Result<Vec<AugmentedFinding>> {
+) -> Result<(Vec<AugmentedFinding>, AugmentInvocationSummary)> {
     use crate::cli::AI_INPUT_LABEL;
 
     // 1. Render a scrub-safe markdown representation of the combined context.
@@ -90,53 +92,126 @@ pub fn augment_findings(
     let map = build_map(observations);
     let scrubbed_md = scrub_text(&raw_md, &map);
 
-    // 3. Fail-closed leak check (mirrors the analyze pipeline exactly).
+    // 3. Fail-closed leak check on the scrubbed markdown only — the user
+    //    message is the scrubbed_md; AUGMENT_PROMPT is the system prompt,
+    //    passed separately to the provider. Running the check once on the
+    //    bytes that actually travel over the wire (the user message = the
+    //    scrubbed context) is sufficient and avoids double-checking content
+    //    that contains no identifiers (the prompt itself is a constant with
+    //    no real-looking values, enforced by its own snapshot test).
     crate::ai::leak_detector::ensure_clean(&scrubbed_md)?;
     crate::ai::leak_detector::ensure_no_map_values(&scrubbed_md, &map)?;
-    let augment_user_message = format!("{}\n\n{}", AUGMENT_PROMPT, scrubbed_md);
-    crate::ai::leak_detector::ensure_clean(&augment_user_message)?;
-    crate::ai::leak_detector::ensure_no_map_values(&augment_user_message, &map)?;
 
-    // 4. Invoke the provider. Any provider error propagates as OtError::Parse
+    // 4. Compose the user message. AUGMENT_PROMPT is the *system* prompt
+    //    (passed as the first argument to provider.augment); the user message
+    //    is just the scrubbed context. We do NOT duplicate AUGMENT_PROMPT in
+    //    the user message — that was a MEDIUM finding (redundant double prompt).
+    let user_message = scrubbed_md.clone();
+
+    // 5. Invoke the provider. Any provider error propagates as OtError::Parse
     //    (EC-004). Exit code 70 (EX_SOFTWARE) — same as the analyze path.
-    let raw_response = provider.augment(AUGMENT_PROMPT, &augment_user_message)?;
+    let invoke_start = std::time::Instant::now();
+    let raw_response = provider.augment(AUGMENT_PROMPT, &user_message)?;
+    let elapsed = invoke_start.elapsed();
 
-    // 5. Parse the JSON response. Malformed input → Ok(vec![]) (EC-001).
+    // 6. Parse the JSON response. Malformed input → Ok(vec![]) (EC-001).
     let mut augmented = parse_augmented_response(&raw_response)?;
+    let raw_finding_count = augmented.len();
 
-    // 6. Cap at top-AUGMENT_CAP by confidence (High > Medium > Low) — EC-002.
+    // 7. EC-003 (CRITICAL fix): check for hallucinated pseudonyms BEFORE
+    //    unscrub. After unscrub, host_NNN/name_NNN tokens have been replaced
+    //    with real values, so the filter cannot fire on legitimate findings.
     //
-    // Sort by confidence tier (High → Medium → Low). Take High and Medium
-    // items first. Only include Low-confidence items if needed to reach the
-    // cap AND there are not enough High+Medium items to fill it.
-    // In practice, the tests require that Low items are excluded when
-    // High+Medium count ≤ cap (the test fixture is 10H+10M+10L with cap=25;
-    // the assertion requires all returned items to be High or Medium).
-    augmented.sort_by_key(|a| confidence_rank(a.confidence));
-    // Partition: High+Medium first, then Low.
-    let high_medium_count = augmented
-        .iter()
-        .filter(|f| f.confidence != Confidence::Low)
-        .count();
-    let take_count = if high_medium_count >= AUGMENT_CAP {
-        // More H+M than cap — include only the top AUGMENT_CAP H+M items.
-        AUGMENT_CAP
-    } else {
-        // Fewer H+M than cap — include all H+M items plus Low items up to cap.
-        // Per the test contract, if H+M alone fills the cap's intent, stop
-        // at H+M (don't pad with Low when there is no pressure to do so).
-        // The assertion `all_high_or_medium` requires we never return Low
-        // when 0 < H+M_count ≤ cap. Only include Low when there are zero
-        // H+M items at all (degenerate case).
-        if high_medium_count > 0 {
-            high_medium_count
-        } else {
-            augmented.len().min(AUGMENT_CAP)
-        }
-    };
-    augmented.truncate(take_count);
+    //    The valid pseudonyms are all keys in the scrub map across all families:
+    //    ip pseudonyms (host_NNN), mac pseudonyms (mac_NNN), and hostname
+    //    pseudonyms (name_NNN). A pseudonym-shaped token in the AI response
+    //    that does not appear in the map was never assigned to any observed
+    //    identifier — it is hallucinated.
+    //
+    //    We check evidence, reasoning, AND title to catch hallucinations
+    //    anywhere in the finding (CRITICAL fix: original only checked evidence).
+    //
+    //    When a finding has NO pseudonym-shaped tokens at all, there is nothing
+    //    to validate → keep.
 
-    // 7. Unscrub evidence and reasoning fields so the caller sees real values.
+    // Collect all known pseudonyms across all scrub map families.
+    let known_pseudonyms: std::collections::HashSet<&str> = map
+        .ips
+        .keys()
+        .chain(map.macs.keys())
+        .chain(map.names.keys())
+        .map(|s| s.as_str())
+        .collect();
+
+    augmented.retain(|af| {
+        // Gather all pseudonym-shaped tokens from evidence, reasoning, AND title.
+        let mut refs: Vec<&str> = Vec::new();
+        for ev in &af.evidence {
+            refs.extend(ev.split_whitespace().filter(|t| is_otsniff_pseudonym(t)));
+        }
+        refs.extend(
+            af.reasoning
+                .split_whitespace()
+                .filter(|t| is_otsniff_pseudonym(t)),
+        );
+        refs.extend(
+            af.title
+                .split_whitespace()
+                .filter(|t| is_otsniff_pseudonym(t)),
+        );
+
+        if refs.is_empty() {
+            // No pseudonym references — nothing to validate → keep.
+            return true;
+        }
+
+        // All referenced pseudonyms must appear in the scrub map.
+        refs.iter().all(|p| known_pseudonyms.contains(p))
+        // Silently drop hallucinated findings — no eprintln here.
+        // Callers that need diagnostics can compare raw vs surviving counts
+        // via the AugmentInvocationSummary.
+    });
+
+    // 8. Cap at top-AUGMENT_CAP by confidence (High > Medium > Low) — EC-002.
+    //
+    // Stable sort by (confidence_rank, id) for full determinism, then
+    // truncate to AUGMENT_CAP. This is the correct "top-N" semantics:
+    // every Low finding survives when total count <= AUGMENT_CAP regardless
+    // of whether High/Medium findings also exist (fixes HIGH finding: the
+    // old branchy logic dropped all Low items whenever any H/M existed,
+    // even below the cap).
+    augmented.sort_by(|a, b| {
+        let rank_a = confidence_rank(a.confidence);
+        let rank_b = confidence_rank(b.confidence);
+        rank_a.cmp(&rank_b).then_with(|| a.id.cmp(&b.id))
+    });
+    if augmented.len() > AUGMENT_CAP {
+        augmented.truncate(AUGMENT_CAP);
+    }
+
+    // 9. Dedup against rule findings (AC-003).
+    //
+    // Both the augmented findings (still in scrubbed pseudonym form) and the
+    // rule findings (in real-value form) need a common vocabulary for the host-
+    // pseudonym comparison. We scrub the rule findings' evidence strings with
+    // the same map so both sides speak pseudonyms at dedup time.
+    let scrubbed_rule_findings: Vec<crate::findings::Finding> = findings
+        .iter()
+        .map(|f| crate::findings::Finding {
+            id: f.id,
+            severity: f.severity,
+            title: f.title.clone(),
+            summary: f.summary.clone(),
+            evidence: f.evidence.iter().map(|ev| scrub_text(ev, &map)).collect(),
+            recommendation: f.recommendation,
+            playbook: f.playbook.clone(),
+        })
+        .collect();
+    let augmented = dedup_against_rule_findings(augmented, &scrubbed_rule_findings);
+
+    // 10. Unscrub evidence, reasoning, and title fields so the caller sees real
+    //     values. Done AFTER EC-003 filter and dedup per CRITICAL fix #2.
+    let mut augmented = augmented;
     for f in &mut augmented {
         for ev in &mut f.evidence {
             let (unscrubbed, _, _) = unscrub_text(ev, &map);
@@ -144,65 +219,26 @@ pub fn augment_findings(
         }
         let (unscrubbed_reason, _, _) = unscrub_text(&f.reasoning, &map);
         f.reasoning = unscrubbed_reason;
+        let (unscrubbed_title, _, _) = unscrub_text(&f.title, &map);
+        f.title = unscrubbed_title;
     }
 
-    // 8. EC-003: drop findings whose evidence references a pseudonym (`host_NNN`
-    //    pattern) not present in the current scrub map's ip keys.
-    //
-    // A `host_NNN` token in the AI's response is a pseudonym reference.
-    // If it's not in the scrub map, the AI hallucinated the host — it was
-    // never observed in the capture. Such findings are dropped.
-    //
-    // When a finding's evidence has NO `host_NNN` tokens, there is nothing
-    // to validate against the scrub map and the finding is kept.
-    let known_pseudonyms: std::collections::HashSet<&str> =
-        map.ips.keys().map(|s| s.as_str()).collect();
+    let surviving_finding_count = augmented.len();
 
-    // Pre-compile the host-pseudonym pattern detector.
-    fn is_host_pseudonym(token: &str) -> bool {
-        // Matches `host_NNN` exactly: "host_" followed by one or more digits.
-        if let Some(rest) = token.strip_prefix("host_") {
-            !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
-        } else {
-            false
-        }
-    }
+    // 11. Build the invocation summary for AC-006 / audit log.
+    let summary = AugmentInvocationSummary {
+        system_prompt_bytes: AUGMENT_PROMPT.len(),
+        system_prompt_sha256: crate::audit::sha256_hex(AUGMENT_PROMPT),
+        user_message_bytes: user_message.len(),
+        user_message_sha256: crate::audit::sha256_hex(&user_message),
+        response_bytes: raw_response.len(),
+        response_sha256: crate::audit::sha256_hex(&raw_response),
+        elapsed_seconds: elapsed.as_secs_f64(),
+        raw_finding_count,
+        surviving_finding_count,
+    };
 
-    let augmented = augmented
-        .into_iter()
-        .filter(|af| {
-            // Collect all host_NNN tokens from the evidence.
-            let pseudonym_refs: Vec<&str> = af
-                .evidence
-                .iter()
-                .flat_map(|ev| ev.split_whitespace())
-                .filter(|token| is_host_pseudonym(token))
-                .collect();
-
-            if pseudonym_refs.is_empty() {
-                // No pseudonym references in evidence — cannot validate → keep.
-                return true;
-            }
-
-            // All referenced pseudonyms must be known (in the scrub map).
-            let all_known = pseudonym_refs
-                .iter()
-                .all(|p| known_pseudonyms.contains(p));
-
-            if !all_known {
-                eprintln!(
-                    "WARNING: augmented finding '{}' references unknown host pseudonym(s); dropping (EC-003)",
-                    af.id
-                );
-            }
-            all_known
-        })
-        .collect::<Vec<_>>();
-
-    // 9. Dedup against rule findings (AC-003).
-    let augmented = dedup_against_rule_findings(augmented, findings);
-
-    Ok(augmented)
+    Ok((augmented, summary))
 }
 
 /// Confidence ranking for sorting: lower value = higher confidence.
@@ -215,93 +251,145 @@ fn confidence_rank(c: Confidence) -> u8 {
     }
 }
 
-/// Parse the first valid JSON array from `raw`, tolerating leading/trailing
-/// prose that the LLM may include around the JSON payload (EC-001 / AC-002).
+/// Parse the first valid JSON array from `raw` using a balanced-bracket scan,
+/// tolerating leading/trailing prose that the LLM may include around the JSON
+/// payload (EC-001 / AC-002).
+///
+/// Finds the first `[`, scans forward tracking bracket depth (respecting JSON
+/// string quoting so a `]` inside a string value doesn't close the array), finds
+/// the matching `]`, then attempts `serde_json::from_str` on that single slice.
+/// No O(n²) scan; no boolean sentinel.
 ///
 /// Returns an empty `Vec` when no valid array is found (rather than an error),
 /// so the caller can degrade gracefully.
 pub fn parse_augmented_response(raw: &str) -> Result<Vec<AugmentedFinding>> {
-    // Find the first '[' and attempt to parse from there.
-    // Walk forward from each '[' until we find one whose JSON parse succeeds.
-    let mut start = 0;
-    while let Some(bracket_pos) = raw[start..].find('[') {
-        let abs_pos = start + bracket_pos;
-        let candidate = &raw[abs_pos..];
-        match serde_json::from_str::<Vec<AugmentedFinding>>(candidate) {
-            Ok(findings) => return Ok(findings),
-            Err(_) => {
-                // Try to find the matching ']' by scanning and trimming the
-                // candidate progressively. Walk from the end of the string
-                // inward looking for a closing bracket.
-                let mut end = candidate.len();
-                let found = false;
-                while end > 0 {
-                    if let Some(close_pos) = candidate[..end].rfind(']') {
-                        let slice = &candidate[..=close_pos];
-                        if let Ok(findings) = serde_json::from_str::<Vec<AugmentedFinding>>(slice) {
-                            return Ok(findings);
-                        }
-                        end = close_pos;
-                    } else {
-                        break;
-                    }
-                }
-                if !found {
-                    // No valid array starting at this '['; advance past it.
-                    start = abs_pos + 1;
-                    // Suppress unused-variable warning: `found` is used as
-                    // a sentinel to avoid double-advancing; set it to signal
-                    // we intentionally fell through.
-                    let _ = found;
+    let bytes = raw.as_bytes();
+    let Some(start) = bytes.iter().position(|&b| b == b'[') else {
+        return Ok(vec![]);
+    };
+
+    // Balanced-bracket scan from `start`. Track depth and whether we are
+    // inside a JSON string (to skip `[`/`]` that appear inside string values).
+    let mut depth: usize = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+    let mut end: Option<usize> = None;
+
+    for (i, &b) in bytes[start..].iter().enumerate() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        match b {
+            b'\\' if in_string => {
+                escape_next = true;
+            }
+            b'"' => {
+                in_string = !in_string;
+            }
+            b'[' if !in_string => {
+                depth += 1;
+            }
+            b']' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(start + i);
+                    break;
                 }
             }
+            _ => {}
         }
     }
-    // No valid JSON array found anywhere in the input — return empty (EC-001).
-    eprintln!("WARNING: augment response contained no valid JSON array; treating as empty");
-    Ok(vec![])
+
+    let Some(end_pos) = end else {
+        // No matching `]` found — unbalanced or truncated JSON.
+        return Ok(vec![]);
+    };
+
+    let slice = &raw[start..=end_pos];
+    match serde_json::from_str::<Vec<AugmentedFinding>>(slice) {
+        Ok(findings) => Ok(findings),
+        Err(_) => Ok(vec![]),
+    }
 }
 
-/// Deduplicate augmented findings against existing rule findings.
+/// Deduplicate augmented findings against existing rule findings (AC-003).
 ///
-/// Implements AC-003: if an augmented finding's evidence substantially
-/// overlaps with a rule finding, the rule finding takes precedence and the
-/// augmented finding is dropped. Returns only the surviving augmented
-/// findings.
+/// Drops an augmented finding when the *pseudonym set* of its evidence
+/// is a subset of (or equal to) the pseudonym set of any rule finding.
+/// "Pseudonym" here means any `host_NNN`, `mac_NNN`, or `name_NNN` token
+/// that `scrub_text` assigns to observed network identifiers.
 ///
-/// Overlap is defined as: at least one token from the augmented finding's
-/// evidence appears in the rule finding's evidence. Token comparison is
-/// whitespace-split and case-sensitive.
+/// This replaces the old whitespace-token-set overlap which was too aggressive:
+/// common words like "Modbus", "port", or vendor names in rule evidence were
+/// silently deleting disjoint augmented findings.
+///
+/// An augmented finding with NO pseudonyms in its evidence is kept
+/// unconditionally (conservative baseline — no identity to overlap on).
+///
+/// Both `augmented` and `rule_findings` must be in the SAME vocabulary
+/// (scrubbed pseudonyms or real values) for comparison to work.
 pub fn dedup_against_rule_findings(
     augmented: Vec<AugmentedFinding>,
     rule_findings: &[Finding],
 ) -> Vec<AugmentedFinding> {
-    // Build a set of all tokens from all rule evidence for O(1) lookup.
-    let mut rule_tokens: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for rule in rule_findings {
-        for ev in &rule.evidence {
-            for token in ev.split_whitespace() {
-                rule_tokens.insert(token);
-            }
-        }
-    }
+    // Build one pseudonym set per rule finding.
+    let rule_pseudo_sets: Vec<std::collections::HashSet<String>> = rule_findings
+        .iter()
+        .map(|rule| {
+            rule.evidence
+                .iter()
+                .flat_map(|ev| ev.split_whitespace())
+                .filter(|t| is_otsniff_pseudonym(t))
+                .map(String::from)
+                .collect()
+        })
+        .collect();
 
     augmented
         .into_iter()
         .filter(|af| {
-            // If the augmented finding has evidence, check whether any token
-            // overlaps with any rule-finding token.
-            if af.evidence.is_empty() {
-                // No evidence → no overlap possible → keep (conservative baseline).
+            // Collect pseudonyms from the augmented finding's evidence.
+            let af_pseudos: std::collections::HashSet<String> = af
+                .evidence
+                .iter()
+                .flat_map(|ev| ev.split_whitespace())
+                .filter(|t| is_otsniff_pseudonym(t))
+                .map(String::from)
+                .collect();
+
+            if af_pseudos.is_empty() {
+                // No pseudonyms to compare — keep (conservative baseline).
                 return true;
             }
-            let has_overlap = af.evidence.iter().any(|ev| {
-                ev.split_whitespace()
-                    .any(|token| rule_tokens.contains(token))
-            });
-            !has_overlap
+
+            // Drop the augmented finding if its pseudonym set is a subset of
+            // (or equal to) any single rule finding's pseudonym set.
+            let overlaps_rule = rule_pseudo_sets
+                .iter()
+                .any(|rule_pseudos| !rule_pseudos.is_empty() && af_pseudos.is_subset(rule_pseudos));
+
+            !overlaps_rule
         })
         .collect()
+}
+
+/// True if `token` looks like an otsniff-assigned pseudonym:
+/// - `host_NNN` (IP address pseudonym)
+/// - `mac_NNN` (MAC address pseudonym)
+/// - `name_NNN` (hostname pseudonym)
+///
+/// All pseudonyms use the pattern `<prefix>_<digits>` where digits are
+/// zero-padded to 3 places (e.g. `host_001`, `mac_042`, `name_007`).
+fn is_otsniff_pseudonym(token: &str) -> bool {
+    for prefix in ["host_", "mac_", "name_"] {
+        if let Some(rest) = token.strip_prefix(prefix) {
+            if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -410,8 +498,8 @@ mod tests {
     // ── BC-6.05.003 — Dedup against rule findings ────────────────────────────
 
     // BC-6.05.003 — when an augmented finding's evidence overlaps with a rule
-    // finding, the rule finding takes precedence and the augmented finding is
-    // dropped.
+    // finding on the SAME HOST PSEUDONYM, the rule finding takes precedence and
+    // the augmented finding is dropped.
     #[test]
     fn dedup_drops_overlapping_augmented() {
         // Rule finding covers host_001; augmented finding also references host_001.
@@ -463,6 +551,35 @@ mod tests {
             "BC-6.05.003: augmented finding with disjoint evidence must survive dedup"
         );
         assert_eq!(result[0].id, "ai.role_misclass");
+    }
+
+    // HIGH finding fix: an augmented finding that shares only a non-pseudonym
+    // word (e.g. "Modbus") with rule evidence must survive dedup. The old
+    // token-set overlap would have dropped it.
+    #[test]
+    fn dedup_preserves_finding_sharing_only_common_words() {
+        // Rule finding mentions "Modbus" but host_001; augmented finding
+        // mentions "Modbus" but references host_002 only.
+        let rule = minimal_rule_finding(
+            "ics.engineering_commands",
+            vec!["host_001 sent Modbus Write-Single-Coil".to_string()],
+        );
+        let augmented = AugmentedFinding {
+            id: "ai.modbus_anomaly".to_string(),
+            severity: Severity::Medium,
+            title: "Modbus anomaly on different host".to_string(),
+            evidence: vec!["host_002 sent unusual Modbus traffic".to_string()],
+            confidence: Confidence::Medium,
+            reasoning: "host_002 sent Modbus frames to an unexpected dest".to_string(),
+        };
+        let result = dedup_against_rule_findings(vec![augmented], &[rule]);
+        assert_eq!(
+            result.len(),
+            1,
+            "HIGH: augmented finding that shares only 'Modbus' (not a pseudonym) with a rule \
+             finding must survive dedup; got: {:?}",
+            result
+        );
     }
 
     // ── EC-001 — Malformed JSON falls back to empty vec ───────────────────────
@@ -576,6 +693,74 @@ mod tests {
             "EC-002: top-25 by confidence must be High or Medium, not Low; \
              fixture has 15H + 10M = 25 H/M items so no Low item should appear \
              in the top-25 slice"
+        );
+    }
+
+    // HIGH finding fix: below-cap inputs preserve ALL findings including Low.
+    // With 5H+5M+5L (15 total < 25 cap), all 15 must be returned.
+    #[test]
+    fn cap_preserves_all_findings_when_below_cap() {
+        let mut items: Vec<String> = Vec::new();
+        for i in 0..5u32 {
+            items.push(format!(
+                r#"{{"id":"ai.low_{i}","severity":"Info","title":"Low {i}","evidence":[],"confidence":"Low","reasoning":""}}"#
+            ));
+        }
+        for i in 0..5u32 {
+            items.push(format!(
+                r#"{{"id":"ai.med_{i}","severity":"Medium","title":"Med {i}","evidence":[],"confidence":"Medium","reasoning":""}}"#
+            ));
+        }
+        for i in 0..5u32 {
+            items.push(format!(
+                r#"{{"id":"ai.high_{i}","severity":"High","title":"High {i}","evidence":[],"confidence":"High","reasoning":""}}"#
+            ));
+        }
+        let response = format!("[{}]", items.join(","));
+        let parsed = parse_augmented_response(&response).expect("must parse 15-finding response");
+        // Simulate the augment_findings cap logic on the parsed results
+        // (without a full pipeline): stable sort + truncate to AUGMENT_CAP.
+        let mut sorted = parsed;
+        sorted.sort_by(|a, b| {
+            confidence_rank(a.confidence)
+                .cmp(&confidence_rank(b.confidence))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        if sorted.len() > AUGMENT_CAP {
+            sorted.truncate(AUGMENT_CAP);
+        }
+        assert_eq!(
+            sorted.len(),
+            15,
+            "HIGH cap fix: 5H+5M+5L (15 total, below cap of {AUGMENT_CAP}) must all be returned"
+        );
+    }
+
+    // HIGH finding fix: 30H input truncates to exactly 25.
+    #[test]
+    fn cap_truncates_to_25_when_above_cap() {
+        let items: Vec<String> = (0..30u32)
+            .map(|i| {
+                format!(
+                    r#"{{"id":"ai.high_{i}","severity":"High","title":"High {i}","evidence":[],"confidence":"High","reasoning":""}}"#
+                )
+            })
+            .collect();
+        let response = format!("[{}]", items.join(","));
+        let parsed = parse_augmented_response(&response).expect("must parse 30-finding response");
+        let mut sorted = parsed;
+        sorted.sort_by(|a, b| {
+            confidence_rank(a.confidence)
+                .cmp(&confidence_rank(b.confidence))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        if sorted.len() > AUGMENT_CAP {
+            sorted.truncate(AUGMENT_CAP);
+        }
+        assert_eq!(
+            sorted.len(),
+            AUGMENT_CAP,
+            "HIGH cap fix: 30H input must be truncated to {AUGMENT_CAP}"
         );
     }
 
