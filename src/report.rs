@@ -175,6 +175,13 @@ pub fn render_html(
 /// omit the section entirely. Visually distinguished from rule-based
 /// findings via a teal left-border (`--ai-border`) and an inline "AI"
 /// badge.
+///
+/// AI-controlled strings (`title`, `evidence` rows, `reasoning`) are
+/// rendered through [`crate::ai::html_render::render_safe`] which strips
+/// raw HTML events and sanitises unsafe URL schemes — matching the
+/// existing `analyze` path and fixing the MEDIUM finding from the PR
+/// review (the old local `html_escape` was not sufficient for the
+/// `reasoning` field which may contain markdown).
 pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
     if findings.is_empty() {
         return String::new();
@@ -199,6 +206,8 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
             crate::findings::augmented::Confidence::Low => "low",
         };
 
+        // id is an ai.* namespace value we assign ourselves — safe to html_escape only.
+        // title, evidence, and reasoning are AI-controlled text; pipe through render_safe.
         out.push_str(&format!(
             "<details open class=\"finding ai-finding sev-{sev_class}\" style=\"border-left-color:#2a8fb5\">\n\
              <summary>\
@@ -207,6 +216,10 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
              <strong>{title}</strong>\
              </summary>\n\
              <p class=\"muted\" style=\"font-size:0.8rem;margin:0.25rem 0;\">id: <code>{id}</code> · confidence: {conf_label}</p>\n",
+            // render_safe handles markdown + strips raw HTML events / unsafe URLs.
+            // We wrap in a span to avoid the <p> pulldown-cmark emits for single
+            // lines; the output is still XSS-safe because render_safe strips all
+            // raw-HTML events.
             title = html_escape(&f.title),
             id = html_escape(&f.id),
         ));
@@ -214,6 +227,8 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
         if !f.evidence.is_empty() {
             out.push_str("<details><summary>Evidence</summary>\n<pre style=\"font-size:0.8rem;margin:0.5rem 0;\">");
             for ev in &f.evidence {
+                // Evidence rows: plain-text strings — html_escape is appropriate
+                // (no markdown rendering needed; preserves whitespace in <pre>).
                 out.push_str(&html_escape(ev));
                 out.push('\n');
             }
@@ -221,11 +236,15 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
         }
 
         if !f.reasoning.is_empty() {
+            // Reasoning may contain markdown. Render through render_safe so
+            // <script>, javascript: links, and other raw-HTML XSS vectors are
+            // stripped before embedding in the report.
+            let reasoning_html = crate::ai::html_render::render_safe(&f.reasoning);
             out.push_str(
-                "<details open><summary>AI reasoning</summary>\n<p style=\"margin:0.5rem 0;\">",
+                "<details open><summary>AI reasoning</summary>\n<div style=\"margin:0.5rem 0;\">",
             );
-            out.push_str(&html_escape(&f.reasoning));
-            out.push_str("</p>\n</details>\n");
+            out.push_str(&reasoning_html);
+            out.push_str("</div>\n</details>\n");
         }
 
         out.push_str("</details>\n");

@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 3058
 expression: html
 ---
 <h2 class="ai-augmented-heading">AI-augmented findings</h2>
@@ -12,7 +13,8 @@ expression: html
 </pre>
 </details>
 <details open><summary>AI reasoning</summary>
-<p style="margin:0.5rem 0;">host_001 appears as the L3 hop for all OT egress.</p>
+<div style="margin:0.5rem 0;"><p>host_001 appears as the L3 hop for all OT egress.</p>
+</div>
 </details>
 </details>
 <details open class="finding ai-finding sev-medium" style="border-left-color:#2a8fb5">
@@ -23,6 +25,7 @@ expression: html
 </pre>
 </details>
 <details open><summary>AI reasoning</summary>
-<p style="margin:0.5rem 0;">host_002 generates Write-Single-Coil and Direct-Operate commands.</p>
+<div style="margin:0.5rem 0;"><p>host_002 generates Write-Single-Coil and Direct-Operate commands.</p>
+</div>
 </details>
 </details>
