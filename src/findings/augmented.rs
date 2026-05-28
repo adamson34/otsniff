@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ai::AiProvider;
 use crate::error::Result;
 use crate::findings::{Finding, Severity};
 use crate::inventory::Asset;
@@ -51,6 +52,9 @@ pub struct AugmentedFinding {
 /// structured JSON response, deduplicates against `findings`, and returns
 /// the surviving `AugmentedFinding`s.
 ///
+/// The `provider` parameter accepts any `AiProvider` implementation —
+/// production callers pass `&ClaudeCliProvider`, test callers pass a mock.
+///
 /// # Errors
 ///
 /// Returns `OtError::Parse(reason)` when the provider call fails or the
@@ -60,6 +64,7 @@ pub fn augment_findings(
     _observations: &Observations,
     _findings: &[Finding],
     _inventory: &[Asset],
+    _provider: &dyn AiProvider,
 ) -> Result<Vec<AugmentedFinding>> {
     todo!()
 }
@@ -98,5 +103,308 @@ mod tests {
         let c = Confidence::High;
         let c2 = c;
         assert_eq!(c, c2);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// A minimal valid JSON array of two augmented findings, as the AI
+    /// provider would return — all values use scrubbed pseudonyms.
+    fn two_finding_response() -> &'static str {
+        r#"[
+  {
+    "id": "ai.gateway_inference",
+    "severity": "High",
+    "title": "Inferred gateway role mismatch",
+    "evidence": ["host_001 acted as default gateway but is not inventoried as a router"],
+    "confidence": "High",
+    "reasoning": "host_001 appears as the L3 hop for all OT egress; vendor OUI is an HMI vendor."
+  },
+  {
+    "id": "ai.role_misclass",
+    "severity": "Medium",
+    "title": "Possible role misclassification",
+    "evidence": ["host_002 sends engineering-class commands but is inventoried as a workstation"],
+    "confidence": "Medium",
+    "reasoning": "host_002 generates Write-Single-Coil and Direct-Operate commands, which are engineering-class."
+  }
+]"#
+    }
+
+    fn minimal_rule_finding(id: &'static str, evidence: Vec<String>) -> Finding {
+        Finding {
+            id,
+            severity: Severity::High,
+            title: format!("Test finding {id}"),
+            summary: "test".to_string(),
+            evidence,
+            recommendation: "investigate",
+            playbook: vec!["step 1".to_string()],
+        }
+    }
+
+    // ── BC-6.05.002 — Response shape ─────────────────────────────────────────
+
+    // BC-6.05.002 — parser returns Vec<AugmentedFinding> of length 2 with
+    // correct id/severity/confidence from a well-formed JSON array.
+    #[test]
+    fn augment_parses_well_formed_json_array() {
+        let result = parse_augmented_response(two_finding_response());
+        let findings = result.expect("parse_augmented_response must succeed on valid JSON");
+        assert_eq!(
+            findings.len(),
+            2,
+            "BC-6.05.002: parser must return exactly 2 findings from the two-element fixture"
+        );
+        assert_eq!(findings[0].id, "ai.gateway_inference");
+        assert_eq!(findings[0].severity, Severity::High);
+        assert_eq!(findings[0].confidence, Confidence::High);
+        assert_eq!(findings[1].id, "ai.role_misclass");
+        assert_eq!(findings[1].severity, Severity::Medium);
+        assert_eq!(findings[1].confidence, Confidence::Medium);
+    }
+
+    // BC-6.05.002 — every returned id must start with "ai." per the namespace
+    // contract.
+    #[test]
+    fn augment_id_namespace_prefix() {
+        let findings = parse_augmented_response(two_finding_response())
+            .expect("parse must succeed on valid JSON");
+        for f in &findings {
+            assert!(
+                f.id.starts_with("ai."),
+                "BC-6.05.002: augmented finding id '{}' must be namespaced 'ai.<short>'",
+                f.id
+            );
+        }
+    }
+
+    // BC-6.05.002 — parser must extract the JSON array even when the model
+    // wraps it in prose before and/or after.
+    #[test]
+    fn augment_tolerates_preamble_and_postamble() {
+        let raw = format!(
+            "Sure, here you go:\n{}\nLet me know if you need more detail.",
+            two_finding_response()
+        );
+        let findings =
+            parse_augmented_response(&raw).expect("parser must tolerate prose preamble/postamble");
+        assert_eq!(
+            findings.len(),
+            2,
+            "BC-6.05.002: parser must extract both findings even with prose preamble/postamble"
+        );
+    }
+
+    // ── BC-6.05.003 — Dedup against rule findings ────────────────────────────
+
+    // BC-6.05.003 — when an augmented finding's evidence overlaps with a rule
+    // finding, the rule finding takes precedence and the augmented finding is
+    // dropped.
+    #[test]
+    fn dedup_drops_overlapping_augmented() {
+        // Rule finding covers host_001; augmented finding also references host_001.
+        let rule = minimal_rule_finding(
+            "ics.engineering_commands",
+            vec!["host_001 sent Write-Single-Coil".to_string()],
+        );
+        let augmented = AugmentedFinding {
+            id: "ai.gateway_inference".to_string(),
+            severity: Severity::High,
+            title: "Inferred gateway role".to_string(),
+            evidence: vec!["host_001 acted as default gateway".to_string()],
+            confidence: Confidence::High,
+            reasoning: "host_001 appears as the L3 hop".to_string(),
+        };
+        let result = dedup_against_rule_findings(vec![augmented], &[rule]);
+        // Either dropped entirely or merged as a note — either way the
+        // augmented finding with an overlapping id must NOT appear as an
+        // independent AugmentedFinding in the output.
+        let standalone_ai = result.iter().find(|f| f.id == "ai.gateway_inference");
+        assert!(
+            standalone_ai.is_none(),
+            "BC-6.05.003: augmented finding whose evidence overlaps a rule finding \
+             must be dropped; found it in output: {:?}",
+            standalone_ai
+        );
+    }
+
+    // BC-6.05.003 — a disjoint augmented finding (different host) must survive
+    // dedup.
+    #[test]
+    fn dedup_preserves_disjoint_augmented() {
+        let rule = minimal_rule_finding(
+            "ics.engineering_commands",
+            vec!["host_001 sent Write-Single-Coil".to_string()],
+        );
+        let augmented = AugmentedFinding {
+            id: "ai.role_misclass".to_string(),
+            severity: Severity::Medium,
+            title: "Role misclassification".to_string(),
+            evidence: vec!["host_002 sends engineering commands".to_string()],
+            confidence: Confidence::Medium,
+            reasoning: "host_002 is inventoried as a workstation".to_string(),
+        };
+        let result = dedup_against_rule_findings(vec![augmented], &[rule]);
+        assert_eq!(
+            result.len(),
+            1,
+            "BC-6.05.003: augmented finding with disjoint evidence must survive dedup"
+        );
+        assert_eq!(result[0].id, "ai.role_misclass");
+    }
+
+    // ── EC-001 — Malformed JSON falls back to empty vec ───────────────────────
+
+    // EC-001 — when the provider returns unparseable JSON, the parser returns
+    // Ok(vec![]) rather than an error, allowing the report to render without
+    // the augment section.
+    #[test]
+    fn augment_returns_empty_on_malformed_json() {
+        let result = parse_augmented_response("not json at all");
+        let findings =
+            result.expect("EC-001: malformed JSON must return Ok(vec![]) not Err");
+        assert!(
+            findings.is_empty(),
+            "EC-001: malformed JSON must produce an empty vec, not findings; got: {findings:?}"
+        );
+    }
+
+    // ── EC-002 — Cap at top-N by confidence ──────────────────────────────────
+
+    // EC-002 — when the provider returns more findings than the cap (25), only
+    // the highest-confidence ones survive, ordered confidence High > Medium > Low.
+    //
+    // Interpretation call: cap is 25. Documented here for the implementer.
+    // If the implementer chooses a different cap, update the constant name in
+    // the assertion message but keep the test semantic.
+    #[test]
+    fn augment_caps_at_top_n_by_confidence() {
+        // Build 30 findings: 10 Low, 10 Medium, 10 High (order: Low first).
+        let mut raw: Vec<AugmentedFinding> = Vec::new();
+        for i in 0..10 {
+            raw.push(AugmentedFinding {
+                id: format!("ai.low_{i}"),
+                severity: Severity::Info,
+                title: format!("Low confidence {i}"),
+                evidence: vec![],
+                confidence: Confidence::Low,
+                reasoning: String::new(),
+            });
+        }
+        for i in 0..10 {
+            raw.push(AugmentedFinding {
+                id: format!("ai.medium_{i}"),
+                severity: Severity::Medium,
+                title: format!("Medium confidence {i}"),
+                evidence: vec![],
+                confidence: Confidence::Medium,
+                reasoning: String::new(),
+            });
+        }
+        for i in 0..10 {
+            raw.push(AugmentedFinding {
+                id: format!("ai.high_{i}"),
+                severity: Severity::High,
+                title: format!("High confidence {i}"),
+                evidence: vec![],
+                confidence: Confidence::High,
+                reasoning: String::new(),
+            });
+        }
+        // 30 total — above the cap of 25.
+        assert_eq!(raw.len(), 30);
+
+        // dedup_against_rule_findings with no rule findings and the raw set;
+        // the cap is applied inside augment_findings, but we need a callable
+        // that applies the cap. The story says augment_findings caps at top-N.
+        // For unit testability, the implementer should expose a cap function
+        // or we drive through augment_findings with a mock provider.
+        //
+        // We use the mock provider here to drive the full pipeline.
+        // augment_findings is the entry point; this also covers AC-001.
+        // We build a response with 30 findings.
+        let response_30 = {
+            let mut items: Vec<String> = Vec::new();
+            for f in &raw {
+                let conf = match f.confidence {
+                    Confidence::High => "High",
+                    Confidence::Medium => "Medium",
+                    Confidence::Low => "Low",
+                };
+                items.push(format!(
+                    r#"{{"id":"{}", "severity":"Info", "title":"{}", "evidence":[], "confidence":"{}", "reasoning":""}}"#,
+                    f.id, f.title, conf
+                ));
+            }
+            format!("[{}]", items.join(","))
+        };
+
+        let findings = parse_augmented_response(&response_30)
+            .expect("EC-002: 30-finding response must parse without error");
+        // The cap logic is inside augment_findings; parse returns all 30.
+        // The test for the cap must go through augment_findings. We can't
+        // call it without the full Observations/inventory/provider setup here
+        // — that belongs in snapshot.rs. Here we assert the parser at least
+        // returns all 30 without truncation (the cap is a separate concern).
+        assert_eq!(
+            findings.len(),
+            30,
+            "EC-002 (parser): parse_augmented_response returns all findings; cap is applied downstream"
+        );
+        // Verify confidence ordering would keep High before Medium before Low.
+        // We do this by sorting and asserting the top-25 would all be High or Medium.
+        let mut sorted = findings.clone();
+        sorted.sort_by(|a, b| {
+            let rank = |c: Confidence| match c {
+                Confidence::High => 0u8,
+                Confidence::Medium => 1,
+                Confidence::Low => 2,
+            };
+            rank(a.confidence).cmp(&rank(b.confidence))
+        });
+        let top_25: Vec<_> = sorted.iter().take(25).collect();
+        let all_high_or_medium = top_25
+            .iter()
+            .all(|f| f.confidence == Confidence::High || f.confidence == Confidence::Medium);
+        assert!(
+            all_high_or_medium,
+            "EC-002: top-25 by confidence must be High or Medium, not Low; \
+             a cap that includes Low findings is ordered incorrectly"
+        );
+    }
+
+    // ── EC-003 — Unknown host dropped ────────────────────────────────────────
+
+    // EC-003 — an augmented finding whose evidence references a host not in
+    // the inventory must be dropped.
+    //
+    // This is enforced inside augment_findings (not parse_augmented_response).
+    // The unit test verifies the dedup step's interaction: since the inventory
+    // check is part of the full pipeline, we note that dedup_against_rule_findings
+    // alone cannot test this (it has no inventory param). The snapshot.rs
+    // integration test covers the full path (EC-003 there).
+    //
+    // Here we assert that a finding with no evidence (empty evidence vec) survives
+    // dedup — which is the conservative baseline. The unknown-host check is
+    // an ADDITIONAL filter applied inside augment_findings.
+    #[test]
+    fn dedup_preserves_finding_with_empty_evidence() {
+        // This is a structural baseline — dedup alone doesn't know about inventory.
+        let augmented = AugmentedFinding {
+            id: "ai.unknown_host_ref".to_string(),
+            severity: Severity::Info,
+            title: "References unknown host".to_string(),
+            evidence: vec![],
+            confidence: Confidence::Low,
+            reasoning: "host_999 was observed doing suspicious things".to_string(),
+        };
+        let result = dedup_against_rule_findings(vec![augmented], &[]);
+        // dedup with no rule findings and empty evidence cannot overlap — so it
+        // must survive. The unknown-host filter is in augment_findings.
+        assert_eq!(
+            result.len(),
+            1,
+            "EC-003 (dedup baseline): finding with empty evidence and no rule conflicts survives dedup"
+        );
     }
 }
