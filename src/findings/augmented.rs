@@ -482,17 +482,21 @@ mod tests {
 
     // ── EC-002 — Cap at top-N by confidence ──────────────────────────────────
 
-    // EC-002 — when the provider returns more findings than the cap (25), only
-    // the highest-confidence ones survive, ordered confidence High > Medium > Low.
-    //
-    // Interpretation call: cap is 25. Documented here for the implementer.
-    // If the implementer chooses a different cap, update the constant name in
-    // the assertion message but keep the test semantic.
+    // EC-002 / BC-6.05.002 — parse_augmented_response preserves the full set
+    // of findings in confidence-sortable form.  The fixture uses 15 High +
+    // 10 Medium + 5 Low = 30 items, ensuring the top-25 by confidence-rank
+    // are entirely High or Medium (15 + 10 = 25 exactly).  This exercises
+    // the parser's shape-preservation contract, not the orchestration cap —
+    // the integration test `augment_caps_findings_at_top_25_by_confidence`
+    // in `tests/snapshot.rs` pins the cap-25 behaviour at the
+    // `augment_findings` level.
     #[test]
     fn augment_caps_at_top_n_by_confidence() {
-        // Build 30 findings: 10 Low, 10 Medium, 10 High (order: Low first).
+        // Build 30 findings: 5 Low, 10 Medium, 15 High (order: Low first).
+        // 15 High + 10 Medium = 25 items ≥ cap; top-25 sorted by confidence
+        // are therefore all High or Medium — no Low item reaches the top-25.
         let mut raw: Vec<AugmentedFinding> = Vec::new();
-        for i in 0..10 {
+        for i in 0..5 {
             raw.push(AugmentedFinding {
                 id: format!("ai.low_{i}"),
                 severity: Severity::Info,
@@ -512,7 +516,7 @@ mod tests {
                 reasoning: String::new(),
             });
         }
-        for i in 0..10 {
+        for i in 0..15 {
             raw.push(AugmentedFinding {
                 id: format!("ai.high_{i}"),
                 severity: Severity::High,
@@ -522,18 +526,9 @@ mod tests {
                 reasoning: String::new(),
             });
         }
-        // 30 total — above the cap of 25.
+        // 30 total — above the cap of 25, with 25 High+Medium items.
         assert_eq!(raw.len(), 30);
 
-        // dedup_against_rule_findings with no rule findings and the raw set;
-        // the cap is applied inside augment_findings, but we need a callable
-        // that applies the cap. The story says augment_findings caps at top-N.
-        // For unit testability, the implementer should expose a cap function
-        // or we drive through augment_findings with a mock provider.
-        //
-        // We use the mock provider here to drive the full pipeline.
-        // augment_findings is the entry point; this also covers AC-001.
-        // We build a response with 30 findings.
         let response_30 = {
             let mut items: Vec<String> = Vec::new();
             for f in &raw {
@@ -552,18 +547,17 @@ mod tests {
 
         let findings = parse_augmented_response(&response_30)
             .expect("EC-002: 30-finding response must parse without error");
-        // The cap logic is inside augment_findings; parse returns all 30.
-        // The test for the cap must go through augment_findings. We can't
-        // call it without the full Observations/inventory/provider setup here
-        // — that belongs in snapshot.rs. Here we assert the parser at least
-        // returns all 30 without truncation (the cap is a separate concern).
+        // BC-6.05.002 (parser contract): parse_augmented_response returns all
+        // findings without truncation; capping is an augment_findings concern.
         assert_eq!(
             findings.len(),
             30,
-            "EC-002 (parser): parse_augmented_response returns all findings; cap is applied downstream"
+            "BC-6.05.002 (parser): parse_augmented_response must return all 30 findings; \
+             cap is applied by augment_findings downstream"
         );
-        // Verify confidence ordering would keep High before Medium before Low.
-        // We do this by sorting and asserting the top-25 would all be High or Medium.
+        // Verify confidence ordering: the top-25 items from a confidence-sorted
+        // slice must be entirely High or Medium.  With 15H + 10M + 5L, the
+        // sorted order is [15H, 10M, 5L]; positions 1-25 are all H or M.
         let mut sorted = findings.clone();
         sorted.sort_by(|a, b| {
             let rank = |c: Confidence| match c {
@@ -580,7 +574,8 @@ mod tests {
         assert!(
             all_high_or_medium,
             "EC-002: top-25 by confidence must be High or Medium, not Low; \
-             a cap that includes Low findings is ordered incorrectly"
+             fixture has 15H + 10M = 25 H/M items so no Low item should appear \
+             in the top-25 slice"
         );
     }
 

@@ -2860,21 +2860,60 @@ fn augment_dedup_rule_finding_takes_precedence() {
 #[test]
 fn augment_dedup_disjoint_finding_survives() {
     use otsniff::findings::augmented::augment_findings;
+    use otsniff::observe::HostObs;
 
-    // Build observations with no rule findings (empty events).
-    let obs = otsniff::observe::Observations::default();
+    // Build a minimal two-host observation so the scrub map mints host_001
+    // and host_002 (assigned in sorted IP order: 10.10.0.5 → host_001,
+    // 10.10.0.20 → host_002).  No events, no flows, no credentials — so
+    // run_all produces no rule findings.  The EC-003 filter inside
+    // augment_findings requires that every host_NNN pseudonym in an
+    // augmented finding's evidence appears in the scrub map; without these
+    // hosts in obs.hosts the map is empty and both findings are dropped.
+    let mut hosts = std::collections::HashMap::new();
+    hosts.insert(
+        ip("10.10.0.5"),
+        HostObs {
+            ip: ip("10.10.0.5"),
+            macs: vec![[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01]],
+            protocols: std::collections::HashSet::new(),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 1,
+            bytes: 64,
+            in_ot_zone: true,
+        },
+    );
+    hosts.insert(
+        ip("10.10.0.20"),
+        HostObs {
+            ip: ip("10.10.0.20"),
+            macs: vec![[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x02]],
+            protocols: std::collections::HashSet::new(),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 1,
+            bytes: 64,
+            in_ot_zone: true,
+        },
+    );
+    let obs = otsniff::observe::Observations {
+        hosts,
+        ..Default::default()
+    };
+
     let inventory = build_inventory(&obs);
     let rule_findings = run_all(&obs, &ot_subnets());
     assert!(
         rule_findings.is_empty(),
-        "default observations must produce no rule findings"
+        "two bare hosts with no events must produce no rule findings"
     );
 
     let mock = MockAiProvider::with_augment(&two_augmented_findings_response());
     let augmented = augment_findings(&obs, &rule_findings, &inventory, &mock)
         .expect("BC-6.05.003: augment_findings must succeed when no rule findings exist");
 
-    // With no rule findings to overlap, both augmented findings must survive.
+    // With no rule findings to overlap, and host_001/host_002 registered in
+    // the scrub map, both augmented findings must survive.
     assert_eq!(
         augmented.len(),
         2,
