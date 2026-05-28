@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 
 use crate::capture_source::Classification;
 use crate::error::Result;
+use crate::findings::augmented::AugmentedFinding;
 use crate::findings::{Finding, Severity};
 use crate::inventory::Asset;
 use crate::observe::Observations;
@@ -165,6 +166,19 @@ pub fn render_html(
         ai_section,
     };
     Ok(view.render()?)
+}
+
+/// Render the "AI-augmented findings" section as a pre-formatted HTML
+/// fragment (S-5.03 AC-004).
+///
+/// The returned string is intended to be embedded in the HTML report after
+/// the rule-based findings section. The caller must pass it through
+/// `ai::html_render::render_safe` before embedding (unscrub applies first).
+///
+/// Body is `todo!()` — implementation lands in S-5.03 Step 4.
+#[allow(dead_code)]
+pub fn render_augmented_section(_findings: &[AugmentedFinding]) -> String {
+    todo!()
 }
 
 fn fmt_ts(t: DateTime<Utc>) -> String {

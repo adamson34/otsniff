@@ -68,6 +68,15 @@ impl AiProvider for ClaudeCliProvider {
         "claude-cli"
     }
 
+    /// Run the AI augment pass via the Claude Code CLI (S-5.03).
+    ///
+    /// Follows the same subprocess flow as [`analyze`]: spawns `claude -p`,
+    /// pipes `scrubbed_md` to stdin, and captures stdout. The response is
+    /// expected to be a JSON array of augmented findings with optional prose.
+    fn augment(&self, _system_prompt: &str, _scrubbed_md: &str) -> Result<String> {
+        todo!()
+    }
+
     fn analyze(&self, system_prompt: &str, scrubbed_md: &str) -> Result<String> {
         use std::io::IsTerminal as _;
 

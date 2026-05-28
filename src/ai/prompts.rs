@@ -83,6 +83,18 @@ pub fn capture_source_qualifier(tag: &str) -> &'static str {
     }
 }
 
+/// System prompt for the AI augment pass (S-5.03).
+///
+/// Instructs the provider to return a JSON array of augmented findings
+/// anchored on the rule-based results and asset inventory already in
+/// the scrubbed context. The implementer in Step 4 will replace this
+/// placeholder with a committed, snapshot-tested prompt.
+///
+/// **Critical invariant**: must contain NO real-looking identifiers
+/// (no example IPs, MACs, or fixture data). See the invariant note on
+/// `SYSTEM_PROMPT_BASE`.
+pub const AUGMENT_PROMPT: &str = "TODO";
+
 /// Assemble the full system prompt for a given capture-source tag.
 pub fn system_prompt_for(tag: &str) -> String {
     let mut s = SYSTEM_PROMPT_BASE.to_string();

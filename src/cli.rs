@@ -869,6 +869,9 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             pseudonyms_replaced: replaced,
             pseudonyms_unmapped: unmapped.len(),
         },
+        // S-5.03: augment pass is recorded separately. `None` until the
+        // augment path is wired in Steps 3-4.
+        augment_pass: None,
     };
     let log_json = serde_json::to_string_pretty(&log)?;
     leak_detector::ensure_clean(&log_json)?;

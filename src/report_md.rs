@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 
 use crate::capture_source::Classification;
 use crate::error::Result;
+use crate::findings::augmented::AugmentedFinding;
 use crate::findings::{Finding, Severity};
 use crate::inventory::{Asset, Role};
 use crate::observe::Observations;
@@ -195,6 +196,18 @@ pub fn render_markdown(
     // branch for the reasoning — same applies here.
 
     Ok(out)
+}
+
+/// Render the "AI-augmented findings" section as a Markdown fragment
+/// (S-5.03 AC-004).
+///
+/// Appended after the rule-based findings section in the markdown report.
+/// Unscrub must be applied to `findings[*].reasoning` before calling this.
+///
+/// Body is `todo!()` — implementation lands in S-5.03 Step 4.
+#[allow(dead_code)]
+pub fn render_augmented_section_md(_findings: &[AugmentedFinding]) -> String {
+    todo!()
 }
 
 fn fmt_ts(t: DateTime<Utc>) -> String {

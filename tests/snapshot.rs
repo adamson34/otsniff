@@ -15,6 +15,7 @@ use otsniff::ai::leak_detector;
 use otsniff::ai::prompts;
 use otsniff::audit;
 use otsniff::capture_source::{classify, CaptureSource, Classification, Confidence};
+use otsniff::findings::augmented::AugmentedFinding;
 use otsniff::findings::run_all;
 use otsniff::findings::{catalog, metadata_for};
 use otsniff::inventory::build as build_inventory;
@@ -624,6 +625,7 @@ fn audit_log_rendered_for_an_analyze_run_carries_no_real_identifiers() {
             pseudonyms_replaced: 0,
             pseudonyms_unmapped: 0,
         },
+        augment_pass: None,
     };
     let log_json = serde_json::to_string_pretty(&log).unwrap();
 
@@ -2618,4 +2620,22 @@ fn test_bc_8_01_005_print_mode_forces_open() {
          details.finding (both `@media print` and `details.finding` must appear \
          in the rendered CSS)"
     );
+}
+
+// ---------------------------------------------------------------------------
+// S-5.03 — AI-augmented findings snapshot placeholder
+// ---------------------------------------------------------------------------
+
+/// Placeholder snapshot test for the AI augment pass (S-5.03).
+///
+/// This test will exercise `augment_findings` end-to-end with a mock provider
+/// once the implementation lands in Steps 3-4.  The `todo!()` body keeps the
+/// stub RED (failing) so the Red Gate invariant holds.
+#[test]
+fn augmented_findings_snapshot() {
+    // Type-anchor: confirms `AugmentedFinding` is accessible from integration
+    // tests.  The real assertion (mock provider + snapshot) is added in Step 3.
+    fn _assert_type_accessible(_: &[AugmentedFinding]) {}
+    // S-5.03 Step 3: implement mock-provider snapshot test.
+    todo!()
 }
