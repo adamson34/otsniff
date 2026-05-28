@@ -75,8 +75,46 @@ pub fn augment_findings(
 /// Returns an empty `Vec` when no valid array is found (rather than an error),
 /// so the caller can degrade gracefully.
 pub fn parse_augmented_response(raw: &str) -> Result<Vec<AugmentedFinding>> {
-    let _ = raw;
-    todo!()
+    // Find the first '[' and attempt to parse from there.
+    // Walk forward from each '[' until we find one whose JSON parse succeeds.
+    let mut start = 0;
+    while let Some(bracket_pos) = raw[start..].find('[') {
+        let abs_pos = start + bracket_pos;
+        let candidate = &raw[abs_pos..];
+        match serde_json::from_str::<Vec<AugmentedFinding>>(candidate) {
+            Ok(findings) => return Ok(findings),
+            Err(_) => {
+                // Try to find the matching ']' by scanning and trimming the
+                // candidate progressively. Walk from the end of the string
+                // inward looking for a closing bracket.
+                let mut end = candidate.len();
+                let found = false;
+                while end > 0 {
+                    if let Some(close_pos) = candidate[..end].rfind(']') {
+                        let slice = &candidate[..=close_pos];
+                        if let Ok(findings) = serde_json::from_str::<Vec<AugmentedFinding>>(slice)
+                        {
+                            return Ok(findings);
+                        }
+                        end = close_pos;
+                    } else {
+                        break;
+                    }
+                }
+                if !found {
+                    // No valid array starting at this '['; advance past it.
+                    start = abs_pos + 1;
+                    // Suppress unused-variable warning: `found` is used as
+                    // a sentinel to avoid double-advancing; set it to signal
+                    // we intentionally fell through.
+                    let _ = found;
+                }
+            }
+        }
+    }
+    // No valid JSON array found anywhere in the input — return empty (EC-001).
+    eprintln!("WARNING: augment response contained no valid JSON array; treating as empty");
+    Ok(vec![])
 }
 
 /// Deduplicate augmented findings against existing rule findings.
@@ -85,11 +123,40 @@ pub fn parse_augmented_response(raw: &str) -> Result<Vec<AugmentedFinding>> {
 /// overlaps with a rule finding, the rule finding takes precedence and the
 /// augmented finding is dropped. Returns only the surviving augmented
 /// findings.
+///
+/// Overlap is defined as: at least one token from the augmented finding's
+/// evidence appears in the rule finding's evidence. Token comparison is
+/// whitespace-split and case-sensitive.
 pub fn dedup_against_rule_findings(
-    _augmented: Vec<AugmentedFinding>,
-    _rule_findings: &[Finding],
+    augmented: Vec<AugmentedFinding>,
+    rule_findings: &[Finding],
 ) -> Vec<AugmentedFinding> {
-    todo!()
+    // Build a set of all tokens from all rule evidence for O(1) lookup.
+    let mut rule_tokens: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for rule in rule_findings {
+        for ev in &rule.evidence {
+            for token in ev.split_whitespace() {
+                rule_tokens.insert(token);
+            }
+        }
+    }
+
+    augmented
+        .into_iter()
+        .filter(|af| {
+            // If the augmented finding has evidence, check whether any token
+            // overlaps with any rule-finding token.
+            if af.evidence.is_empty() {
+                // No evidence → no overlap possible → keep (conservative baseline).
+                return true;
+            }
+            let has_overlap = af.evidence.iter().any(|ev| {
+                ev.split_whitespace()
+                    .any(|token| rule_tokens.contains(token))
+            });
+            !has_overlap
+        })
+        .collect()
 }
 
 #[cfg(test)]
