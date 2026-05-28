@@ -221,7 +221,9 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
         }
 
         if !f.reasoning.is_empty() {
-            out.push_str("<details open><summary>AI reasoning</summary>\n<p style=\"margin:0.5rem 0;\">");
+            out.push_str(
+                "<details open><summary>AI reasoning</summary>\n<p style=\"margin:0.5rem 0;\">",
+            );
             out.push_str(&html_escape(&f.reasoning));
             out.push_str("</p>\n</details>\n");
         }

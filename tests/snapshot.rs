@@ -2631,9 +2631,9 @@ fn test_bc_8_01_005_print_mode_forces_open() {
 // Mirrors the mock pattern from `src/ai/claude_cli.rs` unit tests but exposes
 // the `augment` capture surface needed for the privacy invariant assertions.
 
-use std::cell::RefCell;
 use otsniff::ai::AiProvider;
 use otsniff::error::OtError as AugOtError;
+use std::cell::RefCell;
 
 struct MockAiProvider {
     /// Fixed response returned by `augment`.
@@ -2817,11 +2817,18 @@ fn augment_dedup_rule_finding_takes_precedence() {
     let obs = build_fixture();
     let inventory = build_inventory(&obs);
     let rule_findings = run_all(&obs, &ot_subnets());
-    assert!(!rule_findings.is_empty(), "fixture must produce rule findings for dedup test");
+    assert!(
+        !rule_findings.is_empty(),
+        "fixture must produce rule findings for dedup test"
+    );
 
     // The mock returns one augmented finding whose evidence contains
     // a term that overlaps with the first rule finding's evidence.
-    let first_rule_evidence = rule_findings[0].evidence.first().cloned().unwrap_or_default();
+    let first_rule_evidence = rule_findings[0]
+        .evidence
+        .first()
+        .cloned()
+        .unwrap_or_default();
     // Build a response that copies the first rule finding's first evidence token.
     // The overlap term is the first whitespace-delimited token (a pseudonym like host_001).
     let overlap_token = first_rule_evidence
@@ -2858,7 +2865,10 @@ fn augment_dedup_disjoint_finding_survives() {
     let obs = otsniff::observe::Observations::default();
     let inventory = build_inventory(&obs);
     let rule_findings = run_all(&obs, &ot_subnets());
-    assert!(rule_findings.is_empty(), "default observations must produce no rule findings");
+    assert!(
+        rule_findings.is_empty(),
+        "default observations must produce no rule findings"
+    );
 
     let mock = MockAiProvider::with_augment(&two_augmented_findings_response());
     let augmented = augment_findings(&obs, &rule_findings, &inventory, &mock)
@@ -2920,7 +2930,9 @@ fn html_report_omits_augmented_section_when_empty() {
     let html_section = render_augmented_section(&[]);
 
     assert!(
-        !html_section.to_lowercase().contains("ai-augmented findings"),
+        !html_section
+            .to_lowercase()
+            .contains("ai-augmented findings"),
         "BC-3.07.001: empty augmented findings must not emit an 'AI-augmented findings' heading"
     );
 }
@@ -2940,8 +2952,9 @@ fn markdown_report_contains_augmented_section_when_present() {
         id: "ai.role_misclass".to_string(),
         severity: Severity::Medium,
         title: "Possible role misclassification".to_string(),
-        evidence: vec!["ENG-WS-01 sends engineering commands but is inventoried as workstation"
-            .to_string()],
+        evidence: vec![
+            "ENG-WS-01 sends engineering commands but is inventoried as workstation".to_string(),
+        ],
         confidence: Confidence::Medium,
         reasoning: "The asset generates Write-Single-Coil commands.".to_string(),
     }];
@@ -3041,8 +3054,8 @@ fn augmented_findings_markdown_section_snapshot() {
 // Red Gate: panics on `todo!()` in `augment_findings`.
 #[test]
 fn invariant_no_real_values_reach_ai_provider_augment() {
-    use otsniff::findings::augmented::augment_findings;
     use otsniff::ai::leak_detector;
+    use otsniff::findings::augmented::augment_findings;
 
     // AC-005 — privacy invariant for the augment path.
     let mut obs = build_fixture();
@@ -3065,8 +3078,7 @@ fn invariant_no_real_values_reach_ai_provider_augment() {
             in_ot_zone: true,
         },
     );
-    obs.hostnames
-        .insert(canary_ip, canary_hostname.to_string());
+    obs.hostnames.insert(canary_ip, canary_hostname.to_string());
 
     let inventory = build_inventory(&obs);
     let findings = run_all(&obs, &ot_subnets());
@@ -3112,8 +3124,8 @@ fn invariant_no_real_values_reach_ai_provider_augment() {
 // Red Gate: panics on `todo!()` in `augment_findings`.
 #[test]
 fn audit_log_records_augment_pass_hashes_separately() {
-    use otsniff::findings::augmented::augment_findings;
     use otsniff::audit::{self, AugmentInvocationSummary};
+    use otsniff::findings::augmented::augment_findings;
 
     // AC-006 — audit log contract.
     let obs = build_fixture();
@@ -3238,9 +3250,8 @@ fn augment_returns_empty_vec_on_malformed_json_from_provider() {
     let mock = MockAiProvider::with_augment("not json at all, sorry");
     let result = augment_findings(&obs, &findings, &inventory, &mock);
 
-    let augmented = result.expect(
-        "EC-001: malformed JSON from provider must return Ok(vec![]), not an error",
-    );
+    let augmented =
+        result.expect("EC-001: malformed JSON from provider must return Ok(vec![]), not an error");
     assert!(
         augmented.is_empty(),
         "EC-001: malformed JSON must produce empty augmented findings; got: {augmented:?}"
@@ -3300,7 +3311,10 @@ fn augment_caps_findings_at_top_25_by_confidence() {
         all_high_or_medium,
         "EC-002: capped findings must be the highest-confidence ones (High/Medium, not Low); \
          got: {:?}",
-        augmented.iter().map(|f| (f.id.as_str(), f.confidence)).collect::<Vec<_>>()
+        augmented
+            .iter()
+            .map(|f| (f.id.as_str(), f.confidence))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -3357,7 +3371,10 @@ fn augment_failure_after_analyze_success_renders_without_augment() {
     let obs = build_fixture();
     let inventory = build_inventory(&obs);
     let rule_findings = run_all(&obs, &ot_subnets());
-    assert!(!rule_findings.is_empty(), "fixture must produce rule findings");
+    assert!(
+        !rule_findings.is_empty(),
+        "fixture must produce rule findings"
+    );
 
     let mock = MockAiProvider::augment_fails("simulated augment provider failure");
     let result = augment_findings(&obs, &rule_findings, &inventory, &mock);
