@@ -15,6 +15,7 @@ use crate::audit::{
 };
 use crate::capture_source::DeclaredSource;
 use crate::error::{OtError, Result};
+use crate::findings::augmented::augment_findings;
 
 /// Source-label sentinel used in the markdown payload sent to the AI
 /// provider.
@@ -772,11 +773,46 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         );
     }
 
-    // 6. Render the AI's markdown response to safe HTML and embed in
-    //    the report. pulldown-cmark with raw-HTML events filtered, so
-    //    a Claude response containing `<script>` doesn't XSS whoever
-    //    opens the report.
-    let ai_html = crate::ai::html_render::render_safe(&unscrubbed_response);
+    // 6. Run the AI augment pass (S-5.03 CRITICAL #1 — wire augment_findings).
+    //
+    // The augment pass runs a second LLM call with a different system prompt
+    // (AUGMENT_PROMPT) to surface patterns the rule layer missed. It operates
+    // on the same scrub map as the analyze pass, so pseudonyms are consistent
+    // across both AI responses. Errors are soft-failures: the report renders
+    // with rule findings and the analyze-pass AI section intact; the augmented
+    // section is simply absent.
+    let (augmented_findings, augment_summary_opt) =
+        match augment_findings(&obs, &findings, &inventory, &provider) {
+            Ok((af, summary)) => {
+                if args.verbose {
+                    eprintln!(
+                        "  augment pass: {} findings ({} surviving dedup)",
+                        summary.raw_finding_count, summary.surviving_finding_count
+                    );
+                }
+                (af, Some(summary))
+            }
+            Err(e) => {
+                // Soft-failure: log to stderr and continue without augmented findings.
+                eprintln!("WARNING: augment pass failed (report will render without it): {e}");
+                (vec![], None)
+            }
+        };
+
+    // 7. Render the AI analysis section (analyze pass + augmented findings).
+    //    pulldown-cmark with raw-HTML events filtered, so a Claude response
+    //    containing `<script>` doesn't XSS whoever opens the report.
+    //    The augmented section uses render_augmented_section which pipes
+    //    AI-controlled text through render_safe internally.
+    let ai_html = {
+        let mut html_parts = crate::ai::html_render::render_safe(&unscrubbed_response);
+        let augmented_section = crate::report::render_augmented_section(&augmented_findings);
+        if !augmented_section.is_empty() {
+            html_parts.push('\n');
+            html_parts.push_str(&augmented_section);
+        }
+        html_parts
+    };
     let html = render_html(
         &inventory,
         &findings,
@@ -791,13 +827,20 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         source,
     })?;
 
-    // 7. Optional sidecars: markdown (combined: rules + AI), JSON,
+    // 8. Optional sidecars: markdown (combined: rules + AI + augmented), JSON,
     //    pseudonym map.
     if let Some(md_path) = &args.md {
         let mut combined = raw_md.clone();
         combined.push('\n');
         combined.push_str(&unscrubbed_response);
         combined.push('\n');
+        // Append the augmented-findings markdown section when present.
+        let augmented_md_section =
+            crate::report_md::render_augmented_section_md(&augmented_findings);
+        if !augmented_md_section.is_empty() {
+            combined.push('\n');
+            combined.push_str(&augmented_md_section);
+        }
         std::fs::write(md_path, combined).map_err(|source| OtError::WriteOutput {
             path: md_path.clone(),
             source,
@@ -825,7 +868,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         })?;
     }
 
-    // 8. Audit log. Always written when --ai is on; the audit log is
+    // 9. Audit log. Always written when --ai is on; the audit log is
     //    the privacy contract receipt. Path defaults to a `.audit.json`
     //    alongside the report output unless `--audit-log` overrides.
     //    The log itself passes through both leak checks before write
@@ -869,9 +912,8 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             pseudonyms_replaced: replaced,
             pseudonyms_unmapped: unmapped.len(),
         },
-        // S-5.03: augment pass is recorded separately. `None` until the
-        // augment path is wired in Steps 3-4.
-        augment_pass: None,
+        // S-5.03 AC-006: populate the augment_pass field from the returned summary.
+        augment_pass: augment_summary_opt,
     };
     let log_json = serde_json::to_string_pretty(&log)?;
     leak_detector::ensure_clean(&log_json)?;
