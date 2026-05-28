@@ -112,7 +112,7 @@ pub fn augment_findings(
     // In practice, the tests require that Low items are excluded when
     // High+Medium count ≤ cap (the test fixture is 10H+10M+10L with cap=25;
     // the assertion requires all returned items to be High or Medium).
-    augmented.sort_by(|a, b| confidence_rank(a.confidence).cmp(&confidence_rank(b.confidence)));
+    augmented.sort_by_key(|a| confidence_rank(a.confidence));
     // Partition: High+Medium first, then Low.
     let high_medium_count = augmented
         .iter()
@@ -146,55 +146,58 @@ pub fn augment_findings(
         f.reasoning = unscrubbed_reason;
     }
 
-    // 8. EC-003: drop findings whose evidence references hosts not in the
-    //    inventory. We only apply this filter when the scrub map has entries
-    //    (i.e., we had real observations to scrub). This avoids false-positive
-    //    filtering when inventory is empty (which would drop all findings).
-    let augmented = if !map.ips.is_empty() {
-        // Build a set of known real values: IP strings and hostnames.
-        let known_hosts: std::collections::HashSet<String> = inventory
-            .iter()
-            .flat_map(|a| {
-                let mut v = vec![a.ip.to_string()];
-                if let Some(h) = &a.hostname {
-                    v.push(h.clone());
-                }
-                v
-            })
-            .collect();
+    // 8. EC-003: drop findings whose evidence references a pseudonym (`host_NNN`
+    //    pattern) not present in the current scrub map's ip keys.
+    //
+    // A `host_NNN` token in the AI's response is a pseudonym reference.
+    // If it's not in the scrub map, the AI hallucinated the host — it was
+    // never observed in the capture. Such findings are dropped.
+    //
+    // When a finding's evidence has NO `host_NNN` tokens, there is nothing
+    // to validate against the scrub map and the finding is kept.
+    let known_pseudonyms: std::collections::HashSet<&str> =
+        map.ips.keys().map(|s| s.as_str()).collect();
 
-        // Also include all scrub-map values (pseudonym → real). The AI
-        // response's evidence may still contain pseudonyms if the unscrub
-        // step didn't fully resolve them (e.g., host from a different run).
-        // A pseudonym that IS in the map is a known host reference.
-        let known_pseudonyms: std::collections::HashSet<&str> =
-            map.ips.keys().map(|s| s.as_str()).collect();
+    // Pre-compile the host-pseudonym pattern detector.
+    fn is_host_pseudonym(token: &str) -> bool {
+        // Matches `host_NNN` exactly: "host_" followed by one or more digits.
+        if let Some(rest) = token.strip_prefix("host_") {
+            !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+        } else {
+            false
+        }
+    }
 
-        augmented
-            .into_iter()
-            .filter(|af| {
-                if af.evidence.is_empty() {
-                    return true; // no evidence to validate
-                }
-                // Check if any evidence token is a known host (real IP,
-                // hostname) or a known pseudonym (still in scrub-map terms).
-                let references_known_host = af.evidence.iter().any(|ev| {
-                    ev.split_whitespace().any(|token| {
-                        known_hosts.contains(token) || known_pseudonyms.contains(token)
-                    })
-                });
-                if !references_known_host {
-                    eprintln!(
-                        "WARNING: augmented finding '{}' references no known inventory host; dropping (EC-003)",
-                        af.id
-                    );
-                }
-                references_known_host
-            })
-            .collect()
-    } else {
-        augmented
-    };
+    let augmented = augmented
+        .into_iter()
+        .filter(|af| {
+            // Collect all host_NNN tokens from the evidence.
+            let pseudonym_refs: Vec<&str> = af
+                .evidence
+                .iter()
+                .flat_map(|ev| ev.split_whitespace())
+                .filter(|token| is_host_pseudonym(token))
+                .collect();
+
+            if pseudonym_refs.is_empty() {
+                // No pseudonym references in evidence — cannot validate → keep.
+                return true;
+            }
+
+            // All referenced pseudonyms must be known (in the scrub map).
+            let all_known = pseudonym_refs
+                .iter()
+                .all(|p| known_pseudonyms.contains(p));
+
+            if !all_known {
+                eprintln!(
+                    "WARNING: augmented finding '{}' references unknown host pseudonym(s); dropping (EC-003)",
+                    af.id
+                );
+            }
+            all_known
+        })
+        .collect::<Vec<_>>();
 
     // 9. Dedup against rule findings (AC-003).
     let augmented = dedup_against_rule_findings(augmented, findings);
@@ -235,8 +238,7 @@ pub fn parse_augmented_response(raw: &str) -> Result<Vec<AugmentedFinding>> {
                 while end > 0 {
                     if let Some(close_pos) = candidate[..end].rfind(']') {
                         let slice = &candidate[..=close_pos];
-                        if let Ok(findings) = serde_json::from_str::<Vec<AugmentedFinding>>(slice)
-                        {
+                        if let Ok(findings) = serde_json::from_str::<Vec<AugmentedFinding>>(slice) {
                             return Ok(findings);
                         }
                         end = close_pos;
@@ -471,8 +473,7 @@ mod tests {
     #[test]
     fn augment_returns_empty_on_malformed_json() {
         let result = parse_augmented_response("not json at all");
-        let findings =
-            result.expect("EC-001: malformed JSON must return Ok(vec![]) not Err");
+        let findings = result.expect("EC-001: malformed JSON must return Ok(vec![]) not Err");
         assert!(
             findings.is_empty(),
             "EC-001: malformed JSON must produce an empty vec, not findings; got: {findings:?}"
