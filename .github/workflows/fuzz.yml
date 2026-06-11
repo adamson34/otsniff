@@ -18,7 +18,7 @@ jobs:
           - parse_dnp3
           - scrub_text
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Pin the nightly toolchain. Unpinned `@nightly` broke the job:
       # cargo-fuzz's `rustix` dep stopped compiling on bleeding-edge nightly
@@ -71,7 +71,7 @@ jobs:
 
       - name: Upload artifacts (if crashes found)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-artifacts-${{ matrix.harness }}
           path: fuzz/artifacts/${{ matrix.harness }}/
