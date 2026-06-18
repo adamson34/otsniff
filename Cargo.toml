@@ -8,6 +8,16 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-# Dependency-free for the Wave-1 slice. External crates (thiserror, ipnet, serde,
-# serde_json, sha2) are introduced by the stories that first need them.
+# Pure-core deps only: no I/O, no network. `thiserror` is a proc-macro/std-only
+# error-derive crate (ADR-006). Serialization (serde) is kept OUT of the core —
+# the effectful shell (zonewarden binary) owns wire formats.
 [dependencies]
+thiserror = "1.0"
+
+[dev-dependencies]
+proptest = "1"
+
+# `kani` is a known cfg: the formal-verification harnesses are compiled only under
+# `cargo kani` (--cfg kani). Declaring it here silences the unexpected-cfgs lint.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

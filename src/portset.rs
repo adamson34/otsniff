@@ -206,4 +206,50 @@ mod tests {
         let input = ranges(&[(65534, 65534), (65535, 65535)]);
         assert_eq!(canonicalize(input), ranges(&[(65534, 65535)]));
     }
+
+    use proptest::prelude::*;
+    proptest! {
+        // VP-1.01.009 (backfill): for any set of ranges, the canonical form is
+        // idempotent AND truly canonical — sorted, non-overlapping, non-adjacent.
+        #[test]
+        fn prop_canonicalize_idempotent_and_canonical(
+            raw in proptest::collection::vec((0u16..=65535, 0u16..=65535), 0..32)
+        ) {
+            let pairs: Vec<(u16, u16)> = raw
+                .into_iter()
+                .map(|(a, b)| if a <= b { (a, b) } else { (b, a) })
+                .collect();
+            let once = PortSet::from_pairs(&pairs).unwrap(); // from_pairs canonicalizes
+            let twice = canonicalize(once.clone());
+            prop_assert_eq!(&once, &twice); // idempotent
+            if let PortSet::Ranges(rs) = &once {
+                for w in rs.windows(2) {
+                    // strictly increasing with a gap: next.lo > cur.hi + 1 (u32-safe)
+                    prop_assert!(w[1].lo as u32 > w[0].hi as u32 + 1);
+                }
+            }
+        }
+    }
+}
+
+/// Formal-verification harnesses (VP-1.01.009). Compiled only under `cargo kani`
+/// (`--cfg kani`); excluded from normal builds and tests.
+#[cfg(kani)]
+mod kani_harness {
+    use super::*;
+
+    #[kani::proof]
+    fn proof_canonicalize_idempotent() {
+        let (a_lo, a_hi, b_lo, b_hi): (u16, u16, u16, u16) =
+            (kani::any(), kani::any(), kani::any(), kani::any());
+        kani::assume(a_lo <= a_hi);
+        kani::assume(b_lo <= b_hi);
+        let ps = PortSet::Ranges(vec![
+            PortRange { lo: a_lo, hi: a_hi },
+            PortRange { lo: b_lo, hi: b_hi },
+        ]);
+        let once = canonicalize(ps);
+        let twice = canonicalize(once.clone());
+        assert!(once == twice);
+    }
 }

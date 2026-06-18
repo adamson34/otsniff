@@ -54,8 +54,15 @@ impl PurdueLevel {
     }
 }
 
-/// IEC 62443 Security Level Target (MVP: optional overall scalar 0..=4).
-pub type SlTarget = u8;
+/// IEC 62443 Security Level Target. Either an overall scalar (`0..=4`) and/or a
+/// full 7-element Foundational-Requirement vector (FR1..FR7, each `0..=4`). The
+/// MVP only evaluates FR5; the vector is metadata. At least one field is set when
+/// an `sl_t` is present (see policy parsing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlTarget {
+    pub overall: Option<u8>,
+    pub fr_vector: Option<[u8; 7]>,
+}
 
 /// How an asset is assigned to a zone. A single IP is modelled as a host CIDR.
 #[derive(Debug, Clone, PartialEq, Eq)]
