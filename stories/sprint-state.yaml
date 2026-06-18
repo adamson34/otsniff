@@ -390,9 +390,13 @@ stories:
     merged_at: 2026-05-28T20:51:20Z
     notes: "Wave-3 first delivery. Adds AI-augmented findings: new src/findings/augmented.rs (augment_findings + parse_augmented_response + dedup_against_rule_findings + AugmentedFinding + Confidence), AiProvider::augment trait method, ClaudeCliProvider::augment shell-out, render_augmented_section in HTML + markdown reports, AuditLog.augment_pass field. Implements BC-6.05.001 (augment request scrubbed), BC-6.05.002 (response shape + parser tolerance), BC-6.05.003 (dedup against rule findings via pseudonym-set subset), BC-3.07.001 (HTML + markdown render section). Privacy invariant extended via invariant_no_real_values_reach_ai_provider_augment canary test. 23 new tests added; suite 400 → 423 → 426 after fix iteration. EC-001..004 covered (malformed JSON → empty, cap@25 stable-sort + truncate, host-pseudonym hallucination filter pre-unscrub, augment-error soft-fail). Required fix iteration after pr-reviewer found 3 CRITICAL + 4 HIGH + 3 MEDIUM (most notably: augment_findings was not wired into cli.rs::run_analyze in first pass — fixed in commit e8e59dd; EC-003 filter ran post-unscrub — fixed in e6b464b; AC-006 was unverifiable — fixed by returning AugmentInvocationSummary tuple). Second pr-reviewer pass: APPROVE. No new deps. Zero regressions to 271 pre-existing tests."
   S-6.03:
-    status: pending
+    status: completed
     wave: 3
     blocked_by: [S-6.02]  # merged 5f9963a (PR #97) on 2026-05-23
-    branch: null
-    worktree: null
+    branch: feature/S-6.03-diff-renderer  # squash-merged, branch deleted
+    worktree: null  # .worktrees/S-6.03 removed
     unblocked_at: 2026-05-28T00:00:00Z
+    merge_sha: cb426fc
+    pr: 119
+    merged_at: 2026-06-18T14:39:08Z
+    notes: "Wave-3 final delivery. Implements BC-8.04.001: render_diff_html (DiffReportView + askama templates/diff.html) + render_diff_markdown, wired into `otsniff diff` replacing the S-6.02 JSON/<pre> placeholder; leak-detector gate preserved on all three output paths. AC-001 (HTML sections: summary banner, new/recurring/resolved finding badges, host changes, role shifts, flow shifts >threshold), AC-002 (markdown parity), AC-003 (determinism — renderer self-sorts every section on a total key; compute->render-twice shared-rule-id test). EC-001 (empty → 'No deltas detected'), EC-002 (evidence cap 5 with 'showing X of N' label), EC-003 (OtError::Render via ?). Red Gate passed (6 failing tests). Adversary convergence: 7 passes, 3 consecutive NITPICK_ONLY; two rounds of SUBSTANTIVE fixes — (1) determinism for same-id findings + markdown table/heading/code-fence escaping (md_cell/md_heading/make_fence) + evidence-truncation label + EC-002/003 coverage; (2) configurable flow-shift-multiplier label threaded through Diff struct (was hardcoded ≥2×). Suite 426 → 437 tests. pr-reviewer APPROVE cycle 1; security PASS (0 CRITICAL/HIGH, leak-gate confirmed). Demos AC-001/002/003 + EC-001 (gif+webm). No new deps. **Wave 3 complete: S-5.03 + S-6.03 both delivered. 38/38 stories done — cycle v0.4.0-feature ready for /wave-gate wave-3 then convergence.**"

@@ -1,0 +1,2422 @@
+diff --git a/src/cli.rs b/src/cli.rs
+index aa97fd3..0a430da 100644
+--- a/src/cli.rs
++++ b/src/cli.rs
+@@ -387,17 +387,8 @@ fn run_diff(
+ 
+     let content = match ext.as_str() {
+         "json" => serde_json::to_string_pretty(&diff)?,
+-        "md" => format!(
+-            "# Diff (raw)\n\nFull rendering arrives in S-6.03.\n\n```json\n{}\n```\n",
+-            serde_json::to_string_pretty(&diff)?
+-        ),
+-        _ => {
+-            // HTML placeholder; full rendering arrives in S-6.03.
+-            format!(
+-                "<!-- S-6.02 diff JSON; full HTML rendering arrives in S-6.03 -->\n<pre>{}</pre>\n",
+-                html_escape(&serde_json::to_string_pretty(&diff)?)
+-            )
+-        }
++        "md" => crate::report_md::render_diff_markdown(&diff),
++        _ => crate::report::render_diff_html(&diff)?,
+     };
+ 
+     // F-ADV-P2-002: fail-closed leak detection on the rendered diff content
+@@ -425,13 +416,6 @@ fn run_diff(
+     Ok(())
+ }
+ 
+-/// Escape `<`, `>`, and `&` for safe embedding in an HTML `<pre>` block.
+-fn html_escape(s: &str) -> String {
+-    s.replace('&', "&amp;")
+-        .replace('<', "&lt;")
+-        .replace('>', "&gt;")
+-}
+-
+ fn ot_or_default(supplied: &[IpNet]) -> Vec<IpNet> {
+     if supplied.is_empty() {
+         ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+diff --git a/src/diff.rs b/src/diff.rs
+index 91e23f5..3b4c7ce 100644
+--- a/src/diff.rs
++++ b/src/diff.rs
+@@ -108,7 +108,7 @@ pub struct FlowDelta {
+ /// Note: `Deserialize` is intentionally omitted — `Finding` contains
+ /// `&'static str` fields that do not implement `Deserialize`. The implementer
+ /// should address round-trip serialization in S-6.03 if needed.
+-#[derive(Debug, Clone, Serialize, Default)]
++#[derive(Debug, Clone, Serialize)]
+ pub struct Diff {
+     /// Hosts present in `current` whose pseudonym is absent from `baseline`.
+     pub hosts_new: Vec<HostRef>,
+@@ -126,6 +126,26 @@ pub struct Diff {
+     pub flows_new: Vec<FlowSummary>,
+     /// **F-W2-002:** flows present in `baseline` but not in `current`.
+     pub flows_gone: Vec<FlowSummary>,
++    /// The flow-shift threshold this diff was computed with (used by renderers
++    /// for accurate labels). Default is `DEFAULT_FLOW_SHIFT_MULTIPLIER` (2.0).
++    pub flow_shift_multiplier: f64,
++}
++
++impl Default for Diff {
++    fn default() -> Self {
++        Self {
++            hosts_new: Vec::new(),
++            hosts_gone: Vec::new(),
++            findings_new: Vec::new(),
++            findings_recurring: Vec::new(),
++            findings_resolved: Vec::new(),
++            role_shifts: Vec::new(),
++            flow_shifts: Vec::new(),
++            flows_new: Vec::new(),
++            flows_gone: Vec::new(),
++            flow_shift_multiplier: DEFAULT_FLOW_SHIFT_MULTIPLIER,
++        }
++    }
+ }
+ 
+ /// Inputs to `compute`: each side carries its own observations + merged map
+@@ -665,6 +685,7 @@ pub fn compute_with_multiplier(
+         flow_shifts,
+         flows_new,
+         flows_gone,
++        flow_shift_multiplier,
+     }
+ }
+ 
+diff --git a/src/report.rs b/src/report.rs
+index 37a8c94..d4d9846 100644
+--- a/src/report.rs
++++ b/src/report.rs
+@@ -9,6 +9,7 @@ use askama::Template;
+ use chrono::{DateTime, Utc};
+ 
+ use crate::capture_source::Classification;
++use crate::diff::Diff;
+ use crate::error::Result;
+ use crate::findings::augmented::AugmentedFinding;
+ use crate::findings::{Finding, Severity};
+@@ -253,6 +254,309 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
+     out
+ }
+ 
++/// Render a cross-capture diff as a self-contained HTML report (S-6.03 AC-001).
++///
++/// Produces a self-contained HTML document with sections for new, recurring,
++/// and resolved findings, host changes, role shifts, and flow shifts. All
++/// sections sort deterministically so repeated calls produce byte-identical output.
++///
++/// EC-003: `OtError::Render` propagation is satisfied by the `?` on
++/// `view.render()` below. For a well-typed `DiffReportView` (all owned
++/// `String` / `Vec<…>` fields, askama `escape="html"`) the inner template
++/// render is infallible in practice — but the `Result` return type and `?`
++/// propagation mean any future I/O-backed template variant will still be
++/// caught. No additional test is needed; the property is structural.
++pub fn render_diff_html(diff: &Diff) -> Result<String> {
++    const MAX_EVIDENCE: usize = 5;
++
++    let no_deltas = diff.hosts_new.is_empty()
++        && diff.hosts_gone.is_empty()
++        && diff.findings_new.is_empty()
++        && diff.findings_recurring.is_empty()
++        && diff.findings_resolved.is_empty()
++        && diff.role_shifts.is_empty()
++        && diff.flow_shifts.is_empty()
++        && diff.flows_new.is_empty()
++        && diff.flows_gone.is_empty();
++
++    // C-1 (AC-003): sort each finding slice by a total key before rendering
++    // so that two findings sharing the same rule `id` produce a deterministic
++    // order regardless of the order they came out of HashSet iteration in
++    // `diff::compute`. We clone into a local sorted vec rather than mutating
++    // the input `Diff`.
++    let mut sorted_new = diff.findings_new.clone();
++    sort_findings_total(&mut sorted_new);
++    let mut sorted_recurring = diff.findings_recurring.clone();
++    sort_findings_total(&mut sorted_recurring);
++    let mut sorted_resolved = diff.findings_resolved.clone();
++    sort_findings_total(&mut sorted_resolved);
++
++    let findings_new: Vec<DiffFindingView> = sorted_new
++        .iter()
++        .map(|f| diff_finding_view(f, MAX_EVIDENCE))
++        .collect();
++
++    let findings_recurring: Vec<DiffFindingView> = sorted_recurring
++        .iter()
++        .map(|f| diff_finding_view(f, MAX_EVIDENCE))
++        .collect();
++
++    let findings_resolved: Vec<DiffFindingView> = sorted_resolved
++        .iter()
++        .map(|f| diff_finding_view(f, MAX_EVIDENCE))
++        .collect();
++
++    // F-4: defensively sort non-finding sections on local clones so the
++    // renderer is self-sufficiently deterministic even if `compute()` changes.
++    let mut sorted_hosts_new = diff.hosts_new.clone();
++    sorted_hosts_new.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
++    let mut sorted_hosts_gone = diff.hosts_gone.clone();
++    sorted_hosts_gone.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
++    let mut sorted_role_shifts = diff.role_shifts.clone();
++    sorted_role_shifts.sort_by(|a, b| {
++        a.pseudonym
++            .cmp(&b.pseudonym)
++            .then_with(|| a.old_role.cmp(&b.old_role))
++            .then_with(|| a.new_role.cmp(&b.new_role))
++    });
++    let mut sorted_flow_shifts = diff.flow_shifts.clone();
++    sorted_flow_shifts.sort_by(|a, b| {
++        // Largest-ratio first ("loudest signal first") — mirrors diff.rs intent.
++        b.ratio
++            .partial_cmp(&a.ratio)
++            .unwrap_or(core::cmp::Ordering::Equal)
++            .then_with(|| a.src.cmp(&b.src))
++            .then_with(|| a.dst.cmp(&b.dst))
++            .then_with(|| a.dst_port.cmp(&b.dst_port))
++            .then_with(|| a.proto.cmp(&b.proto))
++    });
++    let mut sorted_flows_new = diff.flows_new.clone();
++    sorted_flows_new.sort_by(|a, b| {
++        a.src
++            .cmp(&b.src)
++            .then_with(|| a.dst.cmp(&b.dst))
++            .then_with(|| a.dst_port.cmp(&b.dst_port))
++            .then_with(|| a.proto.cmp(&b.proto))
++    });
++    let mut sorted_flows_gone = diff.flows_gone.clone();
++    sorted_flows_gone.sort_by(|a, b| {
++        a.src
++            .cmp(&b.src)
++            .then_with(|| a.dst.cmp(&b.dst))
++            .then_with(|| a.dst_port.cmp(&b.dst_port))
++            .then_with(|| a.proto.cmp(&b.proto))
++    });
++
++    let hosts_new: Vec<DiffHostView> = sorted_hosts_new.iter().map(diff_host_view).collect();
++
++    let hosts_gone: Vec<DiffHostView> = sorted_hosts_gone.iter().map(diff_host_view).collect();
++
++    let role_shifts: Vec<DiffRoleShiftView> = sorted_role_shifts
++        .iter()
++        .map(|r| DiffRoleShiftView {
++            pseudonym: r.pseudonym.clone(),
++            old_role: r.old_role.clone(),
++            new_role: r.new_role.clone(),
++        })
++        .collect();
++
++    let flow_shifts: Vec<DiffFlowShiftView> = sorted_flow_shifts
++        .iter()
++        .map(|f| DiffFlowShiftView {
++            src: f.src.clone(),
++            dst: f.dst.clone(),
++            dst_port: f.dst_port,
++            proto: f.proto.clone(),
++            baseline_bytes: f.baseline_bytes.to_string(),
++            current_bytes: f.current_bytes.to_string(),
++            ratio: format!("{:.2}", f.ratio),
++        })
++        .collect();
++
++    let flows_new: Vec<DiffFlowSummaryView> = sorted_flows_new
++        .iter()
++        .map(diff_flow_summary_view)
++        .collect();
++
++    let flows_gone: Vec<DiffFlowSummaryView> = sorted_flows_gone
++        .iter()
++        .map(diff_flow_summary_view)
++        .collect();
++
++    let view = DiffReportView {
++        version: crate::VERSION.to_string(),
++        no_deltas,
++        findings_new_count: diff.findings_new.len(),
++        findings_recurring_count: diff.findings_recurring.len(),
++        findings_resolved_count: diff.findings_resolved.len(),
++        hosts_new_count: diff.hosts_new.len(),
++        hosts_gone_count: diff.hosts_gone.len(),
++        flow_shifts_count: diff.flow_shifts.len(),
++        flow_shift_label: format!("≥{}", fmt_multiplier(diff.flow_shift_multiplier)),
++        findings_new,
++        findings_recurring,
++        findings_resolved,
++        hosts_new,
++        hosts_gone,
++        role_shifts,
++        flow_shifts,
++        flows_new,
++        flows_gone,
++    };
++    Ok(view.render()?)
++}
++
++#[derive(Template)]
++#[template(path = "diff.html", escape = "html")]
++struct DiffReportView {
++    version: String,
++    no_deltas: bool,
++    findings_new_count: usize,
++    findings_recurring_count: usize,
++    findings_resolved_count: usize,
++    hosts_new_count: usize,
++    hosts_gone_count: usize,
++    flow_shifts_count: usize,
++    /// Pre-formatted label for the flow-shift threshold, e.g. `"≥2×"` or `"≥3×"`.
++    /// Computed from `Diff::flow_shift_multiplier` so the template stays logic-light
++    /// per ADR-0003.
++    flow_shift_label: String,
++    findings_new: Vec<DiffFindingView>,
++    findings_recurring: Vec<DiffFindingView>,
++    findings_resolved: Vec<DiffFindingView>,
++    hosts_new: Vec<DiffHostView>,
++    hosts_gone: Vec<DiffHostView>,
++    role_shifts: Vec<DiffRoleShiftView>,
++    flow_shifts: Vec<DiffFlowShiftView>,
++    flows_new: Vec<DiffFlowSummaryView>,
++    flows_gone: Vec<DiffFlowSummaryView>,
++}
++
++struct DiffFindingView {
++    id: String,
++    severity_label: String,
++    severity_class: String,
++    title: String,
++    summary: String,
++    evidence: Vec<String>,
++    /// Number of evidence rows after capping (≤ MAX_EVIDENCE).
++    evidence_count: usize,
++    /// Total evidence rows before capping. When `evidence_total > evidence_count`
++    /// the template renders "showing {evidence_count} of {evidence_total}";
++    /// otherwise it renders "{evidence_count} sample(s)".
++    evidence_total: usize,
++    recommendation: String,
++}
++
++struct DiffHostView {
++    pseudonym: String,
++    role: String,
++    protocols: String,
++    zone: String,
++    packets: String,
++    bytes: String,
++}
++
++struct DiffRoleShiftView {
++    pseudonym: String,
++    old_role: String,
++    new_role: String,
++}
++
++struct DiffFlowShiftView {
++    src: String,
++    dst: String,
++    dst_port: u16,
++    proto: String,
++    baseline_bytes: String,
++    current_bytes: String,
++    ratio: String,
++}
++
++struct DiffFlowSummaryView {
++    src: String,
++    dst: String,
++    dst_port: u16,
++    proto: String,
++    bytes: String,
++}
++
++/// Format a flow-shift multiplier for display labels.
++///
++/// Integer values (fract == 0) are rendered without a trailing ".0":
++/// `2.0 → "2×"`, `3.0 → "3×"`. Non-integer values use one decimal place:
++/// `1.5 → "1.5×"`. Always includes the "×" suffix.
++fn fmt_multiplier(m: f64) -> String {
++    if m.fract() == 0.0 {
++        format!("{}×", m as i64)
++    } else {
++        format!("{:.1}×", m)
++    }
++}
++
++fn diff_finding_view(f: &Finding, max_evidence: usize) -> DiffFindingView {
++    let evidence_total = f.evidence.len();
++    let capped: Vec<String> = f.evidence.iter().take(max_evidence).cloned().collect();
++    let evidence_count = capped.len();
++    DiffFindingView {
++        id: f.id.to_string(),
++        severity_label: severity_label(f.severity).to_string(),
++        severity_class: severity_class(f.severity).to_string(),
++        title: f.title.clone(),
++        summary: f.summary.clone(),
++        evidence: capped,
++        evidence_count,
++        evidence_total,
++        recommendation: f.recommendation.to_string(),
++    }
++}
++
++/// C-1 (AC-003): sort a findings slice by a provably total key
++/// `(id, title, severity, evidence_all_joined, summary, recommendation)`
++/// to guarantee a deterministic order even when two findings share the same
++/// rule `id`. The key is total: every component is total-ordered, and the
++/// final `recommendation` field eliminates the last remaining source of
++/// input-order dependency.
++fn sort_findings_total(findings: &mut [Finding]) {
++    findings.sort_by(|a, b| {
++        a.id.cmp(b.id)
++            .then_with(|| a.title.cmp(&b.title))
++            .then_with(|| a.severity.cmp(&b.severity))
++            .then_with(|| a.evidence.join("\n").cmp(&b.evidence.join("\n")))
++            .then_with(|| a.summary.cmp(&b.summary))
++            .then_with(|| a.recommendation.cmp(b.recommendation))
++    });
++}
++
++fn diff_host_view(h: &crate::diff::HostRef) -> DiffHostView {
++    DiffHostView {
++        pseudonym: h.pseudonym.clone(),
++        role: h.role.clone(),
++        protocols: if h.protocols.is_empty() {
++            "—".to_string()
++        } else {
++            h.protocols.join(", ")
++        },
++        zone: if h.in_ot_zone {
++            "OT".to_string()
++        } else {
++            "IT".to_string()
++        },
++        packets: h.packets.to_string(),
++        bytes: human_bytes(h.bytes),
++    }
++}
++
++fn diff_flow_summary_view(f: &crate::diff::FlowSummary) -> DiffFlowSummaryView {
++    DiffFlowSummaryView {
++        src: f.src.clone(),
++        dst: f.dst.clone(),
++        dst_port: f.dst_port,
++        proto: f.proto.clone(),
++        bytes: human_bytes(f.bytes),
++    }
++}
++
+ fn html_escape(s: &str) -> String {
+     s.replace('&', "&amp;")
+         .replace('<', "&lt;")
+diff --git a/src/report_md.rs b/src/report_md.rs
+index 59c861f..b05eb50 100644
+--- a/src/report_md.rs
++++ b/src/report_md.rs
+@@ -13,6 +13,7 @@ use std::fmt::Write;
+ use chrono::{DateTime, Utc};
+ 
+ use crate::capture_source::Classification;
++use crate::diff::Diff;
+ use crate::error::Result;
+ use crate::findings::augmented::AugmentedFinding;
+ use crate::findings::{Finding, Severity};
+@@ -293,3 +294,577 @@ fn human_bytes(n: u64) -> String {
+     };
+     format!("{val:.1} {unit}")
+ }
++
++/// Escape a string for safe use in a markdown pipe-table cell.
++///
++/// I-1: free-form strings that contain `|` would corrupt the table structure
++/// (the pipe is the cell delimiter). Newlines would break the row. This helper
++/// replaces both so any string is safe to interpolate between `|` delimiters.
++fn md_cell(s: &str) -> String {
++    s.replace('|', r"\|").replace('\n', " ")
++}
++
++/// Sanitise a string for safe use in a markdown heading (`###`).
++///
++/// In a heading `|` is not a table delimiter, so pipe-escaping would produce
++/// literal backslash-pipe in the rendered output. This helper collapses
++/// newlines and control characters (which would break the heading line) to a
++/// space, but does NOT escape `|`.
++fn md_heading(s: &str) -> String {
++    s.chars()
++        .map(|c| if c == '\n' || c.is_control() { ' ' } else { c })
++        .collect()
++}
++
++/// Compute a CommonMark-safe fence string for a block whose content may
++/// include backtick runs.
++///
++/// F-1: a fenced code block can only be closed by a run of backticks that is
++/// at least as long as the opening run (CommonMark §4.5). If any evidence line
++/// contains a run of N consecutive backticks, a fence of N backticks would be
++/// broken. This function scans `lines` for the longest consecutive-backtick
++/// run R and returns a fence of max(R+1, 3) backticks. Using the same string
++/// for open and close guarantees the block is always well-formed.
++fn make_fence(lines: &[impl AsRef<str>]) -> String {
++    let max_run = lines
++        .iter()
++        .flat_map(|l| {
++            // Count runs of consecutive backticks in this line.
++            let mut runs = Vec::new();
++            let mut count = 0usize;
++            for ch in l.as_ref().chars() {
++                if ch == '`' {
++                    count += 1;
++                } else {
++                    if count > 0 {
++                        runs.push(count);
++                    }
++                    count = 0;
++                }
++            }
++            if count > 0 {
++                runs.push(count);
++            }
++            runs
++        })
++        .max()
++        .unwrap_or(0);
++
++    let fence_len = max_run.saturating_add(1).max(3);
++    "`".repeat(fence_len)
++}
++
++/// Format a flow-shift multiplier for display labels.
++///
++/// Integer values (fract == 0) are rendered without a trailing ".0":
++/// `2.0 → "2×"`, `3.0 → "3×"`. Non-integer values use one decimal place:
++/// `1.5 → "1.5×"`. Always includes the "×" suffix.
++fn fmt_multiplier(m: f64) -> String {
++    if m.fract() == 0.0 {
++        format!("{}×", m as i64)
++    } else {
++        format!("{:.1}×", m)
++    }
++}
++
++/// Render a cross-capture diff as markdown (S-6.03 AC-002).
++///
++/// Produces an LLM-friendly markdown report with the same sections as the HTML
++/// diff renderer. All sections sort deterministically; each section defensively
++/// re-sorts its local clone before rendering so the output is self-sufficiently
++/// deterministic even if `compute()` changes its output order.
++pub fn render_diff_markdown(diff: &Diff) -> String {
++    const MAX_EVIDENCE: usize = 5;
++    let mut out = String::new();
++
++    writeln!(out, "# otsniff diff report").unwrap();
++    writeln!(out).unwrap();
++    writeln!(out, "_otsniff v{}_", crate::VERSION).unwrap();
++    writeln!(out).unwrap();
++
++    let no_deltas = diff.hosts_new.is_empty()
++        && diff.hosts_gone.is_empty()
++        && diff.findings_new.is_empty()
++        && diff.findings_recurring.is_empty()
++        && diff.findings_resolved.is_empty()
++        && diff.role_shifts.is_empty()
++        && diff.flow_shifts.is_empty()
++        && diff.flows_new.is_empty()
++        && diff.flows_gone.is_empty();
++
++    if no_deltas {
++        writeln!(
++            out,
++            "> **No deltas detected** — captures are identical by all tracked metrics."
++        )
++        .unwrap();
++        writeln!(out).unwrap();
++        return out;
++    }
++
++    // Summary banner
++    writeln!(out, "## Summary").unwrap();
++    writeln!(out).unwrap();
++    writeln!(out, "- **New findings:** {}", diff.findings_new.len()).unwrap();
++    writeln!(
++        out,
++        "- **Recurring findings:** {}",
++        diff.findings_recurring.len()
++    )
++    .unwrap();
++    writeln!(
++        out,
++        "- **Resolved findings:** {}",
++        diff.findings_resolved.len()
++    )
++    .unwrap();
++    writeln!(out, "- **New hosts:** {}", diff.hosts_new.len()).unwrap();
++    writeln!(out, "- **Gone hosts:** {}", diff.hosts_gone.len()).unwrap();
++    writeln!(
++        out,
++        "- **Flow shifts (≥{}):** {}",
++        fmt_multiplier(diff.flow_shift_multiplier),
++        diff.flow_shifts.len()
++    )
++    .unwrap();
++    writeln!(out).unwrap();
++
++    // C-1 (AC-003): sort each slice by a total key before rendering so two
++    // findings with the same rule id produce deterministic output.
++    let mut sorted_new = diff.findings_new.clone();
++    sort_findings_total_md(&mut sorted_new);
++    let mut sorted_recurring = diff.findings_recurring.clone();
++    sort_findings_total_md(&mut sorted_recurring);
++    let mut sorted_resolved = diff.findings_resolved.clone();
++    sort_findings_total_md(&mut sorted_resolved);
++
++    // New findings
++    if !sorted_new.is_empty() {
++        writeln!(out, "## New findings — NEW since baseline").unwrap();
++        writeln!(out).unwrap();
++        for f in &sorted_new {
++            writeln!(
++                out,
++                "### [NEW][{}] {}",
++                severity_label(f.severity).to_uppercase(),
++                md_heading(&f.title),
++            )
++            .unwrap();
++            writeln!(out).unwrap();
++            writeln!(out, "{}", md_cell(&f.summary)).unwrap();
++            writeln!(out).unwrap();
++            let evidence_total = f.evidence.len();
++            let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
++            if !capped.is_empty() {
++                let cap = capped.len();
++                if evidence_total > cap {
++                    writeln!(out, "**Evidence (showing {cap} of {evidence_total}):**").unwrap();
++                } else {
++                    writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
++                }
++                let fence = make_fence(&capped);
++                writeln!(out, "{fence}").unwrap();
++                for e in &capped {
++                    writeln!(out, "{}", e).unwrap();
++                }
++                writeln!(out, "{fence}").unwrap();
++                writeln!(out).unwrap();
++            }
++            writeln!(out, "**Recommendation:** {}", md_cell(f.recommendation)).unwrap();
++            writeln!(out).unwrap();
++            writeln!(out, "_id: `{}`_", f.id).unwrap();
++            writeln!(out).unwrap();
++        }
++    }
++
++    // Recurring findings
++    if !sorted_recurring.is_empty() {
++        writeln!(out, "## Recurring findings").unwrap();
++        writeln!(out).unwrap();
++        for f in &sorted_recurring {
++            writeln!(
++                out,
++                "### [RECURRING][{}] {}",
++                severity_label(f.severity).to_uppercase(),
++                md_heading(&f.title),
++            )
++            .unwrap();
++            writeln!(out).unwrap();
++            writeln!(out, "{}", md_cell(&f.summary)).unwrap();
++            writeln!(out).unwrap();
++            let evidence_total = f.evidence.len();
++            let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
++            if !capped.is_empty() {
++                let cap = capped.len();
++                if evidence_total > cap {
++                    writeln!(out, "**Evidence (showing {cap} of {evidence_total}):**").unwrap();
++                } else {
++                    writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
++                }
++                let fence = make_fence(&capped);
++                writeln!(out, "{fence}").unwrap();
++                for e in &capped {
++                    writeln!(out, "{}", e).unwrap();
++                }
++                writeln!(out, "{fence}").unwrap();
++                writeln!(out).unwrap();
++            }
++            writeln!(out, "**Recommendation:** {}", md_cell(f.recommendation)).unwrap();
++            writeln!(out).unwrap();
++            writeln!(out, "_id: `{}`_", f.id).unwrap();
++            writeln!(out).unwrap();
++        }
++    }
++
++    // Resolved findings
++    if !sorted_resolved.is_empty() {
++        writeln!(out, "## Resolved findings").unwrap();
++        writeln!(out).unwrap();
++        for f in &sorted_resolved {
++            writeln!(
++                out,
++                "### [RESOLVED][{}] {}",
++                severity_label(f.severity).to_uppercase(),
++                md_heading(&f.title),
++            )
++            .unwrap();
++            writeln!(out).unwrap();
++            writeln!(out, "{}", md_cell(&f.summary)).unwrap();
++            writeln!(out).unwrap();
++            let evidence_total = f.evidence.len();
++            let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
++            if !capped.is_empty() {
++                let cap = capped.len();
++                if evidence_total > cap {
++                    writeln!(out, "**Evidence (showing {cap} of {evidence_total}):**").unwrap();
++                } else {
++                    writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
++                }
++                let fence = make_fence(&capped);
++                writeln!(out, "{fence}").unwrap();
++                for e in &capped {
++                    writeln!(out, "{}", e).unwrap();
++                }
++                writeln!(out, "{fence}").unwrap();
++                writeln!(out).unwrap();
++            }
++            writeln!(out, "**Recommendation:** {}", md_cell(f.recommendation)).unwrap();
++            writeln!(out).unwrap();
++            writeln!(out, "_id: `{}`_", f.id).unwrap();
++            writeln!(out).unwrap();
++        }
++    }
++
++    // F-4: defensively sort non-finding sections on local clones so the
++    // renderer is self-sufficiently deterministic even if `compute()` changes.
++    let mut hosts_new = diff.hosts_new.clone();
++    hosts_new.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
++    let mut hosts_gone = diff.hosts_gone.clone();
++    hosts_gone.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
++    let mut role_shifts = diff.role_shifts.clone();
++    role_shifts.sort_by(|a, b| {
++        a.pseudonym
++            .cmp(&b.pseudonym)
++            .then_with(|| a.old_role.cmp(&b.old_role))
++            .then_with(|| a.new_role.cmp(&b.new_role))
++    });
++    let mut flow_shifts = diff.flow_shifts.clone();
++    flow_shifts.sort_by(|a, b| {
++        // Largest-ratio first ("loudest signal first") — mirrors diff.rs intent.
++        b.ratio
++            .partial_cmp(&a.ratio)
++            .unwrap_or(core::cmp::Ordering::Equal)
++            .then_with(|| a.src.cmp(&b.src))
++            .then_with(|| a.dst.cmp(&b.dst))
++            .then_with(|| a.dst_port.cmp(&b.dst_port))
++            .then_with(|| a.proto.cmp(&b.proto))
++    });
++    let mut flows_new = diff.flows_new.clone();
++    flows_new.sort_by(|a, b| {
++        a.src
++            .cmp(&b.src)
++            .then_with(|| a.dst.cmp(&b.dst))
++            .then_with(|| a.dst_port.cmp(&b.dst_port))
++            .then_with(|| a.proto.cmp(&b.proto))
++    });
++    let mut flows_gone = diff.flows_gone.clone();
++    flows_gone.sort_by(|a, b| {
++        a.src
++            .cmp(&b.src)
++            .then_with(|| a.dst.cmp(&b.dst))
++            .then_with(|| a.dst_port.cmp(&b.dst_port))
++            .then_with(|| a.proto.cmp(&b.proto))
++    });
++
++    // Host changes
++    if !hosts_new.is_empty() || !hosts_gone.is_empty() {
++        writeln!(out, "## Host changes").unwrap();
++        writeln!(out).unwrap();
++        writeln!(
++            out,
++            "| Pseudonym | Status | Role | Protocols | Zone | Packets | Bytes |"
++        )
++        .unwrap();
++        writeln!(
++            out,
++            "|-----------|--------|------|-----------|------|---------|-------|"
++        )
++        .unwrap();
++        for h in &hosts_new {
++            writeln!(
++                out,
++                "| `{}` | **New** | {} | {} | {} | {} | {} |",
++                h.pseudonym,
++                md_cell(&h.role),
++                if h.protocols.is_empty() {
++                    "—".to_string()
++                } else {
++                    md_cell(&h.protocols.join(", "))
++                },
++                if h.in_ot_zone { "OT" } else { "IT" },
++                h.packets,
++                human_bytes(h.bytes),
++            )
++            .unwrap();
++        }
++        for h in &hosts_gone {
++            writeln!(
++                out,
++                "| `{}` | ~~Gone~~ | {} | {} | {} | {} | {} |",
++                h.pseudonym,
++                md_cell(&h.role),
++                if h.protocols.is_empty() {
++                    "—".to_string()
++                } else {
++                    md_cell(&h.protocols.join(", "))
++                },
++                if h.in_ot_zone { "OT" } else { "IT" },
++                h.packets,
++                human_bytes(h.bytes),
++            )
++            .unwrap();
++        }
++        writeln!(out).unwrap();
++    }
++
++    // Role shifts
++    if !role_shifts.is_empty() {
++        writeln!(out, "## Role shifts").unwrap();
++        writeln!(out).unwrap();
++        writeln!(out, "| Pseudonym | Old role | → | New role |").unwrap();
++        writeln!(out, "|-----------|----------|---|----------|").unwrap();
++        for r in &role_shifts {
++            writeln!(
++                out,
++                "| `{}` | {} | → | {} |",
++                r.pseudonym,
++                md_cell(&r.old_role),
++                md_cell(&r.new_role),
++            )
++            .unwrap();
++        }
++        writeln!(out).unwrap();
++    }
++
++    // Flow shifts
++    if !flow_shifts.is_empty() {
++        writeln!(
++            out,
++            "## Flow shifts (≥{} volume change)",
++            fmt_multiplier(diff.flow_shift_multiplier)
++        )
++        .unwrap();
++        writeln!(out).unwrap();
++        writeln!(
++            out,
++            "| Source | Destination | Port | Proto | Baseline bytes | Current bytes | Ratio |"
++        )
++        .unwrap();
++        writeln!(
++            out,
++            "|--------|-------------|------|-------|----------------|---------------|-------|"
++        )
++        .unwrap();
++        for f in &flow_shifts {
++            writeln!(
++                out,
++                "| `{}` | `{}` | {} | {} | {} | {} | {:.2}× |",
++                f.src,
++                f.dst,
++                f.dst_port,
++                md_cell(&f.proto),
++                f.baseline_bytes,
++                f.current_bytes,
++                f.ratio,
++            )
++            .unwrap();
++        }
++        writeln!(out).unwrap();
++    }
++
++    // Flow inventory changes
++    if !flows_new.is_empty() || !flows_gone.is_empty() {
++        writeln!(out, "## Flow inventory changes").unwrap();
++        writeln!(out).unwrap();
++        writeln!(
++            out,
++            "| Source | Destination | Port | Proto | Status | Bytes |"
++        )
++        .unwrap();
++        writeln!(
++            out,
++            "|--------|-------------|------|-------|--------|-------|"
++        )
++        .unwrap();
++        for f in &flows_new {
++            writeln!(
++                out,
++                "| `{}` | `{}` | {} | {} | **New** | {} |",
++                f.src,
++                f.dst,
++                f.dst_port,
++                md_cell(&f.proto),
++                human_bytes(f.bytes),
++            )
++            .unwrap();
++        }
++        for f in &flows_gone {
++            writeln!(
++                out,
++                "| `{}` | `{}` | {} | {} | ~~Gone~~ | {} |",
++                f.src,
++                f.dst,
++                f.dst_port,
++                md_cell(&f.proto),
++                human_bytes(f.bytes),
++            )
++            .unwrap();
++        }
++        writeln!(out).unwrap();
++    }
++
++    out
++}
++
++/// C-1 (AC-003): sort a findings slice by a provably total key
++/// `(id, title, severity discriminant, evidence_all_joined, summary, recommendation)`
++/// so two findings with the same rule id produce a deterministic order
++/// regardless of the order they came out of HashSet iteration in
++/// `diff::compute`. The key is total: every tiebreak component is a
++/// total-ordered type (`&str` / `String` / `i32`), and the final
++/// `recommendation` field eliminates the last remaining source of
++/// input-order dependency.
++fn sort_findings_total_md(findings: &mut [crate::findings::Finding]) {
++    findings.sort_by(|a, b| {
++        a.id.cmp(b.id)
++            .then_with(|| a.title.cmp(&b.title))
++            .then_with(|| a.severity.cmp(&b.severity))
++            .then_with(|| a.evidence.join("\n").cmp(&b.evidence.join("\n")))
++            .then_with(|| a.summary.cmp(&b.summary))
++            .then_with(|| a.recommendation.cmp(b.recommendation))
++    });
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    // ── F-1: make_fence produces a fence longer than embedded backtick runs ──
++
++    /// `make_fence` must return a fence whose backtick-run length is strictly
++    /// greater than the longest consecutive-backtick run appearing in the
++    /// evidence lines it scans (and at least 3).
++    ///
++    /// Regression guard: a fence of ``` would break out of itself if any
++    /// evidence line contains exactly "```". This test covers both
++    /// 3-backtick and 4-backtick embedded runs and verifies that:
++    ///   1. The fence length exceeds the max run.
++    ///   2. The rendered markdown block is not broken (the next section
++    ///      heading is still present after the closing fence).
++    #[test]
++    fn make_fence_longer_than_embedded_backtick_runs() {
++        // Lines that contain a 3-backtick run and a 4-backtick run.
++        let lines = vec![
++            "normal line".to_string(),
++            "```".to_string(),                 // exactly 3 backticks
++            "````inline code````".to_string(), // longest run is 4
++        ];
++
++        let fence = make_fence(&lines);
++
++        // The fence must be strictly longer than the 4-backtick run.
++        assert!(
++            fence.len() > 4,
++            "fence length {} must be > 4 (longest embedded run)",
++            fence.len()
++        );
++        // Every char in the fence must be a backtick.
++        assert!(
++            fence.chars().all(|c| c == '`'),
++            "fence must consist entirely of backtick characters"
++        );
++
++        // Render a minimal diff markdown containing one evidence line that
++        // is exactly "```" and another that is "````". Verify the block is
++        // not broken: the section heading that follows the evidence block
++        // must still be present in the output.
++        use crate::diff::{Diff, FlowSummary};
++        use crate::findings::{Finding, Severity};
++
++        let finding = Finding {
++            id: "test.backtick",
++            severity: Severity::Medium,
++            title: "Backtick test finding".to_string(),
++            summary: "Summary".to_string(),
++            evidence: vec!["```".to_string(), "````".to_string()],
++            recommendation: "No action.",
++            playbook: vec![],
++        };
++
++        // Put a flow_new in so there is a "## Flow inventory changes" section
++        // after the finding block — if the fence is broken the heading gets
++        // swallowed into the code block.
++        let flow_new = FlowSummary {
++            src: "host_001".to_string(),
++            dst: "host_002".to_string(),
++            dst_port: 502,
++            proto: "tcp".to_string(),
++            bytes: 1_000,
++        };
++
++        let diff = Diff {
++            findings_new: vec![finding],
++            flows_new: vec![flow_new],
++            ..Diff::default()
++        };
++
++        let md = render_diff_markdown(&diff);
++
++        // The closing fence of the evidence block must appear in the output.
++        assert!(
++            md.contains(&fence),
++            "rendered markdown must contain the computed fence ({fence})"
++        );
++
++        // The flow-inventory-changes section heading must survive (not be
++        // swallowed into the code block by a broken fence).
++        assert!(
++            md.contains("## Flow inventory changes"),
++            "section heading after the evidence block must not be swallowed by \
++             a broken fence; rendered output:\n{md}"
++        );
++    }
++
++    // ── make_fence: minimum length is 3 even with no backticks in evidence ──
++
++    #[test]
++    fn make_fence_minimum_length_three_when_no_backticks() {
++        let lines: Vec<String> = vec!["plain text".to_string(), "no backticks here".to_string()];
++        let fence = make_fence(&lines);
++        assert_eq!(
++            fence.len(),
++            3,
++            "fence must be at least 3 backticks when evidence has no backtick runs"
++        );
++    }
++}
+diff --git a/templates/diff.html b/templates/diff.html
+new file mode 100644
+index 0000000..6344162
+--- /dev/null
++++ b/templates/diff.html
+@@ -0,0 +1,363 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<title>otsniff diff report</title>
++<style>
++  :root {
++    --ink: #15171c;
++    --paper: #fbfaf6;
++    --accent: #ff7e35;
++    --ink-2: #4a4639;
++    --muted: #8a8474;
++    --line: #c8c2ad;
++    --crit:   #c33a36;
++    --high:   #b87325;
++    --med:    #b59121;
++    --info:   #3c6da6;
++    --ok:     #2e7d4a;
++    --new-color: #2e7d4a;
++    --resolved-color: #3c6da6;
++    --recurring-color: #b59121;
++    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
++    --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
++    --bg:   var(--paper);
++    --fg:   var(--ink);
++    --radius:    8px;
++    --radius-sm: 4px;
++  }
++  html { background: var(--bg); color: var(--fg); }
++  body {
++    font: 14px/1.5 var(--font-sans);
++    max-width: 1100px;
++    margin: 0 auto;
++    padding: 0 0 2rem 0;
++  }
++  h1, h2, h3, code, .mono { font-family: var(--font-mono); }
++  .brand-header { display: flex; align-items: center; gap: 12px; padding: 20px 0 16px; border-bottom: 1px solid var(--line); margin-bottom: 28px; color: var(--ink); }
++  .brand-wordmark { font: 600 18px/1 var(--font-mono); }
++  .brand-sep { color: var(--muted); font-weight: 400; }
++  .brand-meta { font: 500 11px/1.4 var(--font-mono); color: var(--muted); margin-top: 4px; }
++  .stats {
++    display: grid;
++    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
++    gap: 0.75rem;
++    margin: 0 0 1.5rem 0;
++  }
++  .stat {
++    background: color-mix(in oklch, var(--ink) 4%, var(--paper));
++    border: 1px solid var(--line);
++    border-radius: var(--radius);
++    padding: 0.75rem 1rem;
++  }
++  .stat .n {
++    font-size: 1.4rem;
++    font-weight: 600;
++    font-feature-settings: "tnum";
++    font-family: var(--font-mono);
++    color: var(--ink);
++  }
++  .stat .l { color: var(--muted); font-size: 0.85rem; }
++  .stat.stat-new .n  { color: var(--new-color); }
++  .stat.stat-resolved .n { color: var(--resolved-color); }
++  .stat.stat-recurring .n { color: var(--recurring-color); }
++  .page-body { padding: 0 1.5rem; }
++  h2 {
++    font-size: 0.8rem;
++    font-weight: 700;
++    text-transform: uppercase;
++    letter-spacing: 0.06em;
++    color: var(--muted);
++    margin-top: 2rem;
++    border-bottom: 1px solid var(--line);
++    padding-bottom: 0.3rem;
++  }
++  h3 { font-size: 1rem; margin: 0.5rem 0 0.25rem 0; }
++  .muted { color: var(--muted); }
++  .no-deltas-banner {
++    background: color-mix(in oklch, var(--ok) 10%, var(--paper));
++    border: 1px solid var(--ok);
++    border-radius: var(--radius);
++    padding: 1rem 1.25rem;
++    margin: 1.5rem 0;
++    color: var(--ok);
++    font-weight: 600;
++  }
++  .finding {
++    border: 1px solid var(--line);
++    border-left-width: 4px;
++    border-radius: var(--radius);
++    padding: 0.9rem 1rem;
++    margin: 0.75rem 0;
++  }
++  details.finding > summary::-webkit-details-marker { display: none; }
++  details.finding > summary { cursor: pointer; list-style: none; }
++  details.finding > summary::before { content: "▾ "; color: var(--muted); }
++  details.finding:not([open]) > summary::before { content: "▸ "; }
++  .finding.sev-critical { border-left-color: var(--crit); background: color-mix(in oklch, var(--crit) 8%, var(--paper)); }
++  .finding.sev-high     { border-left-color: var(--high); background: color-mix(in oklch, var(--high) 8%, var(--paper)); }
++  .finding.sev-medium   { border-left-color: var(--med);  background: color-mix(in oklch, var(--med)  8%, var(--paper)); }
++  .finding.sev-info     { border-left-color: var(--info); background: color-mix(in oklch, var(--info) 8%, var(--paper)); }
++  .badge {
++    display: inline-block;
++    font-size: 0.7rem;
++    text-transform: uppercase;
++    letter-spacing: 0.05em;
++    padding: 0.15rem 0.5rem;
++    border-radius: var(--radius-sm);
++    font-weight: 600;
++    color: #fff;
++    margin-right: 0.5rem;
++    vertical-align: 1px;
++  }
++  .badge.sev-critical { background: var(--crit); }
++  .badge.sev-high     { background: var(--high); }
++  .badge.sev-medium   { background: var(--med);  }
++  .badge.sev-info     { background: var(--info); }
++  .badge-new       { background: var(--new-color); }
++  .badge-resolved  { background: var(--resolved-color); }
++  .badge-recurring { background: var(--recurring-color); }
++  pre.evidence {
++    background: rgba(255,255,255,0.7);
++    border: 1px solid var(--line);
++    border-radius: var(--radius-sm);
++    padding: 0.6rem 0.75rem;
++    font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
++    white-space: pre-wrap;
++    word-break: break-all;
++    margin: 0.4rem 0 0 0;
++  }
++  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 0.75rem 0; }
++  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
++  th { font-weight: 600; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
++  code { font-family: var(--font-mono); font-size: 0.9em; }
++  .host-new     { color: var(--new-color); }
++  .host-gone    { color: var(--resolved-color); text-decoration: line-through; }
++  .ratio-badge  {
++    display: inline-block;
++    background: color-mix(in oklch, var(--high) 15%, var(--paper));
++    border: 1px solid var(--high);
++    border-radius: var(--radius-sm);
++    padding: 0.1rem 0.4rem;
++    font-size: 0.8rem;
++    font-family: var(--font-mono);
++    color: var(--high);
++  }
++</style>
++</head>
++<body>
++<div class="brand-header" style="padding-left:1.5rem;padding-right:1.5rem;">
++  <div>
++    <div class="brand-wordmark">otsniff <span class="brand-sep">/</span> diff</div>
++    <div class="brand-meta">v{{ version }}</div>
++  </div>
++</div>
++
++<div class="page-body">
++
++{% if no_deltas %}
++<div class="no-deltas-banner">No deltas detected — captures are identical by all tracked metrics.</div>
++{% else %}
++
++<div class="stats">
++  <div class="stat stat-new">
++    <div class="n">{{ findings_new_count }}</div>
++    <div class="l">New findings</div>
++  </div>
++  <div class="stat stat-recurring">
++    <div class="n">{{ findings_recurring_count }}</div>
++    <div class="l">Recurring findings</div>
++  </div>
++  <div class="stat stat-resolved">
++    <div class="n">{{ findings_resolved_count }}</div>
++    <div class="l">Resolved findings</div>
++  </div>
++  <div class="stat stat-new">
++    <div class="n">{{ hosts_new_count }}</div>
++    <div class="l">New hosts</div>
++  </div>
++  <div class="stat stat-resolved">
++    <div class="n">{{ hosts_gone_count }}</div>
++    <div class="l">Gone hosts</div>
++  </div>
++  <div class="stat">
++    <div class="n">{{ flow_shifts_count }}</div>
++    <div class="l">Flow shifts ({{ flow_shift_label }})</div>
++  </div>
++</div>
++
++{% if !findings_new.is_empty() %}
++<h2>New findings — NEW since baseline</h2>
++{% for f in findings_new %}
++<details open class="finding sev-{{ f.severity_class }}">
++  <summary>
++    <span class="badge sev-{{ f.severity_class }}">{{ f.severity_label }}</span>
++    <span class="badge badge-new">NEW since baseline</span>
++    <strong>{{ f.title }}</strong>
++  </summary>
++  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>{{ f.id }}</code></p>
++  <p style="margin:0.5rem 0;">{{ f.summary }}</p>
++  {% if !f.evidence.is_empty() %}
++  <details><summary>Evidence ({% if f.evidence_total > f.evidence_count %}showing {{ f.evidence_count }} of {{ f.evidence_total }}{% else %}{{ f.evidence_count }} sample(s){% endif %})</summary>
++  <pre class="evidence">{% for e in f.evidence %}{{ e }}
++{% endfor %}</pre>
++  </details>
++  {% endif %}
++  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> {{ f.recommendation }}</p>
++</details>
++{% endfor %}
++{% endif %}
++
++{% if !findings_recurring.is_empty() %}
++<h2>Recurring findings</h2>
++{% for f in findings_recurring %}
++<details open class="finding sev-{{ f.severity_class }}">
++  <summary>
++    <span class="badge sev-{{ f.severity_class }}">{{ f.severity_label }}</span>
++    <span class="badge badge-recurring">Recurring</span>
++    <strong>{{ f.title }}</strong>
++  </summary>
++  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>{{ f.id }}</code></p>
++  <p style="margin:0.5rem 0;">{{ f.summary }}</p>
++  {% if !f.evidence.is_empty() %}
++  <details><summary>Evidence ({% if f.evidence_total > f.evidence_count %}showing {{ f.evidence_count }} of {{ f.evidence_total }}{% else %}{{ f.evidence_count }} sample(s){% endif %})</summary>
++  <pre class="evidence">{% for e in f.evidence %}{{ e }}
++{% endfor %}</pre>
++  </details>
++  {% endif %}
++  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> {{ f.recommendation }}</p>
++</details>
++{% endfor %}
++{% endif %}
++
++{% if !findings_resolved.is_empty() %}
++<h2>Resolved findings</h2>
++{% for f in findings_resolved %}
++<details open class="finding sev-{{ f.severity_class }}">
++  <summary>
++    <span class="badge sev-{{ f.severity_class }}">{{ f.severity_label }}</span>
++    <span class="badge badge-resolved">RESOLVED</span>
++    <strong>{{ f.title }}</strong>
++  </summary>
++  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>{{ f.id }}</code></p>
++  <p style="margin:0.5rem 0;">{{ f.summary }}</p>
++  {% if !f.evidence.is_empty() %}
++  <details><summary>Evidence ({% if f.evidence_total > f.evidence_count %}showing {{ f.evidence_count }} of {{ f.evidence_total }}{% else %}{{ f.evidence_count }} sample(s){% endif %})</summary>
++  <pre class="evidence">{% for e in f.evidence %}{{ e }}
++{% endfor %}</pre>
++  </details>
++  {% endif %}
++  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> {{ f.recommendation }}</p>
++</details>
++{% endfor %}
++{% endif %}
++
++{% if !hosts_new.is_empty() || !hosts_gone.is_empty() %}
++<h2>Host changes</h2>
++<table>
++  <thead>
++    <tr><th>Pseudonym</th><th>Status</th><th>Role</th><th>Protocols</th><th>Zone</th><th>Packets</th><th>Bytes</th></tr>
++  </thead>
++  <tbody>
++    {% for h in hosts_new %}
++    <tr>
++      <td class="host-new"><code>{{ h.pseudonym }}</code></td>
++      <td><span class="badge badge-new">New</span></td>
++      <td>{{ h.role }}</td>
++      <td>{{ h.protocols }}</td>
++      <td>{{ h.zone }}</td>
++      <td>{{ h.packets }}</td>
++      <td>{{ h.bytes }}</td>
++    </tr>
++    {% endfor %}
++    {% for h in hosts_gone %}
++    <tr>
++      <td class="host-gone"><code>{{ h.pseudonym }}</code></td>
++      <td><span class="badge badge-resolved">Gone</span></td>
++      <td>{{ h.role }}</td>
++      <td>{{ h.protocols }}</td>
++      <td>{{ h.zone }}</td>
++      <td>{{ h.packets }}</td>
++      <td>{{ h.bytes }}</td>
++    </tr>
++    {% endfor %}
++  </tbody>
++</table>
++{% endif %}
++
++{% if !role_shifts.is_empty() %}
++<h2>Role shifts</h2>
++<table>
++  <thead>
++    <tr><th>Pseudonym</th><th>Old role</th><th>→</th><th>New role</th></tr>
++  </thead>
++  <tbody>
++    {% for r in role_shifts %}
++    <tr>
++      <td><code>{{ r.pseudonym }}</code></td>
++      <td>{{ r.old_role }}</td>
++      <td>→</td>
++      <td>{{ r.new_role }}</td>
++    </tr>
++    {% endfor %}
++  </tbody>
++</table>
++{% endif %}
++
++{% if !flow_shifts.is_empty() %}
++<h2>Flow shifts ({{ flow_shift_label }} volume change)</h2>
++<table>
++  <thead>
++    <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Baseline</th><th>Current</th><th>Ratio</th></tr>
++  </thead>
++  <tbody>
++    {% for f in flow_shifts %}
++    <tr>
++      <td><code>{{ f.src }}</code></td>
++      <td><code>{{ f.dst }}</code></td>
++      <td>{{ f.dst_port }}</td>
++      <td>{{ f.proto }}</td>
++      <td>{{ f.baseline_bytes }}</td>
++      <td>{{ f.current_bytes }}</td>
++      <td><span class="ratio-badge">{{ f.ratio }}×</span></td>
++    </tr>
++    {% endfor %}
++  </tbody>
++</table>
++{% endif %}
++
++{% if !flows_new.is_empty() || !flows_gone.is_empty() %}
++<h2>Flow inventory changes</h2>
++<table>
++  <thead>
++    <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Status</th><th>Bytes</th></tr>
++  </thead>
++  <tbody>
++    {% for f in flows_new %}
++    <tr>
++      <td><code>{{ f.src }}</code></td>
++      <td><code>{{ f.dst }}</code></td>
++      <td>{{ f.dst_port }}</td>
++      <td>{{ f.proto }}</td>
++      <td><span class="badge badge-new">New</span></td>
++      <td>{{ f.bytes }}</td>
++    </tr>
++    {% endfor %}
++    {% for f in flows_gone %}
++    <tr>
++      <td><code>{{ f.src }}</code></td>
++      <td><code>{{ f.dst }}</code></td>
++      <td>{{ f.dst_port }}</td>
++      <td>{{ f.proto }}</td>
++      <td><span class="badge badge-resolved">Gone</span></td>
++      <td>{{ f.bytes }}</td>
++    </tr>
++    {% endfor %}
++  </tbody>
++</table>
++{% endif %}
++
++{% endif %}
++</div>
++</body>
++</html>
+diff --git a/tests/snapshot.rs b/tests/snapshot.rs
+index 221ddba..3a1e4d8 100644
+--- a/tests/snapshot.rs
++++ b/tests/snapshot.rs
+@@ -3503,3 +3503,586 @@ fn augment_failure_after_analyze_success_renders_without_augment() {
+         "EC-004: markdown augmented section must be absent when augmented findings are empty"
+     );
+ }
++
++// ---------------------------------------------------------------------------
++// S-6.03 / BC-8.04.001 — diff renderer tests
++//
++// AC-001: HTML renderer produces a summary banner and labelled sections.
++// AC-002: Markdown renderer produces the same data in LLM-friendly form.
++// AC-003: Both renderers are deterministic (two calls on the same Diff are equal).
++// EC-001: Empty Diff produces a "No deltas detected" banner in both renderers.
++// ---------------------------------------------------------------------------
++
++use otsniff::diff::{Diff, FlowDelta, FlowSummary, HostRef, RoleShift};
++use otsniff::report::render_diff_html;
++use otsniff::report_md::render_diff_markdown;
++
++/// Build a deterministic non-empty Diff fixture covering every section:
++/// - `findings_new` (1 finding)
++/// - `findings_recurring` (1 finding)
++/// - `findings_resolved` (1 finding)
++/// - `hosts_new` (1 host)
++/// - `hosts_gone` (1 host)
++/// - `role_shifts` (1 shift — host_003 changed plc → hmi)
++/// - `flow_shifts` (1 shift — ratio 4.0x, above the default 2.0 threshold)
++/// - `flows_new` (1 flow — host_004 → host_002:102)
++/// - `flows_gone` (1 flow — host_005 → host_001:44818)
++fn build_diff_fixture() -> Diff {
++    use otsniff::findings::Severity;
++
++    let finding_new = otsniff::findings::Finding {
++        id: "ics.modbus_writes",
++        severity: Severity::High,
++        title: "NEW: Modbus write commands observed".to_string(),
++        summary: "Engineering writes seen in current capture that were absent in baseline."
++            .to_string(),
++        evidence: vec!["host_001 -> host_002:502".to_string()],
++        recommendation: "Verify write commands are expected for this capture window.",
++        playbook: vec![
++            "Review Modbus write targets against change management records.".to_string(),
++        ],
++    };
++
++    let finding_recurring = otsniff::findings::Finding {
++        id: "egress.ot_to_internet",
++        severity: Severity::Medium,
++        title: "RECURRING: OT-to-internet egress still present".to_string(),
++        summary: "Outbound internet traffic from OT subnet observed in both captures.".to_string(),
++        evidence: vec!["host_001 -> 8.8.8.8:80".to_string()],
++        recommendation: "Block outbound internet traffic from OT zone at the perimeter firewall.",
++        playbook: vec![
++            "Identify source and destination of each egress flow.".to_string(),
++            "Confirm with network owner whether this connection is expected.".to_string(),
++        ],
++    };
++
++    let finding_resolved = otsniff::findings::Finding {
++        id: "creds.telnet",
++        severity: Severity::High,
++        title: "RESOLVED: Plaintext Telnet session no longer present".to_string(),
++        summary: "Telnet session observed in baseline is absent from current capture.".to_string(),
++        evidence: vec!["host_003:23".to_string()],
++        recommendation: "Confirm Telnet is permanently disabled and not re-enabled.",
++        playbook: vec!["Verify Telnet service is disabled on all OT devices.".to_string()],
++    };
++
++    let host_new = HostRef {
++        pseudonym: "host_004".to_string(),
++        role: "engineering".to_string(),
++        protocols: vec!["modbus".to_string(), "smb".to_string()],
++        packets: 300,
++        bytes: 28_800,
++        in_ot_zone: true,
++    };
++
++    let host_gone = HostRef {
++        pseudonym: "host_005".to_string(),
++        role: "plc".to_string(),
++        protocols: vec!["modbus".to_string()],
++        packets: 150,
++        bytes: 14_400,
++        in_ot_zone: true,
++    };
++
++    let role_shift = RoleShift {
++        pseudonym: "host_003".to_string(),
++        old_role: "plc".to_string(),
++        new_role: "hmi".to_string(),
++    };
++
++    let flow_shift = FlowDelta {
++        src: "host_001".to_string(),
++        dst: "host_002".to_string(),
++        dst_port: 502,
++        proto: "tcp".to_string(),
++        baseline_bytes: 10_000,
++        current_bytes: 40_000,
++        ratio: 4.0,
++    };
++
++    let flow_new = FlowSummary {
++        src: "host_004".to_string(),
++        dst: "host_002".to_string(),
++        dst_port: 102,
++        proto: "tcp".to_string(),
++        bytes: 5_000,
++    };
++
++    let flow_gone = FlowSummary {
++        src: "host_005".to_string(),
++        dst: "host_001".to_string(),
++        dst_port: 44818,
++        proto: "tcp".to_string(),
++        bytes: 3_200,
++    };
++
++    Diff {
++        hosts_new: vec![host_new],
++        hosts_gone: vec![host_gone],
++        findings_new: vec![finding_new],
++        findings_recurring: vec![finding_recurring],
++        findings_resolved: vec![finding_resolved],
++        role_shifts: vec![role_shift],
++        flow_shifts: vec![flow_shift],
++        flows_new: vec![flow_new],
++        flows_gone: vec![flow_gone],
++        flow_shift_multiplier: 2.0,
++    }
++}
++
++// ── AC-001 (BC-8.04.001) — HTML diff renderer snapshot + structural assertions ──
++
++/// AC-001 / BC-8.04.001: `render_diff_html` must produce an HTML report with:
++/// - a summary banner showing counts for new / recurring / resolved findings,
++///   new / gone hosts, and flow shifts,
++/// - a "NEW since baseline" section,
++/// - a "RESOLVED" section,
++/// - a recurring badge or label on the recurring finding,
++/// - a host-changes section covering hosts_new and hosts_gone,
++/// - a role-shifts section,
++/// - a flow-shifts section.
++///
++/// Red Gate: panics on `todo!("S-6.03: implement render_diff_html")` until
++/// the implementer writes real rendering logic.
++#[test]
++fn test_bc_8_04_001_diff_html_snapshot_and_sections() {
++    let diff = build_diff_fixture();
++    let html = render_diff_html(&diff)
++        .expect("BC-8.04.001 AC-001: render_diff_html must return Ok for a well-formed Diff");
++
++    // Snapshot: captures full output for regression detection.
++    // Leave un-accepted so the implementer accepts after writing real output.
++    insta::assert_snapshot!("diff_html_report", html);
++
++    // --- Summary banner ---
++    // Must contain counts for the three finding buckets.
++    let lower = html.to_lowercase();
++    assert!(
++        lower.contains("new") && lower.contains("1"),
++        "BC-8.04.001 AC-001: summary banner must include new-finding count (1)"
++    );
++    assert!(
++        lower.contains("resolved") || lower.contains("resolve"),
++        "BC-8.04.001 AC-001: summary banner must reference resolved findings"
++    );
++    assert!(
++        lower.contains("recurring"),
++        "BC-8.04.001 AC-001: summary banner or section must contain the word 'recurring'"
++    );
++
++    // --- Section: NEW since baseline ---
++    assert!(
++        lower.contains("new since baseline")
++            || lower.contains("new since")
++            || lower.contains("new findings"),
++        "BC-8.04.001 AC-001: HTML must contain a 'NEW since baseline' section header"
++    );
++    // The new finding's rule id must appear somewhere in the output.
++    assert!(
++        html.contains("ics.modbus_writes"),
++        "BC-8.04.001 AC-001: HTML must include the new finding id ics.modbus_writes"
++    );
++
++    // --- Section: RESOLVED ---
++    assert!(
++        html.contains("creds.telnet"),
++        "BC-8.04.001 AC-001: HTML must include the resolved finding id creds.telnet"
++    );
++
++    // --- Recurring badge ---
++    assert!(
++        html.contains("egress.ot_to_internet"),
++        "BC-8.04.001 AC-001: HTML must include the recurring finding id egress.ot_to_internet"
++    );
++
++    // --- Host changes section ---
++    // The new host pseudonym and gone host pseudonym must appear.
++    assert!(
++        html.contains("host_004"),
++        "BC-8.04.001 AC-001: HTML must mention the new host pseudonym (host_004)"
++    );
++    assert!(
++        html.contains("host_005"),
++        "BC-8.04.001 AC-001: HTML must mention the gone host pseudonym (host_005)"
++    );
++
++    // --- Role shifts section ---
++    assert!(
++        html.contains("host_003"),
++        "BC-8.04.001 AC-001: HTML must mention the role-shifted host (host_003)"
++    );
++    assert!(
++        html.contains("plc") && html.contains("hmi"),
++        "BC-8.04.001 AC-001: HTML must show old role (plc) and new role (hmi) for the shift"
++    );
++
++    // --- Flow shifts section ---
++    // The flow shift (ratio 4.0, host_001 -> host_002:502) must be represented.
++    assert!(
++        html.contains("host_001") && html.contains("host_002"),
++        "BC-8.04.001 AC-001: HTML must include the flow-shift endpoints (host_001, host_002)"
++    );
++    assert!(
++        html.contains("4") || html.contains("4.0"),
++        "BC-8.04.001 AC-001: HTML must show the flow-shift ratio (4.0x)"
++    );
++}
++
++// ── AC-002 (BC-8.04.001) — markdown diff renderer snapshot ───────────────────
++
++/// AC-002 / BC-8.04.001: `render_diff_markdown` must produce an LLM-friendly
++/// markdown report covering the same sections as the HTML renderer.
++///
++/// Red Gate: panics on `todo!("S-6.03: implement render_diff_markdown")`.
++#[test]
++fn test_bc_8_04_001_diff_markdown_snapshot() {
++    let diff = build_diff_fixture();
++    let md = render_diff_markdown(&diff);
++
++    // Snapshot: captures full output for regression detection.
++    insta::assert_snapshot!("diff_markdown_report", md);
++
++    // --- Structural content assertions ---
++    let lower = md.to_lowercase();
++    assert!(
++        lower.contains("new") || lower.contains("finding"),
++        "BC-8.04.001 AC-002: markdown report must contain findings section"
++    );
++    assert!(
++        md.contains("ics.modbus_writes"),
++        "BC-8.04.001 AC-002: markdown must include new finding id ics.modbus_writes"
++    );
++    assert!(
++        md.contains("creds.telnet"),
++        "BC-8.04.001 AC-002: markdown must include resolved finding id creds.telnet"
++    );
++    assert!(
++        md.contains("egress.ot_to_internet"),
++        "BC-8.04.001 AC-002: markdown must include recurring finding id egress.ot_to_internet"
++    );
++    assert!(
++        md.contains("host_003") && md.contains("plc") && md.contains("hmi"),
++        "BC-8.04.001 AC-002: markdown must show role shift host_003 plc -> hmi"
++    );
++    assert!(
++        md.contains("host_004") && md.contains("host_005"),
++        "BC-8.04.001 AC-002: markdown must mention host_004 (new) and host_005 (gone)"
++    );
++}
++
++// ── AC-003 (BC-8.04.001) — determinism: same Diff → identical output ─────────
++
++/// AC-003 / BC-8.04.001: `render_diff_html` called twice on the same `Diff`
++/// must produce byte-for-byte identical output.
++///
++/// Red Gate: panics on `todo!()` before producing any output at all.
++#[test]
++fn test_bc_8_04_001_diff_html_is_deterministic() {
++    let diff = build_diff_fixture();
++    let first = render_diff_html(&diff)
++        .expect("BC-8.04.001 AC-003: first render_diff_html call must succeed");
++    let second = render_diff_html(&diff)
++        .expect("BC-8.04.001 AC-003: second render_diff_html call must succeed");
++    assert_eq!(
++        first, second,
++        "BC-8.04.001 AC-003: render_diff_html must be deterministic — \
++         two calls on the same Diff produced different output"
++    );
++}
++
++/// AC-003 / BC-8.04.001: `render_diff_markdown` called twice on the same `Diff`
++/// must produce byte-for-byte identical output.
++///
++/// Red Gate: panics on `todo!()` before producing any output at all.
++#[test]
++fn test_bc_8_04_001_diff_markdown_is_deterministic() {
++    let diff = build_diff_fixture();
++    let first = render_diff_markdown(&diff);
++    let second = render_diff_markdown(&diff);
++    assert_eq!(
++        first, second,
++        "BC-8.04.001 AC-003: render_diff_markdown must be deterministic — \
++         two calls on the same Diff produced different output"
++    );
++}
++
++// ── EC-001 — empty Diff emits "No deltas detected" banner in both renderers ──
++
++/// EC-001: when `Diff` is fully empty (all vecs empty), both renderers must
++/// emit a "No deltas detected" banner rather than an empty or malformed document.
++///
++/// Red Gate: panics on `todo!()` before producing any output at all.
++#[test]
++fn test_bc_8_04_001_empty_diff_html_no_deltas_banner() {
++    let diff = Diff::default();
++    let html =
++        render_diff_html(&diff).expect("EC-001: render_diff_html must return Ok for an empty Diff");
++    let lower = html.to_lowercase();
++    assert!(
++        lower.contains("no deltas detected")
++            || lower.contains("no changes")
++            || lower.contains("no delta"),
++        "EC-001: empty Diff HTML output must contain a 'No deltas detected' banner; got:\n{}",
++        &html[..html.len().min(800)]
++    );
++}
++
++/// EC-001: same "No deltas detected" invariant for the markdown renderer.
++///
++/// Red Gate: panics on `todo!()` before producing any output at all.
++#[test]
++fn test_bc_8_04_001_empty_diff_markdown_no_deltas_banner() {
++    let diff = Diff::default();
++    let md = render_diff_markdown(&diff);
++    let lower = md.to_lowercase();
++    assert!(
++        lower.contains("no deltas detected")
++            || lower.contains("no changes")
++            || lower.contains("no delta"),
++        "EC-001: empty Diff markdown output must contain a 'No deltas detected' banner; got:\n{}",
++        &md[..md.len().min(800)]
++    );
++}
++
++// ── C-1 (AC-003) — determinism with findings sharing the same rule id ────────
++
++/// C-1 / AC-003: when two findings share the same rule `id` but differ by
++/// endpoint (simulating two Modbus write flows to distinct destinations),
++/// calling `diff::compute` twice on the same inputs and rendering both
++/// results must produce byte-identical HTML and markdown.
++///
++/// This exercises the real `compute -> render` pipeline — not just rendering
++/// a pre-built `Diff` — so any non-determinism in HashSet iteration order
++/// in `compute` is caught.
++#[test]
++fn test_bc_8_04_001_determinism_with_shared_rule_id() {
++    use otsniff::diff::{compute, DiffInput};
++    use otsniff::findings::{Finding, Severity};
++    use otsniff::observe::Observations;
++    use otsniff::scrub::ScrubMap;
++    use std::collections::BTreeMap;
++
++    // Build two findings sharing rule id "ics.modbus_writes" but with
++    // distinct src/dst/port tuples encoded in evidence (test-helper format
++    // recognised by finding_diff_key).
++    let f1 = Finding {
++        id: "ics.modbus_writes",
++        severity: Severity::High,
++        title: "Modbus write commands".to_string(),
++        summary: "Modbus write from host A".to_string(),
++        evidence: vec!["src=10.0.0.1 dst=10.0.0.10 port=502".to_string()],
++        recommendation: "Review writes.",
++        playbook: vec![],
++    };
++    let f2 = Finding {
++        id: "ics.modbus_writes",
++        severity: Severity::High,
++        title: "Modbus write commands".to_string(),
++        summary: "Modbus write from host B".to_string(),
++        evidence: vec!["src=10.0.0.2 dst=10.0.0.10 port=502".to_string()],
++        recommendation: "Review writes.",
++        playbook: vec![],
++    };
++
++    let empty_obs = Observations::default();
++    let empty_map = ScrubMap {
++        version: 1,
++        created_at: chrono::Utc::now(),
++        ips: BTreeMap::from([
++            ("host_001".to_string(), "10.0.0.1".to_string()),
++            ("host_002".to_string(), "10.0.0.2".to_string()),
++            ("host_010".to_string(), "10.0.0.10".to_string()),
++        ]),
++        macs: BTreeMap::new(),
++        names: BTreeMap::new(),
++    };
++
++    // Both sides see f1; current also adds f2 (so f2 is "new").
++    let baseline_findings = vec![f1.clone()];
++    let current_findings = vec![f1.clone(), f2.clone()];
++
++    let baseline = DiffInput {
++        observations: &empty_obs,
++        map: &empty_map,
++        findings: &baseline_findings,
++    };
++    let current = DiffInput {
++        observations: &empty_obs,
++        map: &empty_map,
++        findings: &current_findings,
++    };
++
++    // Compute twice — HashSet iteration order may differ between runs.
++    let diff_a = compute(baseline, current);
++    let baseline2 = DiffInput {
++        observations: &empty_obs,
++        map: &empty_map,
++        findings: &baseline_findings,
++    };
++    let current2 = DiffInput {
++        observations: &empty_obs,
++        map: &empty_map,
++        findings: &current_findings,
++    };
++    let diff_b = compute(baseline2, current2);
++
++    let html_a = render_diff_html(&diff_a).expect("C-1: first render_diff_html call must succeed");
++    let html_b = render_diff_html(&diff_b).expect("C-1: second render_diff_html call must succeed");
++    assert_eq!(
++        html_a, html_b,
++        "C-1 / AC-003: render_diff_html must be deterministic even when \
++         findings share the same rule id — two compute→render runs differed"
++    );
++
++    let md_a = render_diff_markdown(&diff_a);
++    let md_b = render_diff_markdown(&diff_b);
++    assert_eq!(
++        md_a, md_b,
++        "C-1 / AC-003: render_diff_markdown must be deterministic even when \
++         findings share the same rule id — two compute→render runs differed"
++    );
++}
++
++// ── I-3 / EC-002 — evidence-cap label shows "showing X of N" ─────────────────
++
++/// I-3 / EC-002: when a finding carries more than 5 evidence rows, both
++/// renderers must show exactly 5 rows AND display "showing 5 of N" rather
++/// than "5 sample(s)".
++#[test]
++fn test_ec_002_evidence_cap_label_shows_showing_x_of_n() {
++    use otsniff::findings::{Finding, Severity};
++
++    // Build a finding with 8 evidence rows (> MAX_EVIDENCE = 5).
++    let evidence: Vec<String> = (1..=8).map(|i| format!("evidence row {i}")).collect();
++    let finding = Finding {
++        id: "ics.modbus_writes",
++        severity: Severity::High,
++        title: "Test finding".to_string(),
++        summary: "Summary".to_string(),
++        evidence,
++        recommendation: "Rec.",
++        playbook: vec![],
++    };
++
++    let diff = Diff {
++        findings_new: vec![finding],
++        ..Diff::default()
++    };
++
++    // HTML: must show "showing 5 of 8" and exactly 5 evidence rows.
++    let html = render_diff_html(&diff).expect("EC-002: render_diff_html must succeed");
++    assert!(
++        html.contains("showing 5 of 8"),
++        "EC-002: HTML must show 'showing 5 of 8' when evidence is capped; got evidence section: {}",
++        &html[html.find("Evidence").unwrap_or(0)
++            ..html.len().min(html.find("Evidence").unwrap_or(0) + 200)]
++    );
++    // Exactly 5 evidence rows must appear in the rendered <pre> block.
++    let row_count = (1..=8)
++        .filter(|i| html.contains(&format!("evidence row {i}")))
++        .count();
++    assert_eq!(
++        row_count, 5,
++        "EC-002: HTML must render exactly 5 evidence rows (got {row_count})"
++    );
++    assert!(
++        !html.contains("evidence row 6"),
++        "EC-002: HTML must not render evidence row 6 (beyond cap)"
++    );
++
++    // Markdown: must also show "showing 5 of 8".
++    let md = render_diff_markdown(&diff);
++    assert!(
++        md.contains("showing 5 of 8"),
++        "EC-002: markdown must show 'showing 5 of 8' when evidence is capped; got:\n{}",
++        &md[..md.len().min(600)]
++    );
++    let md_row_count = (1..=8)
++        .filter(|i| md.contains(&format!("evidence row {i}")))
++        .count();
++    assert_eq!(
++        md_row_count, 5,
++        "EC-002: markdown must render exactly 5 evidence rows (got {md_row_count})"
++    );
++    assert!(
++        !md.contains("evidence row 6"),
++        "EC-002: markdown must not render evidence row 6 (beyond cap)"
++    );
++}
++
++// ── F-1 (adv pass 4): flow-shift label reflects actual threshold ──────────────
++
++/// F-1 (adv pass 4): when `--flow-shift-multiplier` is set to a non-default
++/// value, both renderers must label the section with the actual threshold, not
++/// the hardcoded default "2×".
++///
++/// Two sub-cases:
++///   (a) multiplier 3.0 → labels must say "≥3×" and must NOT say "≥2×".
++///   (b) default multiplier 2.0 → labels must still say "≥2×" (regression guard).
++#[test]
++fn test_flow_shift_label_reflects_actual_multiplier() {
++    use otsniff::diff::{Diff, FlowDelta};
++
++    let flow_shift = FlowDelta {
++        src: "host_001".to_string(),
++        dst: "host_002".to_string(),
++        dst_port: 502,
++        proto: "tcp".to_string(),
++        baseline_bytes: 1_000,
++        current_bytes: 4_000,
++        ratio: 4.0,
++    };
++
++    // ── (a) non-default multiplier 3.0 ──────────────────────────────────────
++    let diff_3x = Diff {
++        flow_shifts: vec![flow_shift.clone()],
++        flow_shift_multiplier: 3.0,
++        ..Diff::default()
++    };
++
++    let html_3x =
++        render_diff_html(&diff_3x).expect("render_diff_html must succeed for multiplier=3.0 diff");
++    assert!(
++        html_3x.contains("≥3×"),
++        "HTML with multiplier=3.0 must contain '≥3×'; got a snippet:\n{}",
++        &html_3x[html_3x.find("Flow shifts").unwrap_or(0)
++            ..html_3x
++                .len()
++                .min(html_3x.find("Flow shifts").unwrap_or(0) + 200)]
++    );
++    assert!(
++        !html_3x.contains("≥2×"),
++        "HTML with multiplier=3.0 must NOT contain '≥2×'"
++    );
++
++    let md_3x = render_diff_markdown(&diff_3x);
++    assert!(
++        md_3x.contains("≥3×"),
++        "Markdown with multiplier=3.0 must contain '≥3×'; got:\n{}",
++        &md_3x[..md_3x.len().min(600)]
++    );
++    assert!(
++        !md_3x.contains("≥2×"),
++        "Markdown with multiplier=3.0 must NOT contain '≥2×'"
++    );
++
++    // ── (b) default multiplier 2.0 — regression guard ───────────────────────
++    let diff_2x = Diff {
++        flow_shifts: vec![flow_shift],
++        flow_shift_multiplier: 2.0,
++        ..Diff::default()
++    };
++
++    let html_2x =
++        render_diff_html(&diff_2x).expect("render_diff_html must succeed for multiplier=2.0 diff");
++    assert!(
++        html_2x.contains("≥2×"),
++        "HTML with default multiplier=2.0 must still contain '≥2×' (regression guard)"
++    );
++
++    let md_2x = render_diff_markdown(&diff_2x);
++    assert!(
++        md_2x.contains("≥2×"),
++        "Markdown with default multiplier=2.0 must still contain '≥2×' (regression guard)"
++    );
++}
+diff --git a/tests/snapshots/snapshot__diff_html_report.snap b/tests/snapshots/snapshot__diff_html_report.snap
+new file mode 100644
+index 0000000..a19892d
+--- /dev/null
++++ b/tests/snapshots/snapshot__diff_html_report.snap
+@@ -0,0 +1,365 @@
++---
++source: tests/snapshot.rs
++expression: html
++---
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<title>otsniff diff report</title>
++<style>
++  :root {
++    --ink: #15171c;
++    --paper: #fbfaf6;
++    --accent: #ff7e35;
++    --ink-2: #4a4639;
++    --muted: #8a8474;
++    --line: #c8c2ad;
++    --crit:   #c33a36;
++    --high:   #b87325;
++    --med:    #b59121;
++    --info:   #3c6da6;
++    --ok:     #2e7d4a;
++    --new-color: #2e7d4a;
++    --resolved-color: #3c6da6;
++    --recurring-color: #b59121;
++    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
++    --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
++    --bg:   var(--paper);
++    --fg:   var(--ink);
++    --radius:    8px;
++    --radius-sm: 4px;
++  }
++  html { background: var(--bg); color: var(--fg); }
++  body {
++    font: 14px/1.5 var(--font-sans);
++    max-width: 1100px;
++    margin: 0 auto;
++    padding: 0 0 2rem 0;
++  }
++  h1, h2, h3, code, .mono { font-family: var(--font-mono); }
++  .brand-header { display: flex; align-items: center; gap: 12px; padding: 20px 0 16px; border-bottom: 1px solid var(--line); margin-bottom: 28px; color: var(--ink); }
++  .brand-wordmark { font: 600 18px/1 var(--font-mono); }
++  .brand-sep { color: var(--muted); font-weight: 400; }
++  .brand-meta { font: 500 11px/1.4 var(--font-mono); color: var(--muted); margin-top: 4px; }
++  .stats {
++    display: grid;
++    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
++    gap: 0.75rem;
++    margin: 0 0 1.5rem 0;
++  }
++  .stat {
++    background: color-mix(in oklch, var(--ink) 4%, var(--paper));
++    border: 1px solid var(--line);
++    border-radius: var(--radius);
++    padding: 0.75rem 1rem;
++  }
++  .stat .n {
++    font-size: 1.4rem;
++    font-weight: 600;
++    font-feature-settings: "tnum";
++    font-family: var(--font-mono);
++    color: var(--ink);
++  }
++  .stat .l { color: var(--muted); font-size: 0.85rem; }
++  .stat.stat-new .n  { color: var(--new-color); }
++  .stat.stat-resolved .n { color: var(--resolved-color); }
++  .stat.stat-recurring .n { color: var(--recurring-color); }
++  .page-body { padding: 0 1.5rem; }
++  h2 {
++    font-size: 0.8rem;
++    font-weight: 700;
++    text-transform: uppercase;
++    letter-spacing: 0.06em;
++    color: var(--muted);
++    margin-top: 2rem;
++    border-bottom: 1px solid var(--line);
++    padding-bottom: 0.3rem;
++  }
++  h3 { font-size: 1rem; margin: 0.5rem 0 0.25rem 0; }
++  .muted { color: var(--muted); }
++  .no-deltas-banner {
++    background: color-mix(in oklch, var(--ok) 10%, var(--paper));
++    border: 1px solid var(--ok);
++    border-radius: var(--radius);
++    padding: 1rem 1.25rem;
++    margin: 1.5rem 0;
++    color: var(--ok);
++    font-weight: 600;
++  }
++  .finding {
++    border: 1px solid var(--line);
++    border-left-width: 4px;
++    border-radius: var(--radius);
++    padding: 0.9rem 1rem;
++    margin: 0.75rem 0;
++  }
++  details.finding > summary::-webkit-details-marker { display: none; }
++  details.finding > summary { cursor: pointer; list-style: none; }
++  details.finding > summary::before { content: "▾ "; color: var(--muted); }
++  details.finding:not([open]) > summary::before { content: "▸ "; }
++  .finding.sev-critical { border-left-color: var(--crit); background: color-mix(in oklch, var(--crit) 8%, var(--paper)); }
++  .finding.sev-high     { border-left-color: var(--high); background: color-mix(in oklch, var(--high) 8%, var(--paper)); }
++  .finding.sev-medium   { border-left-color: var(--med);  background: color-mix(in oklch, var(--med)  8%, var(--paper)); }
++  .finding.sev-info     { border-left-color: var(--info); background: color-mix(in oklch, var(--info) 8%, var(--paper)); }
++  .badge {
++    display: inline-block;
++    font-size: 0.7rem;
++    text-transform: uppercase;
++    letter-spacing: 0.05em;
++    padding: 0.15rem 0.5rem;
++    border-radius: var(--radius-sm);
++    font-weight: 600;
++    color: #fff;
++    margin-right: 0.5rem;
++    vertical-align: 1px;
++  }
++  .badge.sev-critical { background: var(--crit); }
++  .badge.sev-high     { background: var(--high); }
++  .badge.sev-medium   { background: var(--med);  }
++  .badge.sev-info     { background: var(--info); }
++  .badge-new       { background: var(--new-color); }
++  .badge-resolved  { background: var(--resolved-color); }
++  .badge-recurring { background: var(--recurring-color); }
++  pre.evidence {
++    background: rgba(255,255,255,0.7);
++    border: 1px solid var(--line);
++    border-radius: var(--radius-sm);
++    padding: 0.6rem 0.75rem;
++    font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
++    white-space: pre-wrap;
++    word-break: break-all;
++    margin: 0.4rem 0 0 0;
++  }
++  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 0.75rem 0; }
++  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
++  th { font-weight: 600; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
++  code { font-family: var(--font-mono); font-size: 0.9em; }
++  .host-new     { color: var(--new-color); }
++  .host-gone    { color: var(--resolved-color); text-decoration: line-through; }
++  .ratio-badge  {
++    display: inline-block;
++    background: color-mix(in oklch, var(--high) 15%, var(--paper));
++    border: 1px solid var(--high);
++    border-radius: var(--radius-sm);
++    padding: 0.1rem 0.4rem;
++    font-size: 0.8rem;
++    font-family: var(--font-mono);
++    color: var(--high);
++  }
++</style>
++</head>
++<body>
++<div class="brand-header" style="padding-left:1.5rem;padding-right:1.5rem;">
++  <div>
++    <div class="brand-wordmark">otsniff <span class="brand-sep">/</span> diff</div>
++    <div class="brand-meta">v0.5.0-dev.1</div>
++  </div>
++</div>
++
++<div class="page-body">
++
++
++
++<div class="stats">
++  <div class="stat stat-new">
++    <div class="n">1</div>
++    <div class="l">New findings</div>
++  </div>
++  <div class="stat stat-recurring">
++    <div class="n">1</div>
++    <div class="l">Recurring findings</div>
++  </div>
++  <div class="stat stat-resolved">
++    <div class="n">1</div>
++    <div class="l">Resolved findings</div>
++  </div>
++  <div class="stat stat-new">
++    <div class="n">1</div>
++    <div class="l">New hosts</div>
++  </div>
++  <div class="stat stat-resolved">
++    <div class="n">1</div>
++    <div class="l">Gone hosts</div>
++  </div>
++  <div class="stat">
++    <div class="n">1</div>
++    <div class="l">Flow shifts (≥2×)</div>
++  </div>
++</div>
++
++
++<h2>New findings — NEW since baseline</h2>
++
++<details open class="finding sev-high">
++  <summary>
++    <span class="badge sev-high">high</span>
++    <span class="badge badge-new">NEW since baseline</span>
++    <strong>NEW: Modbus write commands observed</strong>
++  </summary>
++  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>ics.modbus_writes</code></p>
++  <p style="margin:0.5rem 0;">Engineering writes seen in current capture that were absent in baseline.</p>
++  
++  <details><summary>Evidence (1 sample(s))</summary>
++  <pre class="evidence">host_001 -&gt; host_002:502
++</pre>
++  </details>
++  
++  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> Verify write commands are expected for this capture window.</p>
++</details>
++
++
++
++
++<h2>Recurring findings</h2>
++
++<details open class="finding sev-medium">
++  <summary>
++    <span class="badge sev-medium">medium</span>
++    <span class="badge badge-recurring">Recurring</span>
++    <strong>RECURRING: OT-to-internet egress still present</strong>
++  </summary>
++  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>egress.ot_to_internet</code></p>
++  <p style="margin:0.5rem 0;">Outbound internet traffic from OT subnet observed in both captures.</p>
++  
++  <details><summary>Evidence (1 sample(s))</summary>
++  <pre class="evidence">host_001 -&gt; 8.8.8.8:80
++</pre>
++  </details>
++  
++  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> Block outbound internet traffic from OT zone at the perimeter firewall.</p>
++</details>
++
++
++
++
++<h2>Resolved findings</h2>
++
++<details open class="finding sev-high">
++  <summary>
++    <span class="badge sev-high">high</span>
++    <span class="badge badge-resolved">RESOLVED</span>
++    <strong>RESOLVED: Plaintext Telnet session no longer present</strong>
++  </summary>
++  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>creds.telnet</code></p>
++  <p style="margin:0.5rem 0;">Telnet session observed in baseline is absent from current capture.</p>
++  
++  <details><summary>Evidence (1 sample(s))</summary>
++  <pre class="evidence">host_003:23
++</pre>
++  </details>
++  
++  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> Confirm Telnet is permanently disabled and not re-enabled.</p>
++</details>
++
++
++
++
++<h2>Host changes</h2>
++<table>
++  <thead>
++    <tr><th>Pseudonym</th><th>Status</th><th>Role</th><th>Protocols</th><th>Zone</th><th>Packets</th><th>Bytes</th></tr>
++  </thead>
++  <tbody>
++    
++    <tr>
++      <td class="host-new"><code>host_004</code></td>
++      <td><span class="badge badge-new">New</span></td>
++      <td>engineering</td>
++      <td>modbus, smb</td>
++      <td>OT</td>
++      <td>300</td>
++      <td>28.8 KB</td>
++    </tr>
++    
++    
++    <tr>
++      <td class="host-gone"><code>host_005</code></td>
++      <td><span class="badge badge-resolved">Gone</span></td>
++      <td>plc</td>
++      <td>modbus</td>
++      <td>OT</td>
++      <td>150</td>
++      <td>14.4 KB</td>
++    </tr>
++    
++  </tbody>
++</table>
++
++
++
++<h2>Role shifts</h2>
++<table>
++  <thead>
++    <tr><th>Pseudonym</th><th>Old role</th><th>→</th><th>New role</th></tr>
++  </thead>
++  <tbody>
++    
++    <tr>
++      <td><code>host_003</code></td>
++      <td>plc</td>
++      <td>→</td>
++      <td>hmi</td>
++    </tr>
++    
++  </tbody>
++</table>
++
++
++
++<h2>Flow shifts (≥2× volume change)</h2>
++<table>
++  <thead>
++    <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Baseline</th><th>Current</th><th>Ratio</th></tr>
++  </thead>
++  <tbody>
++    
++    <tr>
++      <td><code>host_001</code></td>
++      <td><code>host_002</code></td>
++      <td>502</td>
++      <td>tcp</td>
++      <td>10000</td>
++      <td>40000</td>
++      <td><span class="ratio-badge">4.00×</span></td>
++    </tr>
++    
++  </tbody>
++</table>
++
++
++
++<h2>Flow inventory changes</h2>
++<table>
++  <thead>
++    <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Status</th><th>Bytes</th></tr>
++  </thead>
++  <tbody>
++    
++    <tr>
++      <td><code>host_004</code></td>
++      <td><code>host_002</code></td>
++      <td>102</td>
++      <td>tcp</td>
++      <td><span class="badge badge-new">New</span></td>
++      <td>5.0 KB</td>
++    </tr>
++    
++    
++    <tr>
++      <td><code>host_005</code></td>
++      <td><code>host_001</code></td>
++      <td>44818</td>
++      <td>tcp</td>
++      <td><span class="badge badge-resolved">Gone</span></td>
++      <td>3.2 KB</td>
++    </tr>
++    
++  </tbody>
++</table>
++
++
++
++</div>
++</body>
++</html>
+diff --git a/tests/snapshots/snapshot__diff_markdown_report.snap b/tests/snapshots/snapshot__diff_markdown_report.snap
+new file mode 100644
+index 0000000..bf356bd
+--- /dev/null
++++ b/tests/snapshots/snapshot__diff_markdown_report.snap
+@@ -0,0 +1,87 @@
++---
++source: tests/snapshot.rs
++expression: md
++---
++# otsniff diff report
++
++_otsniff v0.5.0-dev.1_
++
++## Summary
++
++- **New findings:** 1
++- **Recurring findings:** 1
++- **Resolved findings:** 1
++- **New hosts:** 1
++- **Gone hosts:** 1
++- **Flow shifts (≥2×):** 1
++
++## New findings — NEW since baseline
++
++### [NEW][HIGH] NEW: Modbus write commands observed
++
++Engineering writes seen in current capture that were absent in baseline.
++
++**Evidence (1 sample(s)):**
++```
++host_001 -> host_002:502
++```
++
++**Recommendation:** Verify write commands are expected for this capture window.
++
++_id: `ics.modbus_writes`_
++
++## Recurring findings
++
++### [RECURRING][MEDIUM] RECURRING: OT-to-internet egress still present
++
++Outbound internet traffic from OT subnet observed in both captures.
++
++**Evidence (1 sample(s)):**
++```
++host_001 -> 8.8.8.8:80
++```
++
++**Recommendation:** Block outbound internet traffic from OT zone at the perimeter firewall.
++
++_id: `egress.ot_to_internet`_
++
++## Resolved findings
++
++### [RESOLVED][HIGH] RESOLVED: Plaintext Telnet session no longer present
++
++Telnet session observed in baseline is absent from current capture.
++
++**Evidence (1 sample(s)):**
++```
++host_003:23
++```
++
++**Recommendation:** Confirm Telnet is permanently disabled and not re-enabled.
++
++_id: `creds.telnet`_
++
++## Host changes
++
++| Pseudonym | Status | Role | Protocols | Zone | Packets | Bytes |
++|-----------|--------|------|-----------|------|---------|-------|
++| `host_004` | **New** | engineering | modbus, smb | OT | 300 | 28.8 KB |
++| `host_005` | ~~Gone~~ | plc | modbus | OT | 150 | 14.4 KB |
++
++## Role shifts
++
++| Pseudonym | Old role | → | New role |
++|-----------|----------|---|----------|
++| `host_003` | plc | → | hmi |
++
++## Flow shifts (≥2× volume change)
++
++| Source | Destination | Port | Proto | Baseline bytes | Current bytes | Ratio |
++|--------|-------------|------|-------|----------------|---------------|-------|
++| `host_001` | `host_002` | 502 | tcp | 10000 | 40000 | 4.00× |
++
++## Flow inventory changes
++
++| Source | Destination | Port | Proto | Status | Bytes |
++|--------|-------------|------|-------|--------|-------|
++| `host_004` | `host_002` | 102 | tcp | **New** | 5.0 KB |
++| `host_005` | `host_001` | 44818 | tcp | ~~Gone~~ | 3.2 KB |

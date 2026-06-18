@@ -51,7 +51,7 @@ status: draft
 | S-5.07 | Per-finding card collapsibility via `<details>` | E-5 | 1 | 2 | completed (#75, 84b0489) | S-5.06 | S.8 |
 | S-6.01 | Scrub map merge | E-6 | 1 | 5 | completed (#76, 896c9e2) | — | S.5 |
 | S-6.02 | `diff` subcommand core | E-6 | 2 | 5 | completed | S-6.01 | S.9 + new |
-| S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | draft | S-6.02 | S.8 |
+| S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | completed (#119, cb426fc) | S-6.02 | S.8 |
 
 **Total points:** 125 (Wave 1: ~88, Wave 2: ~24, Wave 3: ~13)
 **Total stories:** 38 (Wave 1: 30, Wave 2: 6, Wave 3: 2)

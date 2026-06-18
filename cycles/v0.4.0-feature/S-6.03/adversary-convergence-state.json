@@ -1,0 +1,87 @@
+{
+  "story_id": "S-6.03",
+  "cycle": "v0.4.0-feature",
+  "bc_scope": ["BC-8.04.001"],
+  "converged": true,
+  "convergence_criterion": "passes_clean >= 3 AND last_classification == NITPICK_ONLY",
+  "passes_clean_consecutive": 3,
+  "last_classification": "NITPICK_ONLY",
+  "total_passes": 7,
+  "passes": [
+    {
+      "pass": 1,
+      "agent": "ab7f4fc91c0840f45",
+      "verdict": "SUBSTANTIVE",
+      "findings": [
+        "C-1 SUBSTANTIVE: AC-003 determinism not guaranteed for findings sharing a rule id (renderer trusted HashSet-derived order)",
+        "I-1 SUBSTANTIVE: markdown table cells unescaped",
+        "I-2 SUBSTANTIVE: flow-shift ratio rounded to 1 decimal collapses distinct ratios",
+        "I-3 SUBSTANTIVE: EC-002/EC-003 untested",
+        "I-4 SUBSTANTIVE: evidence-cap label hides truncation"
+      ],
+      "resolution": "fixed in c2a016e + 1396d7c: total-key renderer sort + compute->render-twice test, md_cell escaping, {:.2} ratio, EC-002 test + EC-003 doc, 'showing X of N' label"
+    },
+    {
+      "pass": 2,
+      "agent": "a51ee12d7b829e882",
+      "verdict": "SUBSTANTIVE",
+      "findings": [
+        "F-1 SUBSTANTIVE: markdown evidence rows inside ``` fences unescaped (backtick-run breakout)"
+      ],
+      "resolution": "fixed in e0a0776: make_fence (fence longer than longest embedded backtick run) + tests; plus F-2/F-3/F-4 hardening (recommendation escape, total sort key, defensive section sorts)"
+    },
+    {
+      "pass": 3,
+      "agent": "a1717e77d0681cb64",
+      "verdict": "NITPICK_ONLY",
+      "findings": [
+        "N-1 NITPICK: flow_shifts lost ratio-first ordering after F-4 hardening (UX regression)",
+        "N-2 NITPICK: md_cell over-escapes | in headings"
+      ],
+      "resolution": "fixed in 4cd30e0 (quality): restored ratio-descending flow ordering with endpoint tiebreak; added md_heading helper. Clean counter reset after this change."
+    },
+    {
+      "pass": 4,
+      "agent": "ab143d96c2b223dc4",
+      "verdict": "SUBSTANTIVE",
+      "findings": [
+        "F-1 SUBSTANTIVE: flow-shift label hardcoded '≥2×' but threshold is user-configurable via --flow-shift-multiplier"
+      ],
+      "resolution": "fixed in 0a8364f: threaded flow_shift_multiplier through Diff struct (set in compute_with_multiplier + Default) into both renderers; fmt_multiplier label; ≥3x test. Clean counter reset after this change."
+    },
+    {
+      "pass": 5,
+      "agent": "aaefd7b1cea6ffd58",
+      "verdict": "NITPICK_ONLY",
+      "findings": [
+        "N1 NITPICK: fmt_multiplier duplicated across modules (DRY smell, matches existing repo pattern)",
+        "N2 NITPICK: timestamp AC clause inert (no timestamp in data model)",
+        "N3 NITPICK: md_cell over-escapes summary prose"
+      ],
+      "resolution": "deferred (cosmetic; consistent with repo convention). No code change — codebase frozen."
+    },
+    {
+      "pass": 6,
+      "agent": "a6457b00762bde4c2",
+      "verdict": "NITPICK_ONLY",
+      "findings": [
+        "NITPICK: duplicated fmt_multiplier/severity_label/human_bytes across report modules (matches pre-existing repo pattern)"
+      ],
+      "resolution": "deferred (cosmetic). No code change."
+    },
+    {
+      "pass": 7,
+      "agent": "ae5859fc9e68a415e",
+      "verdict": "NITPICK_ONLY",
+      "findings": [
+        "NITPICK: helper duplication across report.rs/report_md.rs (established pattern)"
+      ],
+      "resolution": "deferred (cosmetic). No code change. CONVERGED."
+    }
+  ],
+  "deferred_nitpicks": [
+    "Shared-helper module to de-duplicate fmt_multiplier/severity_label/human_bytes/sort_findings_total across report.rs and report_md.rs (matches pre-existing duplication; candidate for a maintenance sweep)",
+    "md_cell applied to standalone summary prose is slightly over-defensive (cosmetic)"
+  ],
+  "final_commit": "0a8364f"
+}
