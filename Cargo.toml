@@ -1,0 +1,13 @@
+[package]
+name = "zonewarden-core"
+version = "0.0.1"
+description = "Pure, deterministic core for OT segmentation conformance (zonewarden)."
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Dependency-free for the Wave-1 slice. External crates (thiserror, ipnet, serde,
+# serde_json, sha2) are introduced by the stories that first need them.
+[dependencies]
