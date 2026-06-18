@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>otsniff diff report</title>
+<style>
+  :root {
+    --ink: #15171c;
+    --paper: #fbfaf6;
+    --accent: #ff7e35;
+    --ink-2: #4a4639;
+    --muted: #8a8474;
+    --line: #c8c2ad;
+    --crit:   #c33a36;
+    --high:   #b87325;
+    --med:    #b59121;
+    --info:   #3c6da6;
+    --ok:     #2e7d4a;
+    --new-color: #2e7d4a;
+    --resolved-color: #3c6da6;
+    --recurring-color: #b59121;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    --bg:   var(--paper);
+    --fg:   var(--ink);
+    --radius:    8px;
+    --radius-sm: 4px;
+  }
+  html { background: var(--bg); color: var(--fg); }
+  body {
+    font: 14px/1.5 var(--font-sans);
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 0 2rem 0;
+  }
+  h1, h2, h3, code, .mono { font-family: var(--font-mono); }
+  .brand-header { display: flex; align-items: center; gap: 12px; padding: 20px 0 16px; border-bottom: 1px solid var(--line); margin-bottom: 28px; color: var(--ink); }
+  .brand-wordmark { font: 600 18px/1 var(--font-mono); }
+  .brand-sep { color: var(--muted); font-weight: 400; }
+  .brand-meta { font: 500 11px/1.4 var(--font-mono); color: var(--muted); margin-top: 4px; }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+    margin: 0 0 1.5rem 0;
+  }
+  .stat {
+    background: color-mix(in oklch, var(--ink) 4%, var(--paper));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+  }
+  .stat .n {
+    font-size: 1.4rem;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+    font-family: var(--font-mono);
+    color: var(--ink);
+  }
+  .stat .l { color: var(--muted); font-size: 0.85rem; }
+  .stat.stat-new .n  { color: var(--new-color); }
+  .stat.stat-resolved .n { color: var(--resolved-color); }
+  .stat.stat-recurring .n { color: var(--recurring-color); }
+  .page-body { padding: 0 1.5rem; }
+  h2 {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-top: 2rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.3rem;
+  }
+  h3 { font-size: 1rem; margin: 0.5rem 0 0.25rem 0; }
+  .muted { color: var(--muted); }
+  .no-deltas-banner {
+    background: color-mix(in oklch, var(--ok) 10%, var(--paper));
+    border: 1px solid var(--ok);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+    color: var(--ok);
+    font-weight: 600;
+  }
+  .finding {
+    border: 1px solid var(--line);
+    border-left-width: 4px;
+    border-radius: var(--radius);
+    padding: 0.9rem 1rem;
+    margin: 0.75rem 0;
+  }
+  details.finding > summary::-webkit-details-marker { display: none; }
+  details.finding > summary { cursor: pointer; list-style: none; }
+  details.finding > summary::before { content: "▾ "; color: var(--muted); }
+  details.finding:not([open]) > summary::before { content: "▸ "; }
+  .finding.sev-critical { border-left-color: var(--crit); background: color-mix(in oklch, var(--crit) 8%, var(--paper)); }
+  .finding.sev-high     { border-left-color: var(--high); background: color-mix(in oklch, var(--high) 8%, var(--paper)); }
+  .finding.sev-medium   { border-left-color: var(--med);  background: color-mix(in oklch, var(--med)  8%, var(--paper)); }
+  .finding.sev-info     { border-left-color: var(--info); background: color-mix(in oklch, var(--info) 8%, var(--paper)); }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    color: #fff;
+    margin-right: 0.5rem;
+    vertical-align: 1px;
+  }
+  .badge.sev-critical { background: var(--crit); }
+  .badge.sev-high     { background: var(--high); }
+  .badge.sev-medium   { background: var(--med);  }
+  .badge.sev-info     { background: var(--info); }
+  .badge-new       { background: var(--new-color); }
+  .badge-resolved  { background: var(--resolved-color); }
+  .badge-recurring { background: var(--recurring-color); }
+  pre.evidence {
+    background: rgba(255,255,255,0.7);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.75rem;
+    font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0.4rem 0 0 0;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 0.75rem 0; }
+  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  code { font-family: var(--font-mono); font-size: 0.9em; }
+  .host-new     { color: var(--new-color); }
+  .host-gone    { color: var(--resolved-color); text-decoration: line-through; }
+  .ratio-badge  {
+    display: inline-block;
+    background: color-mix(in oklch, var(--high) 15%, var(--paper));
+    border: 1px solid var(--high);
+    border-radius: var(--radius-sm);
+    padding: 0.1rem 0.4rem;
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    color: var(--high);
+  }
+</style>
+</head>
+<body>
+<div class="brand-header" style="padding-left:1.5rem;padding-right:1.5rem;">
+  <div>
+    <div class="brand-wordmark">otsniff <span class="brand-sep">/</span> diff</div>
+    <div class="brand-meta">v0.5.0-dev.1</div>
+  </div>
+</div>
+
+<div class="page-body">
+
+
+
+<div class="stats">
+  <div class="stat stat-new">
+    <div class="n">0</div>
+    <div class="l">New findings</div>
+  </div>
+  <div class="stat stat-recurring">
+    <div class="n">1</div>
+    <div class="l">Recurring findings</div>
+  </div>
+  <div class="stat stat-resolved">
+    <div class="n">0</div>
+    <div class="l">Resolved findings</div>
+  </div>
+  <div class="stat stat-new">
+    <div class="n">0</div>
+    <div class="l">New hosts</div>
+  </div>
+  <div class="stat stat-resolved">
+    <div class="n">0</div>
+    <div class="l">Gone hosts</div>
+  </div>
+  <div class="stat">
+    <div class="n">10</div>
+    <div class="l">Flow shifts (≥1.1×)</div>
+  </div>
+</div>
+
+
+
+
+<h2>Recurring findings</h2>
+
+<details open class="finding sev-high">
+  <summary>
+    <span class="badge sev-high">high</span>
+    <span class="badge badge-recurring">Recurring</span>
+    <strong>Modbus engineering-class commands on the wire</strong>
+  </summary>
+  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>ics.modbus_writes</code></p>
+  <p style="margin:0.5rem 0;">7788 write/diagnostic Modbus call(s) observed across 10 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.</p>
+  
+  <details><summary>Evidence (showing 5 of 10)</summary>
+  <pre class="evidence">host_001 -&gt; host_011 : fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil)
+host_002 -&gt; host_011 : fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil)
+host_003 -&gt; host_011 : fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil)
+host_004 -&gt; host_011 : fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil)
+host_005 -&gt; host_011 : fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil), fc=0x05 (Write Single Coil)
+</pre>
+  </details>
+  
+  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.</p>
+</details>
+
+
+
+
+
+
+
+
+
+
+<h2>Flow shifts (≥1.1× volume change)</h2>
+<table>
+  <thead>
+    <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Baseline</th><th>Current</th><th>Ratio</th></tr>
+  </thead>
+  <tbody>
+    
+    <tr>
+      <td><code>host_001</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9348</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+    <tr>
+      <td><code>host_002</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9348</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+    <tr>
+      <td><code>host_003</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9348</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+    <tr>
+      <td><code>host_004</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9348</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+    <tr>
+      <td><code>host_005</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9348</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+    <tr>
+      <td><code>host_006</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9348</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+    <tr>
+      <td><code>host_007</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9348</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+    <tr>
+      <td><code>host_008</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9348</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+    <tr>
+      <td><code>host_009</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9336</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+    <tr>
+      <td><code>host_010</code></td>
+      <td><code>host_011</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>6000</td>
+      <td>9336</td>
+      <td><span class="ratio-badge">1.56×</span></td>
+    </tr>
+    
+  </tbody>
+</table>
+
+
+
+
+
+</div>
+</body>
+</html>
