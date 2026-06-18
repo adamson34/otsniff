@@ -13,6 +13,7 @@ use std::fmt::Write;
 use chrono::{DateTime, Utc};
 
 use crate::capture_source::Classification;
+use crate::diff::Diff;
 use crate::error::Result;
 use crate::findings::augmented::AugmentedFinding;
 use crate::findings::{Finding, Severity};
@@ -292,4 +293,13 @@ fn human_bytes(n: u64) -> String {
         (n, "B")
     };
     format!("{val:.1} {unit}")
+}
+
+/// Render a cross-capture diff as markdown (S-6.03 AC-002).
+///
+/// Stub — implementation pending (Red Gate enforced). All non-trivial logic is
+/// `todo!()` per BC-5.38.001.
+pub fn render_diff_markdown(diff: &Diff) -> String {
+    let _ = diff;
+    todo!("S-6.03: implement render_diff_markdown")
 }

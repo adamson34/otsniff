@@ -9,6 +9,7 @@ use askama::Template;
 use chrono::{DateTime, Utc};
 
 use crate::capture_source::Classification;
+use crate::diff::Diff;
 use crate::error::Result;
 use crate::findings::augmented::AugmentedFinding;
 use crate::findings::{Finding, Severity};
@@ -251,6 +252,15 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
     }
 
     out
+}
+
+/// Render a cross-capture diff as a self-contained HTML report (S-6.03 AC-001).
+///
+/// Stub — implementation pending (Red Gate enforced). All non-trivial logic is
+/// `todo!()` per BC-5.38.001.
+pub fn render_diff_html(diff: &Diff) -> Result<String> {
+    let _ = diff;
+    todo!("S-6.03: implement render_diff_html")
 }
 
 fn html_escape(s: &str) -> String {
