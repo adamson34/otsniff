@@ -3626,6 +3626,7 @@ fn build_diff_fixture() -> Diff {
         flow_shifts: vec![flow_shift],
         flows_new: vec![flow_new],
         flows_gone: vec![flow_gone],
+        flow_shift_multiplier: 2.0,
     }
 }
 
@@ -4006,5 +4007,82 @@ fn test_ec_002_evidence_cap_label_shows_showing_x_of_n() {
     assert!(
         !md.contains("evidence row 6"),
         "EC-002: markdown must not render evidence row 6 (beyond cap)"
+    );
+}
+
+// ── F-1 (adv pass 4): flow-shift label reflects actual threshold ──────────────
+
+/// F-1 (adv pass 4): when `--flow-shift-multiplier` is set to a non-default
+/// value, both renderers must label the section with the actual threshold, not
+/// the hardcoded default "2×".
+///
+/// Two sub-cases:
+///   (a) multiplier 3.0 → labels must say "≥3×" and must NOT say "≥2×".
+///   (b) default multiplier 2.0 → labels must still say "≥2×" (regression guard).
+#[test]
+fn test_flow_shift_label_reflects_actual_multiplier() {
+    use otsniff::diff::{Diff, FlowDelta};
+
+    let flow_shift = FlowDelta {
+        src: "host_001".to_string(),
+        dst: "host_002".to_string(),
+        dst_port: 502,
+        proto: "tcp".to_string(),
+        baseline_bytes: 1_000,
+        current_bytes: 4_000,
+        ratio: 4.0,
+    };
+
+    // ── (a) non-default multiplier 3.0 ──────────────────────────────────────
+    let diff_3x = Diff {
+        flow_shifts: vec![flow_shift.clone()],
+        flow_shift_multiplier: 3.0,
+        ..Diff::default()
+    };
+
+    let html_3x =
+        render_diff_html(&diff_3x).expect("render_diff_html must succeed for multiplier=3.0 diff");
+    assert!(
+        html_3x.contains("≥3×"),
+        "HTML with multiplier=3.0 must contain '≥3×'; got a snippet:\n{}",
+        &html_3x[html_3x.find("Flow shifts").unwrap_or(0)
+            ..html_3x
+                .len()
+                .min(html_3x.find("Flow shifts").unwrap_or(0) + 200)]
+    );
+    assert!(
+        !html_3x.contains("≥2×"),
+        "HTML with multiplier=3.0 must NOT contain '≥2×'"
+    );
+
+    let md_3x = render_diff_markdown(&diff_3x);
+    assert!(
+        md_3x.contains("≥3×"),
+        "Markdown with multiplier=3.0 must contain '≥3×'; got:\n{}",
+        &md_3x[..md_3x.len().min(600)]
+    );
+    assert!(
+        !md_3x.contains("≥2×"),
+        "Markdown with multiplier=3.0 must NOT contain '≥2×'"
+    );
+
+    // ── (b) default multiplier 2.0 — regression guard ───────────────────────
+    let diff_2x = Diff {
+        flow_shifts: vec![flow_shift],
+        flow_shift_multiplier: 2.0,
+        ..Diff::default()
+    };
+
+    let html_2x =
+        render_diff_html(&diff_2x).expect("render_diff_html must succeed for multiplier=2.0 diff");
+    assert!(
+        html_2x.contains("≥2×"),
+        "HTML with default multiplier=2.0 must still contain '≥2×' (regression guard)"
+    );
+
+    let md_2x = render_diff_markdown(&diff_2x);
+    assert!(
+        md_2x.contains("≥2×"),
+        "Markdown with default multiplier=2.0 must still contain '≥2×' (regression guard)"
     );
 }

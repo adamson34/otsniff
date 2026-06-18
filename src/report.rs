@@ -392,6 +392,7 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
         hosts_new_count: diff.hosts_new.len(),
         hosts_gone_count: diff.hosts_gone.len(),
         flow_shifts_count: diff.flow_shifts.len(),
+        flow_shift_label: format!("≥{}", fmt_multiplier(diff.flow_shift_multiplier)),
         findings_new,
         findings_recurring,
         findings_resolved,
@@ -416,6 +417,10 @@ struct DiffReportView {
     hosts_new_count: usize,
     hosts_gone_count: usize,
     flow_shifts_count: usize,
+    /// Pre-formatted label for the flow-shift threshold, e.g. `"≥2×"` or `"≥3×"`.
+    /// Computed from `Diff::flow_shift_multiplier` so the template stays logic-light
+    /// per ADR-0003.
+    flow_shift_label: String,
     findings_new: Vec<DiffFindingView>,
     findings_recurring: Vec<DiffFindingView>,
     findings_resolved: Vec<DiffFindingView>,
@@ -474,6 +479,19 @@ struct DiffFlowSummaryView {
     dst_port: u16,
     proto: String,
     bytes: String,
+}
+
+/// Format a flow-shift multiplier for display labels.
+///
+/// Integer values (fract == 0) are rendered without a trailing ".0":
+/// `2.0 → "2×"`, `3.0 → "3×"`. Non-integer values use one decimal place:
+/// `1.5 → "1.5×"`. Always includes the "×" suffix.
+fn fmt_multiplier(m: f64) -> String {
+    if m.fract() == 0.0 {
+        format!("{}×", m as i64)
+    } else {
+        format!("{:.1}×", m)
+    }
 }
 
 fn diff_finding_view(f: &Finding, max_evidence: usize) -> DiffFindingView {

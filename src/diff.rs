@@ -108,7 +108,7 @@ pub struct FlowDelta {
 /// Note: `Deserialize` is intentionally omitted — `Finding` contains
 /// `&'static str` fields that do not implement `Deserialize`. The implementer
 /// should address round-trip serialization in S-6.03 if needed.
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Diff {
     /// Hosts present in `current` whose pseudonym is absent from `baseline`.
     pub hosts_new: Vec<HostRef>,
@@ -126,6 +126,26 @@ pub struct Diff {
     pub flows_new: Vec<FlowSummary>,
     /// **F-W2-002:** flows present in `baseline` but not in `current`.
     pub flows_gone: Vec<FlowSummary>,
+    /// The flow-shift threshold this diff was computed with (used by renderers
+    /// for accurate labels). Default is `DEFAULT_FLOW_SHIFT_MULTIPLIER` (2.0).
+    pub flow_shift_multiplier: f64,
+}
+
+impl Default for Diff {
+    fn default() -> Self {
+        Self {
+            hosts_new: Vec::new(),
+            hosts_gone: Vec::new(),
+            findings_new: Vec::new(),
+            findings_recurring: Vec::new(),
+            findings_resolved: Vec::new(),
+            role_shifts: Vec::new(),
+            flow_shifts: Vec::new(),
+            flows_new: Vec::new(),
+            flows_gone: Vec::new(),
+            flow_shift_multiplier: DEFAULT_FLOW_SHIFT_MULTIPLIER,
+        }
+    }
 }
 
 /// Inputs to `compute`: each side carries its own observations + merged map
@@ -665,6 +685,7 @@ pub fn compute_with_multiplier(
         flow_shifts,
         flows_new,
         flows_gone,
+        flow_shift_multiplier,
     }
 }
 

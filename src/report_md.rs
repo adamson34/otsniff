@@ -354,11 +354,25 @@ fn make_fence(lines: &[impl AsRef<str>]) -> String {
     "`".repeat(fence_len)
 }
 
+/// Format a flow-shift multiplier for display labels.
+///
+/// Integer values (fract == 0) are rendered without a trailing ".0":
+/// `2.0 → "2×"`, `3.0 → "3×"`. Non-integer values use one decimal place:
+/// `1.5 → "1.5×"`. Always includes the "×" suffix.
+fn fmt_multiplier(m: f64) -> String {
+    if m.fract() == 0.0 {
+        format!("{}×", m as i64)
+    } else {
+        format!("{:.1}×", m)
+    }
+}
+
 /// Render a cross-capture diff as markdown (S-6.03 AC-002).
 ///
 /// Produces an LLM-friendly markdown report with the same sections as the HTML
-/// diff renderer. All sections sort deterministically (the `Diff` struct already
-/// sorts its vecs on construction; this function iterates them in order).
+/// diff renderer. All sections sort deterministically; each section defensively
+/// re-sorts its local clone before rendering so the output is self-sufficiently
+/// deterministic even if `compute()` changes its output order.
 pub fn render_diff_markdown(diff: &Diff) -> String {
     const MAX_EVIDENCE: usize = 5;
     let mut out = String::new();
@@ -406,7 +420,13 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     .unwrap();
     writeln!(out, "- **New hosts:** {}", diff.hosts_new.len()).unwrap();
     writeln!(out, "- **Gone hosts:** {}", diff.hosts_gone.len()).unwrap();
-    writeln!(out, "- **Flow shifts (≥2×):** {}", diff.flow_shifts.len()).unwrap();
+    writeln!(
+        out,
+        "- **Flow shifts (≥{}):** {}",
+        fmt_multiplier(diff.flow_shift_multiplier),
+        diff.flow_shifts.len()
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     // C-1 (AC-003): sort each slice by a total key before rendering so two
@@ -648,7 +668,12 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
 
     // Flow shifts
     if !flow_shifts.is_empty() {
-        writeln!(out, "## Flow shifts (≥2× volume change)").unwrap();
+        writeln!(
+            out,
+            "## Flow shifts (≥{} volume change)",
+            fmt_multiplier(diff.flow_shift_multiplier)
+        )
+        .unwrap();
         writeln!(out).unwrap();
         writeln!(
             out,
