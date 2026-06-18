@@ -387,17 +387,8 @@ fn run_diff(
 
     let content = match ext.as_str() {
         "json" => serde_json::to_string_pretty(&diff)?,
-        "md" => format!(
-            "# Diff (raw)\n\nFull rendering arrives in S-6.03.\n\n```json\n{}\n```\n",
-            serde_json::to_string_pretty(&diff)?
-        ),
-        _ => {
-            // HTML placeholder; full rendering arrives in S-6.03.
-            format!(
-                "<!-- S-6.02 diff JSON; full HTML rendering arrives in S-6.03 -->\n<pre>{}</pre>\n",
-                html_escape(&serde_json::to_string_pretty(&diff)?)
-            )
-        }
+        "md" => crate::report_md::render_diff_markdown(&diff),
+        _ => crate::report::render_diff_html(&diff)?,
     };
 
     // F-ADV-P2-002: fail-closed leak detection on the rendered diff content
@@ -423,13 +414,6 @@ fn run_diff(
         diff.findings_resolved.len(),
     );
     Ok(())
-}
-
-/// Escape `<`, `>`, and `&` for safe embedding in an HTML `<pre>` block.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 fn ot_or_default(supplied: &[IpNet]) -> Vec<IpNet> {

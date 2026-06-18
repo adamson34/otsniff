@@ -256,11 +256,204 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
 
 /// Render a cross-capture diff as a self-contained HTML report (S-6.03 AC-001).
 ///
-/// Stub — implementation pending (Red Gate enforced). All non-trivial logic is
-/// `todo!()` per BC-5.38.001.
+/// Produces a self-contained HTML document with sections for new, recurring,
+/// and resolved findings, host changes, role shifts, and flow shifts. All
+/// sections sort deterministically so repeated calls produce byte-identical output.
 pub fn render_diff_html(diff: &Diff) -> Result<String> {
-    let _ = diff;
-    todo!("S-6.03: implement render_diff_html")
+    const MAX_EVIDENCE: usize = 5;
+
+    let no_deltas = diff.hosts_new.is_empty()
+        && diff.hosts_gone.is_empty()
+        && diff.findings_new.is_empty()
+        && diff.findings_recurring.is_empty()
+        && diff.findings_resolved.is_empty()
+        && diff.role_shifts.is_empty()
+        && diff.flow_shifts.is_empty()
+        && diff.flows_new.is_empty()
+        && diff.flows_gone.is_empty();
+
+    let findings_new: Vec<DiffFindingView> = diff
+        .findings_new
+        .iter()
+        .map(|f| diff_finding_view(f, MAX_EVIDENCE))
+        .collect();
+
+    let findings_recurring: Vec<DiffFindingView> = diff
+        .findings_recurring
+        .iter()
+        .map(|f| diff_finding_view(f, MAX_EVIDENCE))
+        .collect();
+
+    let findings_resolved: Vec<DiffFindingView> = diff
+        .findings_resolved
+        .iter()
+        .map(|f| diff_finding_view(f, MAX_EVIDENCE))
+        .collect();
+
+    let hosts_new: Vec<DiffHostView> = diff.hosts_new.iter().map(diff_host_view).collect();
+
+    let hosts_gone: Vec<DiffHostView> = diff.hosts_gone.iter().map(diff_host_view).collect();
+
+    let role_shifts: Vec<DiffRoleShiftView> = diff
+        .role_shifts
+        .iter()
+        .map(|r| DiffRoleShiftView {
+            pseudonym: r.pseudonym.clone(),
+            old_role: r.old_role.clone(),
+            new_role: r.new_role.clone(),
+        })
+        .collect();
+
+    let flow_shifts: Vec<DiffFlowShiftView> = diff
+        .flow_shifts
+        .iter()
+        .map(|f| DiffFlowShiftView {
+            src: f.src.clone(),
+            dst: f.dst.clone(),
+            dst_port: f.dst_port,
+            proto: f.proto.clone(),
+            baseline_bytes: f.baseline_bytes.to_string(),
+            current_bytes: f.current_bytes.to_string(),
+            ratio: format!("{:.1}", f.ratio),
+        })
+        .collect();
+
+    let flows_new: Vec<DiffFlowSummaryView> =
+        diff.flows_new.iter().map(diff_flow_summary_view).collect();
+
+    let flows_gone: Vec<DiffFlowSummaryView> =
+        diff.flows_gone.iter().map(diff_flow_summary_view).collect();
+
+    let view = DiffReportView {
+        version: crate::VERSION.to_string(),
+        no_deltas,
+        findings_new_count: diff.findings_new.len(),
+        findings_recurring_count: diff.findings_recurring.len(),
+        findings_resolved_count: diff.findings_resolved.len(),
+        hosts_new_count: diff.hosts_new.len(),
+        hosts_gone_count: diff.hosts_gone.len(),
+        flow_shifts_count: diff.flow_shifts.len(),
+        findings_new,
+        findings_recurring,
+        findings_resolved,
+        hosts_new,
+        hosts_gone,
+        role_shifts,
+        flow_shifts,
+        flows_new,
+        flows_gone,
+    };
+    Ok(view.render()?)
+}
+
+#[derive(Template)]
+#[template(path = "diff.html", escape = "html")]
+struct DiffReportView {
+    version: String,
+    no_deltas: bool,
+    findings_new_count: usize,
+    findings_recurring_count: usize,
+    findings_resolved_count: usize,
+    hosts_new_count: usize,
+    hosts_gone_count: usize,
+    flow_shifts_count: usize,
+    findings_new: Vec<DiffFindingView>,
+    findings_recurring: Vec<DiffFindingView>,
+    findings_resolved: Vec<DiffFindingView>,
+    hosts_new: Vec<DiffHostView>,
+    hosts_gone: Vec<DiffHostView>,
+    role_shifts: Vec<DiffRoleShiftView>,
+    flow_shifts: Vec<DiffFlowShiftView>,
+    flows_new: Vec<DiffFlowSummaryView>,
+    flows_gone: Vec<DiffFlowSummaryView>,
+}
+
+struct DiffFindingView {
+    id: String,
+    severity_label: String,
+    severity_class: String,
+    title: String,
+    summary: String,
+    evidence: Vec<String>,
+    evidence_count: usize,
+    recommendation: String,
+}
+
+struct DiffHostView {
+    pseudonym: String,
+    role: String,
+    protocols: String,
+    zone: String,
+    packets: String,
+    bytes: String,
+}
+
+struct DiffRoleShiftView {
+    pseudonym: String,
+    old_role: String,
+    new_role: String,
+}
+
+struct DiffFlowShiftView {
+    src: String,
+    dst: String,
+    dst_port: u16,
+    proto: String,
+    baseline_bytes: String,
+    current_bytes: String,
+    ratio: String,
+}
+
+struct DiffFlowSummaryView {
+    src: String,
+    dst: String,
+    dst_port: u16,
+    proto: String,
+    bytes: String,
+}
+
+fn diff_finding_view(f: &Finding, max_evidence: usize) -> DiffFindingView {
+    let capped: Vec<String> = f.evidence.iter().take(max_evidence).cloned().collect();
+    let evidence_count = capped.len();
+    DiffFindingView {
+        id: f.id.to_string(),
+        severity_label: severity_label(f.severity).to_string(),
+        severity_class: severity_class(f.severity).to_string(),
+        title: f.title.clone(),
+        summary: f.summary.clone(),
+        evidence: capped,
+        evidence_count,
+        recommendation: f.recommendation.to_string(),
+    }
+}
+
+fn diff_host_view(h: &crate::diff::HostRef) -> DiffHostView {
+    DiffHostView {
+        pseudonym: h.pseudonym.clone(),
+        role: h.role.clone(),
+        protocols: if h.protocols.is_empty() {
+            "—".to_string()
+        } else {
+            h.protocols.join(", ")
+        },
+        zone: if h.in_ot_zone {
+            "OT".to_string()
+        } else {
+            "IT".to_string()
+        },
+        packets: h.packets.to_string(),
+        bytes: human_bytes(h.bytes),
+    }
+}
+
+fn diff_flow_summary_view(f: &crate::diff::FlowSummary) -> DiffFlowSummaryView {
+    DiffFlowSummaryView {
+        src: f.src.clone(),
+        dst: f.dst.clone(),
+        dst_port: f.dst_port,
+        proto: f.proto.clone(),
+        bytes: human_bytes(f.bytes),
+    }
 }
 
 fn html_escape(s: &str) -> String {

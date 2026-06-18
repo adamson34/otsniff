@@ -3671,7 +3671,9 @@ fn test_bc_8_04_001_diff_html_snapshot_and_sections() {
 
     // --- Section: NEW since baseline ---
     assert!(
-        lower.contains("new since baseline") || lower.contains("new since") || lower.contains("new findings"),
+        lower.contains("new since baseline")
+            || lower.contains("new since")
+            || lower.contains("new findings"),
         "BC-8.04.001 AC-001: HTML must contain a 'NEW since baseline' section header"
     );
     // The new finding's rule id must appear somewhere in the output.
@@ -3812,8 +3814,8 @@ fn test_bc_8_04_001_diff_markdown_is_deterministic() {
 #[test]
 fn test_bc_8_04_001_empty_diff_html_no_deltas_banner() {
     let diff = Diff::default();
-    let html = render_diff_html(&diff)
-        .expect("EC-001: render_diff_html must return Ok for an empty Diff");
+    let html =
+        render_diff_html(&diff).expect("EC-001: render_diff_html must return Ok for an empty Diff");
     let lower = html.to_lowercase();
     assert!(
         lower.contains("no deltas detected")

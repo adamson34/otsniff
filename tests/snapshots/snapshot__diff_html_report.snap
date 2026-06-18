@@ -1,3 +1,7 @@
+---
+source: tests/snapshot.rs
+expression: html
+---
 <!doctype html>
 <html lang="en">
 <head>
@@ -149,215 +153,213 @@
 <div class="brand-header" style="padding-left:1.5rem;padding-right:1.5rem;">
   <div>
     <div class="brand-wordmark">otsniff <span class="brand-sep">/</span> diff</div>
-    <div class="brand-meta">v{{ version }}</div>
+    <div class="brand-meta">v0.5.0-dev.1</div>
   </div>
 </div>
 
 <div class="page-body">
 
-{% if no_deltas %}
-<div class="no-deltas-banner">No deltas detected — captures are identical by all tracked metrics.</div>
-{% else %}
+
 
 <div class="stats">
   <div class="stat stat-new">
-    <div class="n">{{ findings_new_count }}</div>
+    <div class="n">1</div>
     <div class="l">New findings</div>
   </div>
   <div class="stat stat-recurring">
-    <div class="n">{{ findings_recurring_count }}</div>
+    <div class="n">1</div>
     <div class="l">Recurring findings</div>
   </div>
   <div class="stat stat-resolved">
-    <div class="n">{{ findings_resolved_count }}</div>
+    <div class="n">1</div>
     <div class="l">Resolved findings</div>
   </div>
   <div class="stat stat-new">
-    <div class="n">{{ hosts_new_count }}</div>
+    <div class="n">1</div>
     <div class="l">New hosts</div>
   </div>
   <div class="stat stat-resolved">
-    <div class="n">{{ hosts_gone_count }}</div>
+    <div class="n">1</div>
     <div class="l">Gone hosts</div>
   </div>
   <div class="stat">
-    <div class="n">{{ flow_shifts_count }}</div>
+    <div class="n">1</div>
     <div class="l">Flow shifts (≥2×)</div>
   </div>
 </div>
 
-{% if !findings_new.is_empty() %}
+
 <h2>New findings — NEW since baseline</h2>
-{% for f in findings_new %}
-<details open class="finding sev-{{ f.severity_class }}">
+
+<details open class="finding sev-high">
   <summary>
-    <span class="badge sev-{{ f.severity_class }}">{{ f.severity_label }}</span>
+    <span class="badge sev-high">high</span>
     <span class="badge badge-new">NEW since baseline</span>
-    <strong>{{ f.title }}</strong>
+    <strong>NEW: Modbus write commands observed</strong>
   </summary>
-  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>{{ f.id }}</code></p>
-  <p style="margin:0.5rem 0;">{{ f.summary }}</p>
-  {% if !f.evidence.is_empty() %}
-  <details><summary>Evidence ({{ f.evidence_count }} sample(s))</summary>
-  <pre class="evidence">{% for e in f.evidence %}{{ e }}
-{% endfor %}</pre>
+  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>ics.modbus_writes</code></p>
+  <p style="margin:0.5rem 0;">Engineering writes seen in current capture that were absent in baseline.</p>
+  
+  <details><summary>Evidence (1 sample(s))</summary>
+  <pre class="evidence">host_001 -&gt; host_002:502
+</pre>
   </details>
-  {% endif %}
-  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> {{ f.recommendation }}</p>
+  
+  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> Verify write commands are expected for this capture window.</p>
 </details>
-{% endfor %}
-{% endif %}
 
-{% if !findings_recurring.is_empty() %}
+
+
+
 <h2>Recurring findings</h2>
-{% for f in findings_recurring %}
-<details open class="finding sev-{{ f.severity_class }}">
+
+<details open class="finding sev-medium">
   <summary>
-    <span class="badge sev-{{ f.severity_class }}">{{ f.severity_label }}</span>
+    <span class="badge sev-medium">medium</span>
     <span class="badge badge-recurring">Recurring</span>
-    <strong>{{ f.title }}</strong>
+    <strong>RECURRING: OT-to-internet egress still present</strong>
   </summary>
-  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>{{ f.id }}</code></p>
-  <p style="margin:0.5rem 0;">{{ f.summary }}</p>
-  {% if !f.evidence.is_empty() %}
-  <details><summary>Evidence ({{ f.evidence_count }} sample(s))</summary>
-  <pre class="evidence">{% for e in f.evidence %}{{ e }}
-{% endfor %}</pre>
+  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>egress.ot_to_internet</code></p>
+  <p style="margin:0.5rem 0;">Outbound internet traffic from OT subnet observed in both captures.</p>
+  
+  <details><summary>Evidence (1 sample(s))</summary>
+  <pre class="evidence">host_001 -&gt; 8.8.8.8:80
+</pre>
   </details>
-  {% endif %}
-  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> {{ f.recommendation }}</p>
+  
+  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> Block outbound internet traffic from OT zone at the perimeter firewall.</p>
 </details>
-{% endfor %}
-{% endif %}
 
-{% if !findings_resolved.is_empty() %}
+
+
+
 <h2>Resolved findings</h2>
-{% for f in findings_resolved %}
-<details open class="finding sev-{{ f.severity_class }}">
-  <summary>
-    <span class="badge sev-{{ f.severity_class }}">{{ f.severity_label }}</span>
-    <span class="badge badge-resolved">RESOLVED</span>
-    <strong>{{ f.title }}</strong>
-  </summary>
-  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>{{ f.id }}</code></p>
-  <p style="margin:0.5rem 0;">{{ f.summary }}</p>
-  {% if !f.evidence.is_empty() %}
-  <details><summary>Evidence ({{ f.evidence_count }} sample(s))</summary>
-  <pre class="evidence">{% for e in f.evidence %}{{ e }}
-{% endfor %}</pre>
-  </details>
-  {% endif %}
-  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> {{ f.recommendation }}</p>
-</details>
-{% endfor %}
-{% endif %}
 
-{% if !hosts_new.is_empty() || !hosts_gone.is_empty() %}
+<details open class="finding sev-high">
+  <summary>
+    <span class="badge sev-high">high</span>
+    <span class="badge badge-resolved">RESOLVED</span>
+    <strong>RESOLVED: Plaintext Telnet session no longer present</strong>
+  </summary>
+  <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>creds.telnet</code></p>
+  <p style="margin:0.5rem 0;">Telnet session observed in baseline is absent from current capture.</p>
+  
+  <details><summary>Evidence (1 sample(s))</summary>
+  <pre class="evidence">host_003:23
+</pre>
+  </details>
+  
+  <p style="margin:0.5rem 0;"><strong>Recommendation:</strong> Confirm Telnet is permanently disabled and not re-enabled.</p>
+</details>
+
+
+
+
 <h2>Host changes</h2>
 <table>
   <thead>
     <tr><th>Pseudonym</th><th>Status</th><th>Role</th><th>Protocols</th><th>Zone</th><th>Packets</th><th>Bytes</th></tr>
   </thead>
   <tbody>
-    {% for h in hosts_new %}
+    
     <tr>
-      <td class="host-new"><code>{{ h.pseudonym }}</code></td>
+      <td class="host-new"><code>host_004</code></td>
       <td><span class="badge badge-new">New</span></td>
-      <td>{{ h.role }}</td>
-      <td>{{ h.protocols }}</td>
-      <td>{{ h.zone }}</td>
-      <td>{{ h.packets }}</td>
-      <td>{{ h.bytes }}</td>
+      <td>engineering</td>
+      <td>modbus, smb</td>
+      <td>OT</td>
+      <td>300</td>
+      <td>28.8 KB</td>
     </tr>
-    {% endfor %}
-    {% for h in hosts_gone %}
+    
+    
     <tr>
-      <td class="host-gone"><code>{{ h.pseudonym }}</code></td>
+      <td class="host-gone"><code>host_005</code></td>
       <td><span class="badge badge-resolved">Gone</span></td>
-      <td>{{ h.role }}</td>
-      <td>{{ h.protocols }}</td>
-      <td>{{ h.zone }}</td>
-      <td>{{ h.packets }}</td>
-      <td>{{ h.bytes }}</td>
+      <td>plc</td>
+      <td>modbus</td>
+      <td>OT</td>
+      <td>150</td>
+      <td>14.4 KB</td>
     </tr>
-    {% endfor %}
+    
   </tbody>
 </table>
-{% endif %}
 
-{% if !role_shifts.is_empty() %}
+
+
 <h2>Role shifts</h2>
 <table>
   <thead>
     <tr><th>Pseudonym</th><th>Old role</th><th>→</th><th>New role</th></tr>
   </thead>
   <tbody>
-    {% for r in role_shifts %}
+    
     <tr>
-      <td><code>{{ r.pseudonym }}</code></td>
-      <td>{{ r.old_role }}</td>
+      <td><code>host_003</code></td>
+      <td>plc</td>
       <td>→</td>
-      <td>{{ r.new_role }}</td>
+      <td>hmi</td>
     </tr>
-    {% endfor %}
+    
   </tbody>
 </table>
-{% endif %}
 
-{% if !flow_shifts.is_empty() %}
+
+
 <h2>Flow shifts (≥2× volume change)</h2>
 <table>
   <thead>
     <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Baseline</th><th>Current</th><th>Ratio</th></tr>
   </thead>
   <tbody>
-    {% for f in flow_shifts %}
+    
     <tr>
-      <td><code>{{ f.src }}</code></td>
-      <td><code>{{ f.dst }}</code></td>
-      <td>{{ f.dst_port }}</td>
-      <td>{{ f.proto }}</td>
-      <td>{{ f.baseline_bytes }}</td>
-      <td>{{ f.current_bytes }}</td>
-      <td><span class="ratio-badge">{{ f.ratio }}×</span></td>
+      <td><code>host_001</code></td>
+      <td><code>host_002</code></td>
+      <td>502</td>
+      <td>tcp</td>
+      <td>10000</td>
+      <td>40000</td>
+      <td><span class="ratio-badge">4.0×</span></td>
     </tr>
-    {% endfor %}
+    
   </tbody>
 </table>
-{% endif %}
 
-{% if !flows_new.is_empty() || !flows_gone.is_empty() %}
+
+
 <h2>Flow inventory changes</h2>
 <table>
   <thead>
     <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Status</th><th>Bytes</th></tr>
   </thead>
   <tbody>
-    {% for f in flows_new %}
+    
     <tr>
-      <td><code>{{ f.src }}</code></td>
-      <td><code>{{ f.dst }}</code></td>
-      <td>{{ f.dst_port }}</td>
-      <td>{{ f.proto }}</td>
+      <td><code>host_004</code></td>
+      <td><code>host_002</code></td>
+      <td>102</td>
+      <td>tcp</td>
       <td><span class="badge badge-new">New</span></td>
-      <td>{{ f.bytes }}</td>
+      <td>5.0 KB</td>
     </tr>
-    {% endfor %}
-    {% for f in flows_gone %}
+    
+    
     <tr>
-      <td><code>{{ f.src }}</code></td>
-      <td><code>{{ f.dst }}</code></td>
-      <td>{{ f.dst_port }}</td>
-      <td>{{ f.proto }}</td>
+      <td><code>host_005</code></td>
+      <td><code>host_001</code></td>
+      <td>44818</td>
+      <td>tcp</td>
       <td><span class="badge badge-resolved">Gone</span></td>
-      <td>{{ f.bytes }}</td>
+      <td>3.2 KB</td>
     </tr>
-    {% endfor %}
+    
   </tbody>
 </table>
-{% endif %}
 
-{% endif %}
+
+
 </div>
 </body>
 </html>

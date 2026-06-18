@@ -297,9 +297,288 @@ fn human_bytes(n: u64) -> String {
 
 /// Render a cross-capture diff as markdown (S-6.03 AC-002).
 ///
-/// Stub — implementation pending (Red Gate enforced). All non-trivial logic is
-/// `todo!()` per BC-5.38.001.
+/// Produces an LLM-friendly markdown report with the same sections as the HTML
+/// diff renderer. All sections sort deterministically (the `Diff` struct already
+/// sorts its vecs on construction; this function iterates them in order).
 pub fn render_diff_markdown(diff: &Diff) -> String {
-    let _ = diff;
-    todo!("S-6.03: implement render_diff_markdown")
+    const MAX_EVIDENCE: usize = 5;
+    let mut out = String::new();
+
+    writeln!(out, "# otsniff diff report").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "_otsniff v{}_", crate::VERSION).unwrap();
+    writeln!(out).unwrap();
+
+    let no_deltas = diff.hosts_new.is_empty()
+        && diff.hosts_gone.is_empty()
+        && diff.findings_new.is_empty()
+        && diff.findings_recurring.is_empty()
+        && diff.findings_resolved.is_empty()
+        && diff.role_shifts.is_empty()
+        && diff.flow_shifts.is_empty()
+        && diff.flows_new.is_empty()
+        && diff.flows_gone.is_empty();
+
+    if no_deltas {
+        writeln!(
+            out,
+            "> **No deltas detected** — captures are identical by all tracked metrics."
+        )
+        .unwrap();
+        writeln!(out).unwrap();
+        return out;
+    }
+
+    // Summary banner
+    writeln!(out, "## Summary").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "- **New findings:** {}", diff.findings_new.len()).unwrap();
+    writeln!(
+        out,
+        "- **Recurring findings:** {}",
+        diff.findings_recurring.len()
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "- **Resolved findings:** {}",
+        diff.findings_resolved.len()
+    )
+    .unwrap();
+    writeln!(out, "- **New hosts:** {}", diff.hosts_new.len()).unwrap();
+    writeln!(out, "- **Gone hosts:** {}", diff.hosts_gone.len()).unwrap();
+    writeln!(out, "- **Flow shifts (≥2×):** {}", diff.flow_shifts.len()).unwrap();
+    writeln!(out).unwrap();
+
+    // New findings
+    if !diff.findings_new.is_empty() {
+        writeln!(out, "## New findings — NEW since baseline").unwrap();
+        writeln!(out).unwrap();
+        for f in &diff.findings_new {
+            writeln!(
+                out,
+                "### [NEW][{}] {}",
+                severity_label(f.severity).to_uppercase(),
+                f.title
+            )
+            .unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "{}", f.summary).unwrap();
+            writeln!(out).unwrap();
+            let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
+            if !capped.is_empty() {
+                writeln!(out, "**Evidence ({} sample(s)):**", capped.len()).unwrap();
+                writeln!(out, "```").unwrap();
+                for e in &capped {
+                    writeln!(out, "{}", e).unwrap();
+                }
+                writeln!(out, "```").unwrap();
+                writeln!(out).unwrap();
+            }
+            writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "_id: `{}`_", f.id).unwrap();
+            writeln!(out).unwrap();
+        }
+    }
+
+    // Recurring findings
+    if !diff.findings_recurring.is_empty() {
+        writeln!(out, "## Recurring findings").unwrap();
+        writeln!(out).unwrap();
+        for f in &diff.findings_recurring {
+            writeln!(
+                out,
+                "### [RECURRING][{}] {}",
+                severity_label(f.severity).to_uppercase(),
+                f.title
+            )
+            .unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "{}", f.summary).unwrap();
+            writeln!(out).unwrap();
+            let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
+            if !capped.is_empty() {
+                writeln!(out, "**Evidence ({} sample(s)):**", capped.len()).unwrap();
+                writeln!(out, "```").unwrap();
+                for e in &capped {
+                    writeln!(out, "{}", e).unwrap();
+                }
+                writeln!(out, "```").unwrap();
+                writeln!(out).unwrap();
+            }
+            writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "_id: `{}`_", f.id).unwrap();
+            writeln!(out).unwrap();
+        }
+    }
+
+    // Resolved findings
+    if !diff.findings_resolved.is_empty() {
+        writeln!(out, "## Resolved findings").unwrap();
+        writeln!(out).unwrap();
+        for f in &diff.findings_resolved {
+            writeln!(
+                out,
+                "### [RESOLVED][{}] {}",
+                severity_label(f.severity).to_uppercase(),
+                f.title
+            )
+            .unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "{}", f.summary).unwrap();
+            writeln!(out).unwrap();
+            let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
+            if !capped.is_empty() {
+                writeln!(out, "**Evidence ({} sample(s)):**", capped.len()).unwrap();
+                writeln!(out, "```").unwrap();
+                for e in &capped {
+                    writeln!(out, "{}", e).unwrap();
+                }
+                writeln!(out, "```").unwrap();
+                writeln!(out).unwrap();
+            }
+            writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "_id: `{}`_", f.id).unwrap();
+            writeln!(out).unwrap();
+        }
+    }
+
+    // Host changes
+    if !diff.hosts_new.is_empty() || !diff.hosts_gone.is_empty() {
+        writeln!(out, "## Host changes").unwrap();
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "| Pseudonym | Status | Role | Protocols | Zone | Packets | Bytes |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|-----------|--------|------|-----------|------|---------|-------|"
+        )
+        .unwrap();
+        for h in &diff.hosts_new {
+            writeln!(
+                out,
+                "| `{}` | **New** | {} | {} | {} | {} | {} |",
+                h.pseudonym,
+                h.role,
+                if h.protocols.is_empty() {
+                    "—".to_string()
+                } else {
+                    h.protocols.join(", ")
+                },
+                if h.in_ot_zone { "OT" } else { "IT" },
+                h.packets,
+                human_bytes(h.bytes),
+            )
+            .unwrap();
+        }
+        for h in &diff.hosts_gone {
+            writeln!(
+                out,
+                "| `{}` | ~~Gone~~ | {} | {} | {} | {} | {} |",
+                h.pseudonym,
+                h.role,
+                if h.protocols.is_empty() {
+                    "—".to_string()
+                } else {
+                    h.protocols.join(", ")
+                },
+                if h.in_ot_zone { "OT" } else { "IT" },
+                h.packets,
+                human_bytes(h.bytes),
+            )
+            .unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    // Role shifts
+    if !diff.role_shifts.is_empty() {
+        writeln!(out, "## Role shifts").unwrap();
+        writeln!(out).unwrap();
+        writeln!(out, "| Pseudonym | Old role | → | New role |").unwrap();
+        writeln!(out, "|-----------|----------|---|----------|").unwrap();
+        for r in &diff.role_shifts {
+            writeln!(
+                out,
+                "| `{}` | {} | → | {} |",
+                r.pseudonym, r.old_role, r.new_role
+            )
+            .unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    // Flow shifts
+    if !diff.flow_shifts.is_empty() {
+        writeln!(out, "## Flow shifts (≥2× volume change)").unwrap();
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "| Source | Destination | Port | Proto | Baseline bytes | Current bytes | Ratio |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|--------|-------------|------|-------|----------------|---------------|-------|"
+        )
+        .unwrap();
+        for f in &diff.flow_shifts {
+            writeln!(
+                out,
+                "| `{}` | `{}` | {} | {} | {} | {} | {:.1}× |",
+                f.src, f.dst, f.dst_port, f.proto, f.baseline_bytes, f.current_bytes, f.ratio,
+            )
+            .unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    // Flow inventory changes
+    if !diff.flows_new.is_empty() || !diff.flows_gone.is_empty() {
+        writeln!(out, "## Flow inventory changes").unwrap();
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "| Source | Destination | Port | Proto | Status | Bytes |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|--------|-------------|------|-------|--------|-------|"
+        )
+        .unwrap();
+        for f in &diff.flows_new {
+            writeln!(
+                out,
+                "| `{}` | `{}` | {} | {} | **New** | {} |",
+                f.src,
+                f.dst,
+                f.dst_port,
+                f.proto,
+                human_bytes(f.bytes),
+            )
+            .unwrap();
+        }
+        for f in &diff.flows_gone {
+            writeln!(
+                out,
+                "| `{}` | `{}` | {} | {} | ~~Gone~~ | {} |",
+                f.src,
+                f.dst,
+                f.dst_port,
+                f.proto,
+                human_bytes(f.bytes),
+            )
+            .unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    out
 }

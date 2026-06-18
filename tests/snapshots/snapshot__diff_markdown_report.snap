@@ -1,0 +1,87 @@
+---
+source: tests/snapshot.rs
+expression: md
+---
+# otsniff diff report
+
+_otsniff v0.5.0-dev.1_
+
+## Summary
+
+- **New findings:** 1
+- **Recurring findings:** 1
+- **Resolved findings:** 1
+- **New hosts:** 1
+- **Gone hosts:** 1
+- **Flow shifts (≥2×):** 1
+
+## New findings — NEW since baseline
+
+### [NEW][HIGH] NEW: Modbus write commands observed
+
+Engineering writes seen in current capture that were absent in baseline.
+
+**Evidence (1 sample(s)):**
+```
+host_001 -> host_002:502
+```
+
+**Recommendation:** Verify write commands are expected for this capture window.
+
+_id: `ics.modbus_writes`_
+
+## Recurring findings
+
+### [RECURRING][MEDIUM] RECURRING: OT-to-internet egress still present
+
+Outbound internet traffic from OT subnet observed in both captures.
+
+**Evidence (1 sample(s)):**
+```
+host_001 -> 8.8.8.8:80
+```
+
+**Recommendation:** Block outbound internet traffic from OT zone at the perimeter firewall.
+
+_id: `egress.ot_to_internet`_
+
+## Resolved findings
+
+### [RESOLVED][HIGH] RESOLVED: Plaintext Telnet session no longer present
+
+Telnet session observed in baseline is absent from current capture.
+
+**Evidence (1 sample(s)):**
+```
+host_003:23
+```
+
+**Recommendation:** Confirm Telnet is permanently disabled and not re-enabled.
+
+_id: `creds.telnet`_
+
+## Host changes
+
+| Pseudonym | Status | Role | Protocols | Zone | Packets | Bytes |
+|-----------|--------|------|-----------|------|---------|-------|
+| `host_004` | **New** | engineering | modbus, smb | OT | 300 | 28.8 KB |
+| `host_005` | ~~Gone~~ | plc | modbus | OT | 150 | 14.4 KB |
+
+## Role shifts
+
+| Pseudonym | Old role | → | New role |
+|-----------|----------|---|----------|
+| `host_003` | plc | → | hmi |
+
+## Flow shifts (≥2× volume change)
+
+| Source | Destination | Port | Proto | Baseline bytes | Current bytes | Ratio |
+|--------|-------------|------|-------|----------------|---------------|-------|
+| `host_001` | `host_002` | 502 | tcp | 10000 | 40000 | 4.0× |
+
+## Flow inventory changes
+
+| Source | Destination | Port | Proto | Status | Bytes |
+|--------|-------------|------|-------|--------|-------|
+| `host_004` | `host_002` | 102 | tcp | **New** | 5.0 KB |
+| `host_005` | `host_001` | 44818 | tcp | ~~Gone~~ | 3.2 KB |
