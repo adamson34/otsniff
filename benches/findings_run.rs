@@ -3,8 +3,8 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use chrono::{TimeZone, Utc};
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::hint::black_box;
 use ipnet::IpNet;
+use std::hint::black_box;
 
 use otsniff::findings::run_all;
 use otsniff::observe::{

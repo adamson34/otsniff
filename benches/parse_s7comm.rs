@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::hint::black_box;
 use otsniff::parse::s7comm;
+use std::hint::black_box;
 
 fn bench_parse_s7comm(c: &mut Criterion) {
     // Synthetic TPKT+COTP+S7 Job frame with Write Var (fc=0x05).

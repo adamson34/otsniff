@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::hint::black_box;
 use otsniff::parse::enip;
+use std::hint::black_box;
 
 fn bench_parse_enip(c: &mut Criterion) {
     // Minimal EtherNet/IP encapsulation header: RegisterSession (0x0065),

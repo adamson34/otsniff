@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::hint::black_box;
 use otsniff::parse::dhcp;
+use std::hint::black_box;
 
 const MAGIC_COOKIE: [u8; 4] = [0x63, 0x82, 0x53, 0x63];
 const FIXED_HEADER_LEN: usize = 240;
