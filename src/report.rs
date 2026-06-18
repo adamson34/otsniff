@@ -306,12 +306,49 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
         .map(|f| diff_finding_view(f, MAX_EVIDENCE))
         .collect();
 
-    let hosts_new: Vec<DiffHostView> = diff.hosts_new.iter().map(diff_host_view).collect();
+    // F-4: defensively sort non-finding sections on local clones so the
+    // renderer is self-sufficiently deterministic even if `compute()` changes.
+    let mut sorted_hosts_new = diff.hosts_new.clone();
+    sorted_hosts_new.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
+    let mut sorted_hosts_gone = diff.hosts_gone.clone();
+    sorted_hosts_gone.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
+    let mut sorted_role_shifts = diff.role_shifts.clone();
+    sorted_role_shifts.sort_by(|a, b| {
+        a.pseudonym
+            .cmp(&b.pseudonym)
+            .then_with(|| a.old_role.cmp(&b.old_role))
+            .then_with(|| a.new_role.cmp(&b.new_role))
+    });
+    let mut sorted_flow_shifts = diff.flow_shifts.clone();
+    sorted_flow_shifts.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+    let mut sorted_flows_new = diff.flows_new.clone();
+    sorted_flows_new.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+    let mut sorted_flows_gone = diff.flows_gone.clone();
+    sorted_flows_gone.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
 
-    let hosts_gone: Vec<DiffHostView> = diff.hosts_gone.iter().map(diff_host_view).collect();
+    let hosts_new: Vec<DiffHostView> = sorted_hosts_new.iter().map(diff_host_view).collect();
 
-    let role_shifts: Vec<DiffRoleShiftView> = diff
-        .role_shifts
+    let hosts_gone: Vec<DiffHostView> = sorted_hosts_gone.iter().map(diff_host_view).collect();
+
+    let role_shifts: Vec<DiffRoleShiftView> = sorted_role_shifts
         .iter()
         .map(|r| DiffRoleShiftView {
             pseudonym: r.pseudonym.clone(),
@@ -320,8 +357,7 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
         })
         .collect();
 
-    let flow_shifts: Vec<DiffFlowShiftView> = diff
-        .flow_shifts
+    let flow_shifts: Vec<DiffFlowShiftView> = sorted_flow_shifts
         .iter()
         .map(|f| DiffFlowShiftView {
             src: f.src.clone(),
@@ -334,11 +370,15 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
         })
         .collect();
 
-    let flows_new: Vec<DiffFlowSummaryView> =
-        diff.flows_new.iter().map(diff_flow_summary_view).collect();
+    let flows_new: Vec<DiffFlowSummaryView> = sorted_flows_new
+        .iter()
+        .map(diff_flow_summary_view)
+        .collect();
 
-    let flows_gone: Vec<DiffFlowSummaryView> =
-        diff.flows_gone.iter().map(diff_flow_summary_view).collect();
+    let flows_gone: Vec<DiffFlowSummaryView> = sorted_flows_gone
+        .iter()
+        .map(diff_flow_summary_view)
+        .collect();
 
     let view = DiffReportView {
         version: crate::VERSION.to_string(),
@@ -450,21 +490,20 @@ fn diff_finding_view(f: &Finding, max_evidence: usize) -> DiffFindingView {
     }
 }
 
-/// C-1 (AC-003): sort a findings slice by a total key
-/// `(id, title, evidence_first, summary)` to guarantee a deterministic order
-/// even when two findings share the same rule `id`.
+/// C-1 (AC-003): sort a findings slice by a provably total key
+/// `(id, title, severity, evidence_all_joined, summary, recommendation)`
+/// to guarantee a deterministic order even when two findings share the same
+/// rule `id`. The key is total: every component is total-ordered, and the
+/// final `recommendation` field eliminates the last remaining source of
+/// input-order dependency.
 fn sort_findings_total(findings: &mut [Finding]) {
     findings.sort_by(|a, b| {
         a.id.cmp(b.id)
             .then_with(|| a.title.cmp(&b.title))
-            .then_with(|| {
-                a.evidence
-                    .first()
-                    .cloned()
-                    .unwrap_or_default()
-                    .cmp(&b.evidence.first().cloned().unwrap_or_default())
-            })
+            .then_with(|| a.severity.cmp(&b.severity))
+            .then_with(|| a.evidence.join("\n").cmp(&b.evidence.join("\n")))
             .then_with(|| a.summary.cmp(&b.summary))
+            .then_with(|| a.recommendation.cmp(b.recommendation))
     });
 }
 

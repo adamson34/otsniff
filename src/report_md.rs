@@ -304,6 +304,44 @@ fn md_cell(s: &str) -> String {
     s.replace('|', r"\|").replace('\n', " ")
 }
 
+/// Compute a CommonMark-safe fence string for a block whose content may
+/// include backtick runs.
+///
+/// F-1: a fenced code block can only be closed by a run of backticks that is
+/// at least as long as the opening run (CommonMark §4.5). If any evidence line
+/// contains a run of N consecutive backticks, a fence of N backticks would be
+/// broken. This function scans `lines` for the longest consecutive-backtick
+/// run R and returns a fence of max(R+1, 3) backticks. Using the same string
+/// for open and close guarantees the block is always well-formed.
+fn make_fence(lines: &[impl AsRef<str>]) -> String {
+    let max_run = lines
+        .iter()
+        .flat_map(|l| {
+            // Count runs of consecutive backticks in this line.
+            let mut runs = Vec::new();
+            let mut count = 0usize;
+            for ch in l.as_ref().chars() {
+                if ch == '`' {
+                    count += 1;
+                } else {
+                    if count > 0 {
+                        runs.push(count);
+                    }
+                    count = 0;
+                }
+            }
+            if count > 0 {
+                runs.push(count);
+            }
+            runs
+        })
+        .max()
+        .unwrap_or(0);
+
+    let fence_len = max_run.saturating_add(1).max(3);
+    "`".repeat(fence_len)
+}
+
 /// Render a cross-capture diff as markdown (S-6.03 AC-002).
 ///
 /// Produces an LLM-friendly markdown report with the same sections as the HTML
@@ -392,14 +430,15 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 } else {
                     writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
                 }
-                writeln!(out, "```").unwrap();
+                let fence = make_fence(&capped);
+                writeln!(out, "{fence}").unwrap();
                 for e in &capped {
                     writeln!(out, "{}", e).unwrap();
                 }
-                writeln!(out, "```").unwrap();
+                writeln!(out, "{fence}").unwrap();
                 writeln!(out).unwrap();
             }
-            writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
+            writeln!(out, "**Recommendation:** {}", md_cell(f.recommendation)).unwrap();
             writeln!(out).unwrap();
             writeln!(out, "_id: `{}`_", f.id).unwrap();
             writeln!(out).unwrap();
@@ -430,14 +469,15 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 } else {
                     writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
                 }
-                writeln!(out, "```").unwrap();
+                let fence = make_fence(&capped);
+                writeln!(out, "{fence}").unwrap();
                 for e in &capped {
                     writeln!(out, "{}", e).unwrap();
                 }
-                writeln!(out, "```").unwrap();
+                writeln!(out, "{fence}").unwrap();
                 writeln!(out).unwrap();
             }
-            writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
+            writeln!(out, "**Recommendation:** {}", md_cell(f.recommendation)).unwrap();
             writeln!(out).unwrap();
             writeln!(out, "_id: `{}`_", f.id).unwrap();
             writeln!(out).unwrap();
@@ -468,22 +508,61 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 } else {
                     writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
                 }
-                writeln!(out, "```").unwrap();
+                let fence = make_fence(&capped);
+                writeln!(out, "{fence}").unwrap();
                 for e in &capped {
                     writeln!(out, "{}", e).unwrap();
                 }
-                writeln!(out, "```").unwrap();
+                writeln!(out, "{fence}").unwrap();
                 writeln!(out).unwrap();
             }
-            writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
+            writeln!(out, "**Recommendation:** {}", md_cell(f.recommendation)).unwrap();
             writeln!(out).unwrap();
             writeln!(out, "_id: `{}`_", f.id).unwrap();
             writeln!(out).unwrap();
         }
     }
 
+    // F-4: defensively sort non-finding sections on local clones so the
+    // renderer is self-sufficiently deterministic even if `compute()` changes.
+    let mut hosts_new = diff.hosts_new.clone();
+    hosts_new.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
+    let mut hosts_gone = diff.hosts_gone.clone();
+    hosts_gone.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
+    let mut role_shifts = diff.role_shifts.clone();
+    role_shifts.sort_by(|a, b| {
+        a.pseudonym
+            .cmp(&b.pseudonym)
+            .then_with(|| a.old_role.cmp(&b.old_role))
+            .then_with(|| a.new_role.cmp(&b.new_role))
+    });
+    let mut flow_shifts = diff.flow_shifts.clone();
+    flow_shifts.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+    let mut flows_new = diff.flows_new.clone();
+    flows_new.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+    let mut flows_gone = diff.flows_gone.clone();
+    flows_gone.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+
     // Host changes
-    if !diff.hosts_new.is_empty() || !diff.hosts_gone.is_empty() {
+    if !hosts_new.is_empty() || !hosts_gone.is_empty() {
         writeln!(out, "## Host changes").unwrap();
         writeln!(out).unwrap();
         writeln!(
@@ -496,7 +575,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
             "|-----------|--------|------|-----------|------|---------|-------|"
         )
         .unwrap();
-        for h in &diff.hosts_new {
+        for h in &hosts_new {
             writeln!(
                 out,
                 "| `{}` | **New** | {} | {} | {} | {} | {} |",
@@ -513,7 +592,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
             )
             .unwrap();
         }
-        for h in &diff.hosts_gone {
+        for h in &hosts_gone {
             writeln!(
                 out,
                 "| `{}` | ~~Gone~~ | {} | {} | {} | {} | {} |",
@@ -534,12 +613,12 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     }
 
     // Role shifts
-    if !diff.role_shifts.is_empty() {
+    if !role_shifts.is_empty() {
         writeln!(out, "## Role shifts").unwrap();
         writeln!(out).unwrap();
         writeln!(out, "| Pseudonym | Old role | → | New role |").unwrap();
         writeln!(out, "|-----------|----------|---|----------|").unwrap();
-        for r in &diff.role_shifts {
+        for r in &role_shifts {
             writeln!(
                 out,
                 "| `{}` | {} | → | {} |",
@@ -553,7 +632,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     }
 
     // Flow shifts
-    if !diff.flow_shifts.is_empty() {
+    if !flow_shifts.is_empty() {
         writeln!(out, "## Flow shifts (≥2× volume change)").unwrap();
         writeln!(out).unwrap();
         writeln!(
@@ -566,7 +645,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
             "|--------|-------------|------|-------|----------------|---------------|-------|"
         )
         .unwrap();
-        for f in &diff.flow_shifts {
+        for f in &flow_shifts {
             writeln!(
                 out,
                 "| `{}` | `{}` | {} | {} | {} | {} | {:.2}× |",
@@ -584,7 +663,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     }
 
     // Flow inventory changes
-    if !diff.flows_new.is_empty() || !diff.flows_gone.is_empty() {
+    if !flows_new.is_empty() || !flows_gone.is_empty() {
         writeln!(out, "## Flow inventory changes").unwrap();
         writeln!(out).unwrap();
         writeln!(
@@ -597,7 +676,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
             "|--------|-------------|------|-------|--------|-------|"
         )
         .unwrap();
-        for f in &diff.flows_new {
+        for f in &flows_new {
             writeln!(
                 out,
                 "| `{}` | `{}` | {} | {} | **New** | {} |",
@@ -609,7 +688,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
             )
             .unwrap();
         }
-        for f in &diff.flows_gone {
+        for f in &flows_gone {
             writeln!(
                 out,
                 "| `{}` | `{}` | {} | {} | ~~Gone~~ | {} |",
@@ -627,21 +706,125 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     out
 }
 
-/// C-1 (AC-003): sort a findings slice by a total key
-/// `(id, title, evidence_first, summary)` so two findings with the same
-/// rule id produce deterministic output across repeated compute → render
-/// calls.
+/// C-1 (AC-003): sort a findings slice by a provably total key
+/// `(id, title, severity discriminant, evidence_all_joined, summary, recommendation)`
+/// so two findings with the same rule id produce a deterministic order
+/// regardless of the order they came out of HashSet iteration in
+/// `diff::compute`. The key is total: every tiebreak component is a
+/// total-ordered type (`&str` / `String` / `i32`), and the final
+/// `recommendation` field eliminates the last remaining source of
+/// input-order dependency.
 fn sort_findings_total_md(findings: &mut [crate::findings::Finding]) {
     findings.sort_by(|a, b| {
         a.id.cmp(b.id)
             .then_with(|| a.title.cmp(&b.title))
-            .then_with(|| {
-                a.evidence
-                    .first()
-                    .cloned()
-                    .unwrap_or_default()
-                    .cmp(&b.evidence.first().cloned().unwrap_or_default())
-            })
+            .then_with(|| a.severity.cmp(&b.severity))
+            .then_with(|| a.evidence.join("\n").cmp(&b.evidence.join("\n")))
             .then_with(|| a.summary.cmp(&b.summary))
+            .then_with(|| a.recommendation.cmp(b.recommendation))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── F-1: make_fence produces a fence longer than embedded backtick runs ──
+
+    /// `make_fence` must return a fence whose backtick-run length is strictly
+    /// greater than the longest consecutive-backtick run appearing in the
+    /// evidence lines it scans (and at least 3).
+    ///
+    /// Regression guard: a fence of ``` would break out of itself if any
+    /// evidence line contains exactly "```". This test covers both
+    /// 3-backtick and 4-backtick embedded runs and verifies that:
+    ///   1. The fence length exceeds the max run.
+    ///   2. The rendered markdown block is not broken (the next section
+    ///      heading is still present after the closing fence).
+    #[test]
+    fn make_fence_longer_than_embedded_backtick_runs() {
+        // Lines that contain a 3-backtick run and a 4-backtick run.
+        let lines = vec![
+            "normal line".to_string(),
+            "```".to_string(),                 // exactly 3 backticks
+            "````inline code````".to_string(), // longest run is 4
+        ];
+
+        let fence = make_fence(&lines);
+
+        // The fence must be strictly longer than the 4-backtick run.
+        assert!(
+            fence.len() > 4,
+            "fence length {} must be > 4 (longest embedded run)",
+            fence.len()
+        );
+        // Every char in the fence must be a backtick.
+        assert!(
+            fence.chars().all(|c| c == '`'),
+            "fence must consist entirely of backtick characters"
+        );
+
+        // Render a minimal diff markdown containing one evidence line that
+        // is exactly "```" and another that is "````". Verify the block is
+        // not broken: the section heading that follows the evidence block
+        // must still be present in the output.
+        use crate::diff::{Diff, FlowSummary};
+        use crate::findings::{Finding, Severity};
+
+        let finding = Finding {
+            id: "test.backtick",
+            severity: Severity::Medium,
+            title: "Backtick test finding".to_string(),
+            summary: "Summary".to_string(),
+            evidence: vec!["```".to_string(), "````".to_string()],
+            recommendation: "No action.",
+            playbook: vec![],
+        };
+
+        // Put a flow_new in so there is a "## Flow inventory changes" section
+        // after the finding block — if the fence is broken the heading gets
+        // swallowed into the code block.
+        let flow_new = FlowSummary {
+            src: "host_001".to_string(),
+            dst: "host_002".to_string(),
+            dst_port: 502,
+            proto: "tcp".to_string(),
+            bytes: 1_000,
+        };
+
+        let diff = Diff {
+            findings_new: vec![finding],
+            flows_new: vec![flow_new],
+            ..Diff::default()
+        };
+
+        let md = render_diff_markdown(&diff);
+
+        // The closing fence of the evidence block must appear in the output.
+        assert!(
+            md.contains(&fence),
+            "rendered markdown must contain the computed fence ({fence})"
+        );
+
+        // The flow-inventory-changes section heading must survive (not be
+        // swallowed into the code block by a broken fence).
+        assert!(
+            md.contains("## Flow inventory changes"),
+            "section heading after the evidence block must not be swallowed by \
+             a broken fence; rendered output:\n{md}"
+        );
+    }
+
+    // ── make_fence: minimum length is 3 even with no backticks in evidence ──
+
+    #[test]
+    fn make_fence_minimum_length_three_when_no_backticks() {
+        let lines: Vec<String> = vec!["plain text".to_string(), "no backticks here".to_string()];
+        let fence = make_fence(&lines);
+        assert_eq!(
+            fence.len(),
+            3,
+            "fence must be at least 3 backticks when evidence has no backtick runs"
+        );
+    }
 }
