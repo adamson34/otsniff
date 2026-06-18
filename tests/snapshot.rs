@@ -3525,8 +3525,8 @@ use otsniff::report_md::render_diff_markdown;
 /// - `hosts_gone` (1 host)
 /// - `role_shifts` (1 shift — host_003 changed plc → hmi)
 /// - `flow_shifts` (1 shift — ratio 4.0x, above the default 2.0 threshold)
-/// - `flows_new` + `flows_gone` are left empty (tested implicitly via the
-///   above; they are covered by the snapshot diff already).
+/// - `flows_new` (1 flow — host_004 → host_002:102)
+/// - `flows_gone` (1 flow — host_005 → host_001:44818)
 fn build_diff_fixture() -> Diff {
     use otsniff::findings::Severity;
 
@@ -3840,5 +3840,171 @@ fn test_bc_8_04_001_empty_diff_markdown_no_deltas_banner() {
             || lower.contains("no delta"),
         "EC-001: empty Diff markdown output must contain a 'No deltas detected' banner; got:\n{}",
         &md[..md.len().min(800)]
+    );
+}
+
+// ── C-1 (AC-003) — determinism with findings sharing the same rule id ────────
+
+/// C-1 / AC-003: when two findings share the same rule `id` but differ by
+/// endpoint (simulating two Modbus write flows to distinct destinations),
+/// calling `diff::compute` twice on the same inputs and rendering both
+/// results must produce byte-identical HTML and markdown.
+///
+/// This exercises the real `compute -> render` pipeline — not just rendering
+/// a pre-built `Diff` — so any non-determinism in HashSet iteration order
+/// in `compute` is caught.
+#[test]
+fn test_bc_8_04_001_determinism_with_shared_rule_id() {
+    use otsniff::diff::{compute, DiffInput};
+    use otsniff::findings::{Finding, Severity};
+    use otsniff::observe::Observations;
+    use otsniff::scrub::ScrubMap;
+    use std::collections::BTreeMap;
+
+    // Build two findings sharing rule id "ics.modbus_writes" but with
+    // distinct src/dst/port tuples encoded in evidence (test-helper format
+    // recognised by finding_diff_key).
+    let f1 = Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "Modbus write commands".to_string(),
+        summary: "Modbus write from host A".to_string(),
+        evidence: vec!["src=10.0.0.1 dst=10.0.0.10 port=502".to_string()],
+        recommendation: "Review writes.",
+        playbook: vec![],
+    };
+    let f2 = Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "Modbus write commands".to_string(),
+        summary: "Modbus write from host B".to_string(),
+        evidence: vec!["src=10.0.0.2 dst=10.0.0.10 port=502".to_string()],
+        recommendation: "Review writes.",
+        playbook: vec![],
+    };
+
+    let empty_obs = Observations::default();
+    let empty_map = ScrubMap {
+        version: 1,
+        created_at: chrono::Utc::now(),
+        ips: BTreeMap::from([
+            ("host_001".to_string(), "10.0.0.1".to_string()),
+            ("host_002".to_string(), "10.0.0.2".to_string()),
+            ("host_010".to_string(), "10.0.0.10".to_string()),
+        ]),
+        macs: BTreeMap::new(),
+        names: BTreeMap::new(),
+    };
+
+    // Both sides see f1; current also adds f2 (so f2 is "new").
+    let baseline_findings = vec![f1.clone()];
+    let current_findings = vec![f1.clone(), f2.clone()];
+
+    let baseline = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &baseline_findings,
+    };
+    let current = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &current_findings,
+    };
+
+    // Compute twice — HashSet iteration order may differ between runs.
+    let diff_a = compute(baseline, current);
+    let baseline2 = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &baseline_findings,
+    };
+    let current2 = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &current_findings,
+    };
+    let diff_b = compute(baseline2, current2);
+
+    let html_a = render_diff_html(&diff_a).expect("C-1: first render_diff_html call must succeed");
+    let html_b = render_diff_html(&diff_b).expect("C-1: second render_diff_html call must succeed");
+    assert_eq!(
+        html_a, html_b,
+        "C-1 / AC-003: render_diff_html must be deterministic even when \
+         findings share the same rule id — two compute→render runs differed"
+    );
+
+    let md_a = render_diff_markdown(&diff_a);
+    let md_b = render_diff_markdown(&diff_b);
+    assert_eq!(
+        md_a, md_b,
+        "C-1 / AC-003: render_diff_markdown must be deterministic even when \
+         findings share the same rule id — two compute→render runs differed"
+    );
+}
+
+// ── I-3 / EC-002 — evidence-cap label shows "showing X of N" ─────────────────
+
+/// I-3 / EC-002: when a finding carries more than 5 evidence rows, both
+/// renderers must show exactly 5 rows AND display "showing 5 of N" rather
+/// than "5 sample(s)".
+#[test]
+fn test_ec_002_evidence_cap_label_shows_showing_x_of_n() {
+    use otsniff::findings::{Finding, Severity};
+
+    // Build a finding with 8 evidence rows (> MAX_EVIDENCE = 5).
+    let evidence: Vec<String> = (1..=8).map(|i| format!("evidence row {i}")).collect();
+    let finding = Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "Test finding".to_string(),
+        summary: "Summary".to_string(),
+        evidence,
+        recommendation: "Rec.",
+        playbook: vec![],
+    };
+
+    let diff = Diff {
+        findings_new: vec![finding],
+        ..Diff::default()
+    };
+
+    // HTML: must show "showing 5 of 8" and exactly 5 evidence rows.
+    let html = render_diff_html(&diff).expect("EC-002: render_diff_html must succeed");
+    assert!(
+        html.contains("showing 5 of 8"),
+        "EC-002: HTML must show 'showing 5 of 8' when evidence is capped; got evidence section: {}",
+        &html[html.find("Evidence").unwrap_or(0)
+            ..html.len().min(html.find("Evidence").unwrap_or(0) + 200)]
+    );
+    // Exactly 5 evidence rows must appear in the rendered <pre> block.
+    let row_count = (1..=8)
+        .filter(|i| html.contains(&format!("evidence row {i}")))
+        .count();
+    assert_eq!(
+        row_count, 5,
+        "EC-002: HTML must render exactly 5 evidence rows (got {row_count})"
+    );
+    assert!(
+        !html.contains("evidence row 6"),
+        "EC-002: HTML must not render evidence row 6 (beyond cap)"
+    );
+
+    // Markdown: must also show "showing 5 of 8".
+    let md = render_diff_markdown(&diff);
+    assert!(
+        md.contains("showing 5 of 8"),
+        "EC-002: markdown must show 'showing 5 of 8' when evidence is capped; got:\n{}",
+        &md[..md.len().min(600)]
+    );
+    let md_row_count = (1..=8)
+        .filter(|i| md.contains(&format!("evidence row {i}")))
+        .count();
+    assert_eq!(
+        md_row_count, 5,
+        "EC-002: markdown must render exactly 5 evidence rows (got {md_row_count})"
+    );
+    assert!(
+        !md.contains("evidence row 6"),
+        "EC-002: markdown must not render evidence row 6 (beyond cap)"
     );
 }

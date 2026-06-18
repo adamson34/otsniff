@@ -77,7 +77,7 @@ _id: `creds.telnet`_
 
 | Source | Destination | Port | Proto | Baseline bytes | Current bytes | Ratio |
 |--------|-------------|------|-------|----------------|---------------|-------|
-| `host_001` | `host_002` | 502 | tcp | 10000 | 40000 | 4.0× |
+| `host_001` | `host_002` | 502 | tcp | 10000 | 40000 | 4.00× |
 
 ## Flow inventory changes
 
