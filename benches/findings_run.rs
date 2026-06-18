@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 
 use chrono::{TimeZone, Utc};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use ipnet::IpNet;
 
 use otsniff::findings::run_all;
