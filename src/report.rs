@@ -321,8 +321,11 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
     });
     let mut sorted_flow_shifts = diff.flow_shifts.clone();
     sorted_flow_shifts.sort_by(|a, b| {
-        a.src
-            .cmp(&b.src)
+        // Largest-ratio first ("loudest signal first") — mirrors diff.rs intent.
+        b.ratio
+            .partial_cmp(&a.ratio)
+            .unwrap_or(core::cmp::Ordering::Equal)
+            .then_with(|| a.src.cmp(&b.src))
             .then_with(|| a.dst.cmp(&b.dst))
             .then_with(|| a.dst_port.cmp(&b.dst_port))
             .then_with(|| a.proto.cmp(&b.proto))

@@ -304,6 +304,18 @@ fn md_cell(s: &str) -> String {
     s.replace('|', r"\|").replace('\n', " ")
 }
 
+/// Sanitise a string for safe use in a markdown heading (`###`).
+///
+/// In a heading `|` is not a table delimiter, so pipe-escaping would produce
+/// literal backslash-pipe in the rendered output. This helper collapses
+/// newlines and control characters (which would break the heading line) to a
+/// space, but does NOT escape `|`.
+fn md_heading(s: &str) -> String {
+    s.chars()
+        .map(|c| if c == '\n' || c.is_control() { ' ' } else { c })
+        .collect()
+}
+
 /// Compute a CommonMark-safe fence string for a block whose content may
 /// include backtick runs.
 ///
@@ -415,7 +427,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 out,
                 "### [NEW][{}] {}",
                 severity_label(f.severity).to_uppercase(),
-                md_cell(&f.title),
+                md_heading(&f.title),
             )
             .unwrap();
             writeln!(out).unwrap();
@@ -454,7 +466,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 out,
                 "### [RECURRING][{}] {}",
                 severity_label(f.severity).to_uppercase(),
-                md_cell(&f.title),
+                md_heading(&f.title),
             )
             .unwrap();
             writeln!(out).unwrap();
@@ -493,7 +505,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 out,
                 "### [RESOLVED][{}] {}",
                 severity_label(f.severity).to_uppercase(),
-                md_cell(&f.title),
+                md_heading(&f.title),
             )
             .unwrap();
             writeln!(out).unwrap();
@@ -538,8 +550,11 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     });
     let mut flow_shifts = diff.flow_shifts.clone();
     flow_shifts.sort_by(|a, b| {
-        a.src
-            .cmp(&b.src)
+        // Largest-ratio first ("loudest signal first") — mirrors diff.rs intent.
+        b.ratio
+            .partial_cmp(&a.ratio)
+            .unwrap_or(core::cmp::Ordering::Equal)
+            .then_with(|| a.src.cmp(&b.src))
             .then_with(|| a.dst.cmp(&b.dst))
             .then_with(|| a.dst_port.cmp(&b.dst_port))
             .then_with(|| a.proto.cmp(&b.proto))
