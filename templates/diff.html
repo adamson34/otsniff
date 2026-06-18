@@ -198,7 +198,7 @@
   <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>{{ f.id }}</code></p>
   <p style="margin:0.5rem 0;">{{ f.summary }}</p>
   {% if !f.evidence.is_empty() %}
-  <details><summary>Evidence ({{ f.evidence_count }} sample(s))</summary>
+  <details><summary>Evidence ({% if f.evidence_total > f.evidence_count %}showing {{ f.evidence_count }} of {{ f.evidence_total }}{% else %}{{ f.evidence_count }} sample(s){% endif %})</summary>
   <pre class="evidence">{% for e in f.evidence %}{{ e }}
 {% endfor %}</pre>
   </details>
@@ -220,7 +220,7 @@
   <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>{{ f.id }}</code></p>
   <p style="margin:0.5rem 0;">{{ f.summary }}</p>
   {% if !f.evidence.is_empty() %}
-  <details><summary>Evidence ({{ f.evidence_count }} sample(s))</summary>
+  <details><summary>Evidence ({% if f.evidence_total > f.evidence_count %}showing {{ f.evidence_count }} of {{ f.evidence_total }}{% else %}{{ f.evidence_count }} sample(s){% endif %})</summary>
   <pre class="evidence">{% for e in f.evidence %}{{ e }}
 {% endfor %}</pre>
   </details>
@@ -242,7 +242,7 @@
   <p class="muted" style="font-size:0.85rem;margin:0.25rem 0;">id: <code>{{ f.id }}</code></p>
   <p style="margin:0.5rem 0;">{{ f.summary }}</p>
   {% if !f.evidence.is_empty() %}
-  <details><summary>Evidence ({{ f.evidence_count }} sample(s))</summary>
+  <details><summary>Evidence ({% if f.evidence_total > f.evidence_count %}showing {{ f.evidence_count }} of {{ f.evidence_total }}{% else %}{{ f.evidence_count }} sample(s){% endif %})</summary>
   <pre class="evidence">{% for e in f.evidence %}{{ e }}
 {% endfor %}</pre>
   </details>

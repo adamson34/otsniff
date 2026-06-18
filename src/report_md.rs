@@ -295,6 +295,15 @@ fn human_bytes(n: u64) -> String {
     format!("{val:.1} {unit}")
 }
 
+/// Escape a string for safe use in a markdown pipe-table cell.
+///
+/// I-1: free-form strings that contain `|` would corrupt the table structure
+/// (the pipe is the cell delimiter). Newlines would break the row. This helper
+/// replaces both so any string is safe to interpolate between `|` delimiters.
+fn md_cell(s: &str) -> String {
+    s.replace('|', r"\|").replace('\n', " ")
+}
+
 /// Render a cross-capture diff as markdown (S-6.03 AC-002).
 ///
 /// Produces an LLM-friendly markdown report with the same sections as the HTML
@@ -350,24 +359,39 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     writeln!(out, "- **Flow shifts (≥2×):** {}", diff.flow_shifts.len()).unwrap();
     writeln!(out).unwrap();
 
+    // C-1 (AC-003): sort each slice by a total key before rendering so two
+    // findings with the same rule id produce deterministic output.
+    let mut sorted_new = diff.findings_new.clone();
+    sort_findings_total_md(&mut sorted_new);
+    let mut sorted_recurring = diff.findings_recurring.clone();
+    sort_findings_total_md(&mut sorted_recurring);
+    let mut sorted_resolved = diff.findings_resolved.clone();
+    sort_findings_total_md(&mut sorted_resolved);
+
     // New findings
-    if !diff.findings_new.is_empty() {
+    if !sorted_new.is_empty() {
         writeln!(out, "## New findings — NEW since baseline").unwrap();
         writeln!(out).unwrap();
-        for f in &diff.findings_new {
+        for f in &sorted_new {
             writeln!(
                 out,
                 "### [NEW][{}] {}",
                 severity_label(f.severity).to_uppercase(),
-                f.title
+                md_cell(&f.title),
             )
             .unwrap();
             writeln!(out).unwrap();
-            writeln!(out, "{}", f.summary).unwrap();
+            writeln!(out, "{}", md_cell(&f.summary)).unwrap();
             writeln!(out).unwrap();
+            let evidence_total = f.evidence.len();
             let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
             if !capped.is_empty() {
-                writeln!(out, "**Evidence ({} sample(s)):**", capped.len()).unwrap();
+                let cap = capped.len();
+                if evidence_total > cap {
+                    writeln!(out, "**Evidence (showing {cap} of {evidence_total}):**").unwrap();
+                } else {
+                    writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
+                }
                 writeln!(out, "```").unwrap();
                 for e in &capped {
                     writeln!(out, "{}", e).unwrap();
@@ -383,23 +407,29 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     }
 
     // Recurring findings
-    if !diff.findings_recurring.is_empty() {
+    if !sorted_recurring.is_empty() {
         writeln!(out, "## Recurring findings").unwrap();
         writeln!(out).unwrap();
-        for f in &diff.findings_recurring {
+        for f in &sorted_recurring {
             writeln!(
                 out,
                 "### [RECURRING][{}] {}",
                 severity_label(f.severity).to_uppercase(),
-                f.title
+                md_cell(&f.title),
             )
             .unwrap();
             writeln!(out).unwrap();
-            writeln!(out, "{}", f.summary).unwrap();
+            writeln!(out, "{}", md_cell(&f.summary)).unwrap();
             writeln!(out).unwrap();
+            let evidence_total = f.evidence.len();
             let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
             if !capped.is_empty() {
-                writeln!(out, "**Evidence ({} sample(s)):**", capped.len()).unwrap();
+                let cap = capped.len();
+                if evidence_total > cap {
+                    writeln!(out, "**Evidence (showing {cap} of {evidence_total}):**").unwrap();
+                } else {
+                    writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
+                }
                 writeln!(out, "```").unwrap();
                 for e in &capped {
                     writeln!(out, "{}", e).unwrap();
@@ -415,23 +445,29 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     }
 
     // Resolved findings
-    if !diff.findings_resolved.is_empty() {
+    if !sorted_resolved.is_empty() {
         writeln!(out, "## Resolved findings").unwrap();
         writeln!(out).unwrap();
-        for f in &diff.findings_resolved {
+        for f in &sorted_resolved {
             writeln!(
                 out,
                 "### [RESOLVED][{}] {}",
                 severity_label(f.severity).to_uppercase(),
-                f.title
+                md_cell(&f.title),
             )
             .unwrap();
             writeln!(out).unwrap();
-            writeln!(out, "{}", f.summary).unwrap();
+            writeln!(out, "{}", md_cell(&f.summary)).unwrap();
             writeln!(out).unwrap();
+            let evidence_total = f.evidence.len();
             let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
             if !capped.is_empty() {
-                writeln!(out, "**Evidence ({} sample(s)):**", capped.len()).unwrap();
+                let cap = capped.len();
+                if evidence_total > cap {
+                    writeln!(out, "**Evidence (showing {cap} of {evidence_total}):**").unwrap();
+                } else {
+                    writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
+                }
                 writeln!(out, "```").unwrap();
                 for e in &capped {
                     writeln!(out, "{}", e).unwrap();
@@ -465,11 +501,11 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 out,
                 "| `{}` | **New** | {} | {} | {} | {} | {} |",
                 h.pseudonym,
-                h.role,
+                md_cell(&h.role),
                 if h.protocols.is_empty() {
                     "—".to_string()
                 } else {
-                    h.protocols.join(", ")
+                    md_cell(&h.protocols.join(", "))
                 },
                 if h.in_ot_zone { "OT" } else { "IT" },
                 h.packets,
@@ -482,11 +518,11 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 out,
                 "| `{}` | ~~Gone~~ | {} | {} | {} | {} | {} |",
                 h.pseudonym,
-                h.role,
+                md_cell(&h.role),
                 if h.protocols.is_empty() {
                     "—".to_string()
                 } else {
-                    h.protocols.join(", ")
+                    md_cell(&h.protocols.join(", "))
                 },
                 if h.in_ot_zone { "OT" } else { "IT" },
                 h.packets,
@@ -507,7 +543,9 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
             writeln!(
                 out,
                 "| `{}` | {} | → | {} |",
-                r.pseudonym, r.old_role, r.new_role
+                r.pseudonym,
+                md_cell(&r.old_role),
+                md_cell(&r.new_role),
             )
             .unwrap();
         }
@@ -531,8 +569,14 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
         for f in &diff.flow_shifts {
             writeln!(
                 out,
-                "| `{}` | `{}` | {} | {} | {} | {} | {:.1}× |",
-                f.src, f.dst, f.dst_port, f.proto, f.baseline_bytes, f.current_bytes, f.ratio,
+                "| `{}` | `{}` | {} | {} | {} | {} | {:.2}× |",
+                f.src,
+                f.dst,
+                f.dst_port,
+                md_cell(&f.proto),
+                f.baseline_bytes,
+                f.current_bytes,
+                f.ratio,
             )
             .unwrap();
         }
@@ -560,7 +604,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 f.src,
                 f.dst,
                 f.dst_port,
-                f.proto,
+                md_cell(&f.proto),
                 human_bytes(f.bytes),
             )
             .unwrap();
@@ -572,7 +616,7 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
                 f.src,
                 f.dst,
                 f.dst_port,
-                f.proto,
+                md_cell(&f.proto),
                 human_bytes(f.bytes),
             )
             .unwrap();
@@ -581,4 +625,23 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     }
 
     out
+}
+
+/// C-1 (AC-003): sort a findings slice by a total key
+/// `(id, title, evidence_first, summary)` so two findings with the same
+/// rule id produce deterministic output across repeated compute → render
+/// calls.
+fn sort_findings_total_md(findings: &mut [crate::findings::Finding]) {
+    findings.sort_by(|a, b| {
+        a.id.cmp(b.id)
+            .then_with(|| a.title.cmp(&b.title))
+            .then_with(|| {
+                a.evidence
+                    .first()
+                    .cloned()
+                    .unwrap_or_default()
+                    .cmp(&b.evidence.first().cloned().unwrap_or_default())
+            })
+            .then_with(|| a.summary.cmp(&b.summary))
+    });
 }

@@ -259,6 +259,13 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
 /// Produces a self-contained HTML document with sections for new, recurring,
 /// and resolved findings, host changes, role shifts, and flow shifts. All
 /// sections sort deterministically so repeated calls produce byte-identical output.
+///
+/// EC-003: `OtError::Render` propagation is satisfied by the `?` on
+/// `view.render()` below. For a well-typed `DiffReportView` (all owned
+/// `String` / `Vec<…>` fields, askama `escape="html"`) the inner template
+/// render is infallible in practice — but the `Result` return type and `?`
+/// propagation mean any future I/O-backed template variant will still be
+/// caught. No additional test is needed; the property is structural.
 pub fn render_diff_html(diff: &Diff) -> Result<String> {
     const MAX_EVIDENCE: usize = 5;
 
@@ -272,20 +279,29 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
         && diff.flows_new.is_empty()
         && diff.flows_gone.is_empty();
 
-    let findings_new: Vec<DiffFindingView> = diff
-        .findings_new
+    // C-1 (AC-003): sort each finding slice by a total key before rendering
+    // so that two findings sharing the same rule `id` produce a deterministic
+    // order regardless of the order they came out of HashSet iteration in
+    // `diff::compute`. We clone into a local sorted vec rather than mutating
+    // the input `Diff`.
+    let mut sorted_new = diff.findings_new.clone();
+    sort_findings_total(&mut sorted_new);
+    let mut sorted_recurring = diff.findings_recurring.clone();
+    sort_findings_total(&mut sorted_recurring);
+    let mut sorted_resolved = diff.findings_resolved.clone();
+    sort_findings_total(&mut sorted_resolved);
+
+    let findings_new: Vec<DiffFindingView> = sorted_new
         .iter()
         .map(|f| diff_finding_view(f, MAX_EVIDENCE))
         .collect();
 
-    let findings_recurring: Vec<DiffFindingView> = diff
-        .findings_recurring
+    let findings_recurring: Vec<DiffFindingView> = sorted_recurring
         .iter()
         .map(|f| diff_finding_view(f, MAX_EVIDENCE))
         .collect();
 
-    let findings_resolved: Vec<DiffFindingView> = diff
-        .findings_resolved
+    let findings_resolved: Vec<DiffFindingView> = sorted_resolved
         .iter()
         .map(|f| diff_finding_view(f, MAX_EVIDENCE))
         .collect();
@@ -314,7 +330,7 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
             proto: f.proto.clone(),
             baseline_bytes: f.baseline_bytes.to_string(),
             current_bytes: f.current_bytes.to_string(),
-            ratio: format!("{:.1}", f.ratio),
+            ratio: format!("{:.2}", f.ratio),
         })
         .collect();
 
@@ -375,7 +391,12 @@ struct DiffFindingView {
     title: String,
     summary: String,
     evidence: Vec<String>,
+    /// Number of evidence rows after capping (≤ MAX_EVIDENCE).
     evidence_count: usize,
+    /// Total evidence rows before capping. When `evidence_total > evidence_count`
+    /// the template renders "showing {evidence_count} of {evidence_total}";
+    /// otherwise it renders "{evidence_count} sample(s)".
+    evidence_total: usize,
     recommendation: String,
 }
 
@@ -413,6 +434,7 @@ struct DiffFlowSummaryView {
 }
 
 fn diff_finding_view(f: &Finding, max_evidence: usize) -> DiffFindingView {
+    let evidence_total = f.evidence.len();
     let capped: Vec<String> = f.evidence.iter().take(max_evidence).cloned().collect();
     let evidence_count = capped.len();
     DiffFindingView {
@@ -423,8 +445,27 @@ fn diff_finding_view(f: &Finding, max_evidence: usize) -> DiffFindingView {
         summary: f.summary.clone(),
         evidence: capped,
         evidence_count,
+        evidence_total,
         recommendation: f.recommendation.to_string(),
     }
+}
+
+/// C-1 (AC-003): sort a findings slice by a total key
+/// `(id, title, evidence_first, summary)` to guarantee a deterministic order
+/// even when two findings share the same rule `id`.
+fn sort_findings_total(findings: &mut [Finding]) {
+    findings.sort_by(|a, b| {
+        a.id.cmp(b.id)
+            .then_with(|| a.title.cmp(&b.title))
+            .then_with(|| {
+                a.evidence
+                    .first()
+                    .cloned()
+                    .unwrap_or_default()
+                    .cmp(&b.evidence.first().cloned().unwrap_or_default())
+            })
+            .then_with(|| a.summary.cmp(&b.summary))
+    });
 }
 
 fn diff_host_view(h: &crate::diff::HostRef) -> DiffHostView {
