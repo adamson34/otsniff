@@ -13,6 +13,7 @@ use std::fmt::Write;
 use chrono::{DateTime, Utc};
 
 use crate::capture_source::Classification;
+use crate::diff::Diff;
 use crate::error::Result;
 use crate::findings::augmented::AugmentedFinding;
 use crate::findings::{Finding, Severity};
@@ -292,4 +293,578 @@ fn human_bytes(n: u64) -> String {
         (n, "B")
     };
     format!("{val:.1} {unit}")
+}
+
+/// Escape a string for safe use in a markdown pipe-table cell.
+///
+/// I-1: free-form strings that contain `|` would corrupt the table structure
+/// (the pipe is the cell delimiter). Newlines would break the row. This helper
+/// replaces both so any string is safe to interpolate between `|` delimiters.
+fn md_cell(s: &str) -> String {
+    s.replace('|', r"\|").replace('\n', " ")
+}
+
+/// Sanitise a string for safe use in a markdown heading (`###`).
+///
+/// In a heading `|` is not a table delimiter, so pipe-escaping would produce
+/// literal backslash-pipe in the rendered output. This helper collapses
+/// newlines and control characters (which would break the heading line) to a
+/// space, but does NOT escape `|`.
+fn md_heading(s: &str) -> String {
+    s.chars()
+        .map(|c| if c == '\n' || c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+/// Compute a CommonMark-safe fence string for a block whose content may
+/// include backtick runs.
+///
+/// F-1: a fenced code block can only be closed by a run of backticks that is
+/// at least as long as the opening run (CommonMark §4.5). If any evidence line
+/// contains a run of N consecutive backticks, a fence of N backticks would be
+/// broken. This function scans `lines` for the longest consecutive-backtick
+/// run R and returns a fence of max(R+1, 3) backticks. Using the same string
+/// for open and close guarantees the block is always well-formed.
+fn make_fence(lines: &[impl AsRef<str>]) -> String {
+    let max_run = lines
+        .iter()
+        .flat_map(|l| {
+            // Count runs of consecutive backticks in this line.
+            let mut runs = Vec::new();
+            let mut count = 0usize;
+            for ch in l.as_ref().chars() {
+                if ch == '`' {
+                    count += 1;
+                } else {
+                    if count > 0 {
+                        runs.push(count);
+                    }
+                    count = 0;
+                }
+            }
+            if count > 0 {
+                runs.push(count);
+            }
+            runs
+        })
+        .max()
+        .unwrap_or(0);
+
+    let fence_len = max_run.saturating_add(1).max(3);
+    "`".repeat(fence_len)
+}
+
+/// Format a flow-shift multiplier for display labels.
+///
+/// Integer values (fract == 0) are rendered without a trailing ".0":
+/// `2.0 → "2×"`, `3.0 → "3×"`. Non-integer values use one decimal place:
+/// `1.5 → "1.5×"`. Always includes the "×" suffix.
+fn fmt_multiplier(m: f64) -> String {
+    if m.fract() == 0.0 {
+        format!("{}×", m as i64)
+    } else {
+        format!("{:.1}×", m)
+    }
+}
+
+/// Render a cross-capture diff as markdown (S-6.03 AC-002).
+///
+/// Produces an LLM-friendly markdown report with the same sections as the HTML
+/// diff renderer. All sections sort deterministically; each section defensively
+/// re-sorts its local clone before rendering so the output is self-sufficiently
+/// deterministic even if `compute()` changes its output order.
+pub fn render_diff_markdown(diff: &Diff) -> String {
+    const MAX_EVIDENCE: usize = 5;
+    let mut out = String::new();
+
+    writeln!(out, "# otsniff diff report").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "_otsniff v{}_", crate::VERSION).unwrap();
+    writeln!(out).unwrap();
+
+    let no_deltas = diff.hosts_new.is_empty()
+        && diff.hosts_gone.is_empty()
+        && diff.findings_new.is_empty()
+        && diff.findings_recurring.is_empty()
+        && diff.findings_resolved.is_empty()
+        && diff.role_shifts.is_empty()
+        && diff.flow_shifts.is_empty()
+        && diff.flows_new.is_empty()
+        && diff.flows_gone.is_empty();
+
+    if no_deltas {
+        writeln!(
+            out,
+            "> **No deltas detected** — captures are identical by all tracked metrics."
+        )
+        .unwrap();
+        writeln!(out).unwrap();
+        return out;
+    }
+
+    // Summary banner
+    writeln!(out, "## Summary").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "- **New findings:** {}", diff.findings_new.len()).unwrap();
+    writeln!(
+        out,
+        "- **Recurring findings:** {}",
+        diff.findings_recurring.len()
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "- **Resolved findings:** {}",
+        diff.findings_resolved.len()
+    )
+    .unwrap();
+    writeln!(out, "- **New hosts:** {}", diff.hosts_new.len()).unwrap();
+    writeln!(out, "- **Gone hosts:** {}", diff.hosts_gone.len()).unwrap();
+    writeln!(
+        out,
+        "- **Flow shifts (≥{}):** {}",
+        fmt_multiplier(diff.flow_shift_multiplier),
+        diff.flow_shifts.len()
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // C-1 (AC-003): sort each slice by a total key before rendering so two
+    // findings with the same rule id produce deterministic output.
+    let mut sorted_new = diff.findings_new.clone();
+    sort_findings_total_md(&mut sorted_new);
+    let mut sorted_recurring = diff.findings_recurring.clone();
+    sort_findings_total_md(&mut sorted_recurring);
+    let mut sorted_resolved = diff.findings_resolved.clone();
+    sort_findings_total_md(&mut sorted_resolved);
+
+    // New findings
+    if !sorted_new.is_empty() {
+        writeln!(out, "## New findings — NEW since baseline").unwrap();
+        writeln!(out).unwrap();
+        for f in &sorted_new {
+            writeln!(
+                out,
+                "### [NEW][{}] {}",
+                severity_label(f.severity).to_uppercase(),
+                md_heading(&f.title),
+            )
+            .unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "{}", md_cell(&f.summary)).unwrap();
+            writeln!(out).unwrap();
+            let evidence_total = f.evidence.len();
+            let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
+            if !capped.is_empty() {
+                let cap = capped.len();
+                if evidence_total > cap {
+                    writeln!(out, "**Evidence (showing {cap} of {evidence_total}):**").unwrap();
+                } else {
+                    writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
+                }
+                let fence = make_fence(&capped);
+                writeln!(out, "{fence}").unwrap();
+                for e in &capped {
+                    writeln!(out, "{}", e).unwrap();
+                }
+                writeln!(out, "{fence}").unwrap();
+                writeln!(out).unwrap();
+            }
+            writeln!(out, "**Recommendation:** {}", md_cell(f.recommendation)).unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "_id: `{}`_", f.id).unwrap();
+            writeln!(out).unwrap();
+        }
+    }
+
+    // Recurring findings
+    if !sorted_recurring.is_empty() {
+        writeln!(out, "## Recurring findings").unwrap();
+        writeln!(out).unwrap();
+        for f in &sorted_recurring {
+            writeln!(
+                out,
+                "### [RECURRING][{}] {}",
+                severity_label(f.severity).to_uppercase(),
+                md_heading(&f.title),
+            )
+            .unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "{}", md_cell(&f.summary)).unwrap();
+            writeln!(out).unwrap();
+            let evidence_total = f.evidence.len();
+            let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
+            if !capped.is_empty() {
+                let cap = capped.len();
+                if evidence_total > cap {
+                    writeln!(out, "**Evidence (showing {cap} of {evidence_total}):**").unwrap();
+                } else {
+                    writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
+                }
+                let fence = make_fence(&capped);
+                writeln!(out, "{fence}").unwrap();
+                for e in &capped {
+                    writeln!(out, "{}", e).unwrap();
+                }
+                writeln!(out, "{fence}").unwrap();
+                writeln!(out).unwrap();
+            }
+            writeln!(out, "**Recommendation:** {}", md_cell(f.recommendation)).unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "_id: `{}`_", f.id).unwrap();
+            writeln!(out).unwrap();
+        }
+    }
+
+    // Resolved findings
+    if !sorted_resolved.is_empty() {
+        writeln!(out, "## Resolved findings").unwrap();
+        writeln!(out).unwrap();
+        for f in &sorted_resolved {
+            writeln!(
+                out,
+                "### [RESOLVED][{}] {}",
+                severity_label(f.severity).to_uppercase(),
+                md_heading(&f.title),
+            )
+            .unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "{}", md_cell(&f.summary)).unwrap();
+            writeln!(out).unwrap();
+            let evidence_total = f.evidence.len();
+            let capped: Vec<&String> = f.evidence.iter().take(MAX_EVIDENCE).collect();
+            if !capped.is_empty() {
+                let cap = capped.len();
+                if evidence_total > cap {
+                    writeln!(out, "**Evidence (showing {cap} of {evidence_total}):**").unwrap();
+                } else {
+                    writeln!(out, "**Evidence ({cap} sample(s)):**").unwrap();
+                }
+                let fence = make_fence(&capped);
+                writeln!(out, "{fence}").unwrap();
+                for e in &capped {
+                    writeln!(out, "{}", e).unwrap();
+                }
+                writeln!(out, "{fence}").unwrap();
+                writeln!(out).unwrap();
+            }
+            writeln!(out, "**Recommendation:** {}", md_cell(f.recommendation)).unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "_id: `{}`_", f.id).unwrap();
+            writeln!(out).unwrap();
+        }
+    }
+
+    // F-4: defensively sort non-finding sections on local clones so the
+    // renderer is self-sufficiently deterministic even if `compute()` changes.
+    let mut hosts_new = diff.hosts_new.clone();
+    hosts_new.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
+    let mut hosts_gone = diff.hosts_gone.clone();
+    hosts_gone.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
+    let mut role_shifts = diff.role_shifts.clone();
+    role_shifts.sort_by(|a, b| {
+        a.pseudonym
+            .cmp(&b.pseudonym)
+            .then_with(|| a.old_role.cmp(&b.old_role))
+            .then_with(|| a.new_role.cmp(&b.new_role))
+    });
+    let mut flow_shifts = diff.flow_shifts.clone();
+    flow_shifts.sort_by(|a, b| {
+        // Largest-ratio first ("loudest signal first") — mirrors diff.rs intent.
+        b.ratio
+            .partial_cmp(&a.ratio)
+            .unwrap_or(core::cmp::Ordering::Equal)
+            .then_with(|| a.src.cmp(&b.src))
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+    let mut flows_new = diff.flows_new.clone();
+    flows_new.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+    let mut flows_gone = diff.flows_gone.clone();
+    flows_gone.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+
+    // Host changes
+    if !hosts_new.is_empty() || !hosts_gone.is_empty() {
+        writeln!(out, "## Host changes").unwrap();
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "| Pseudonym | Status | Role | Protocols | Zone | Packets | Bytes |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|-----------|--------|------|-----------|------|---------|-------|"
+        )
+        .unwrap();
+        for h in &hosts_new {
+            writeln!(
+                out,
+                "| `{}` | **New** | {} | {} | {} | {} | {} |",
+                h.pseudonym,
+                md_cell(&h.role),
+                if h.protocols.is_empty() {
+                    "—".to_string()
+                } else {
+                    md_cell(&h.protocols.join(", "))
+                },
+                if h.in_ot_zone { "OT" } else { "IT" },
+                h.packets,
+                human_bytes(h.bytes),
+            )
+            .unwrap();
+        }
+        for h in &hosts_gone {
+            writeln!(
+                out,
+                "| `{}` | ~~Gone~~ | {} | {} | {} | {} | {} |",
+                h.pseudonym,
+                md_cell(&h.role),
+                if h.protocols.is_empty() {
+                    "—".to_string()
+                } else {
+                    md_cell(&h.protocols.join(", "))
+                },
+                if h.in_ot_zone { "OT" } else { "IT" },
+                h.packets,
+                human_bytes(h.bytes),
+            )
+            .unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    // Role shifts
+    if !role_shifts.is_empty() {
+        writeln!(out, "## Role shifts").unwrap();
+        writeln!(out).unwrap();
+        writeln!(out, "| Pseudonym | Old role | → | New role |").unwrap();
+        writeln!(out, "|-----------|----------|---|----------|").unwrap();
+        for r in &role_shifts {
+            writeln!(
+                out,
+                "| `{}` | {} | → | {} |",
+                r.pseudonym,
+                md_cell(&r.old_role),
+                md_cell(&r.new_role),
+            )
+            .unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    // Flow shifts
+    if !flow_shifts.is_empty() {
+        writeln!(
+            out,
+            "## Flow shifts (≥{} volume change)",
+            fmt_multiplier(diff.flow_shift_multiplier)
+        )
+        .unwrap();
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "| Source | Destination | Port | Proto | Baseline bytes | Current bytes | Ratio |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|--------|-------------|------|-------|----------------|---------------|-------|"
+        )
+        .unwrap();
+        for f in &flow_shifts {
+            writeln!(
+                out,
+                "| `{}` | `{}` | {} | {} | {} | {} | {:.2}× |",
+                f.src,
+                f.dst,
+                f.dst_port,
+                md_cell(&f.proto),
+                f.baseline_bytes,
+                f.current_bytes,
+                f.ratio,
+            )
+            .unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    // Flow inventory changes
+    if !flows_new.is_empty() || !flows_gone.is_empty() {
+        writeln!(out, "## Flow inventory changes").unwrap();
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "| Source | Destination | Port | Proto | Status | Bytes |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|--------|-------------|------|-------|--------|-------|"
+        )
+        .unwrap();
+        for f in &flows_new {
+            writeln!(
+                out,
+                "| `{}` | `{}` | {} | {} | **New** | {} |",
+                f.src,
+                f.dst,
+                f.dst_port,
+                md_cell(&f.proto),
+                human_bytes(f.bytes),
+            )
+            .unwrap();
+        }
+        for f in &flows_gone {
+            writeln!(
+                out,
+                "| `{}` | `{}` | {} | {} | ~~Gone~~ | {} |",
+                f.src,
+                f.dst,
+                f.dst_port,
+                md_cell(&f.proto),
+                human_bytes(f.bytes),
+            )
+            .unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    out
+}
+
+/// C-1 (AC-003): sort a findings slice by a provably total key
+/// `(id, title, severity discriminant, evidence_all_joined, summary, recommendation)`
+/// so two findings with the same rule id produce a deterministic order
+/// regardless of the order they came out of HashSet iteration in
+/// `diff::compute`. The key is total: every tiebreak component is a
+/// total-ordered type (`&str` / `String` / `i32`), and the final
+/// `recommendation` field eliminates the last remaining source of
+/// input-order dependency.
+fn sort_findings_total_md(findings: &mut [crate::findings::Finding]) {
+    findings.sort_by(|a, b| {
+        a.id.cmp(b.id)
+            .then_with(|| a.title.cmp(&b.title))
+            .then_with(|| a.severity.cmp(&b.severity))
+            .then_with(|| a.evidence.join("\n").cmp(&b.evidence.join("\n")))
+            .then_with(|| a.summary.cmp(&b.summary))
+            .then_with(|| a.recommendation.cmp(b.recommendation))
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── F-1: make_fence produces a fence longer than embedded backtick runs ──
+
+    /// `make_fence` must return a fence whose backtick-run length is strictly
+    /// greater than the longest consecutive-backtick run appearing in the
+    /// evidence lines it scans (and at least 3).
+    ///
+    /// Regression guard: a fence of ``` would break out of itself if any
+    /// evidence line contains exactly "```". This test covers both
+    /// 3-backtick and 4-backtick embedded runs and verifies that:
+    ///   1. The fence length exceeds the max run.
+    ///   2. The rendered markdown block is not broken (the next section
+    ///      heading is still present after the closing fence).
+    #[test]
+    fn make_fence_longer_than_embedded_backtick_runs() {
+        // Lines that contain a 3-backtick run and a 4-backtick run.
+        let lines = vec![
+            "normal line".to_string(),
+            "```".to_string(),                 // exactly 3 backticks
+            "````inline code````".to_string(), // longest run is 4
+        ];
+
+        let fence = make_fence(&lines);
+
+        // The fence must be strictly longer than the 4-backtick run.
+        assert!(
+            fence.len() > 4,
+            "fence length {} must be > 4 (longest embedded run)",
+            fence.len()
+        );
+        // Every char in the fence must be a backtick.
+        assert!(
+            fence.chars().all(|c| c == '`'),
+            "fence must consist entirely of backtick characters"
+        );
+
+        // Render a minimal diff markdown containing one evidence line that
+        // is exactly "```" and another that is "````". Verify the block is
+        // not broken: the section heading that follows the evidence block
+        // must still be present in the output.
+        use crate::diff::{Diff, FlowSummary};
+        use crate::findings::{Finding, Severity};
+
+        let finding = Finding {
+            id: "test.backtick",
+            severity: Severity::Medium,
+            title: "Backtick test finding".to_string(),
+            summary: "Summary".to_string(),
+            evidence: vec!["```".to_string(), "````".to_string()],
+            recommendation: "No action.",
+            playbook: vec![],
+        };
+
+        // Put a flow_new in so there is a "## Flow inventory changes" section
+        // after the finding block — if the fence is broken the heading gets
+        // swallowed into the code block.
+        let flow_new = FlowSummary {
+            src: "host_001".to_string(),
+            dst: "host_002".to_string(),
+            dst_port: 502,
+            proto: "tcp".to_string(),
+            bytes: 1_000,
+        };
+
+        let diff = Diff {
+            findings_new: vec![finding],
+            flows_new: vec![flow_new],
+            ..Diff::default()
+        };
+
+        let md = render_diff_markdown(&diff);
+
+        // The closing fence of the evidence block must appear in the output.
+        assert!(
+            md.contains(&fence),
+            "rendered markdown must contain the computed fence ({fence})"
+        );
+
+        // The flow-inventory-changes section heading must survive (not be
+        // swallowed into the code block by a broken fence).
+        assert!(
+            md.contains("## Flow inventory changes"),
+            "section heading after the evidence block must not be swallowed by \
+             a broken fence; rendered output:\n{md}"
+        );
+    }
+
+    // ── make_fence: minimum length is 3 even with no backticks in evidence ──
+
+    #[test]
+    fn make_fence_minimum_length_three_when_no_backticks() {
+        let lines: Vec<String> = vec!["plain text".to_string(), "no backticks here".to_string()];
+        let fence = make_fence(&lines);
+        assert_eq!(
+            fence.len(),
+            3,
+            "fence must be at least 3 backticks when evidence has no backtick runs"
+        );
+    }
 }

@@ -9,6 +9,7 @@ use askama::Template;
 use chrono::{DateTime, Utc};
 
 use crate::capture_source::Classification;
+use crate::diff::Diff;
 use crate::error::Result;
 use crate::findings::augmented::AugmentedFinding;
 use crate::findings::{Finding, Severity};
@@ -251,6 +252,309 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
     }
 
     out
+}
+
+/// Render a cross-capture diff as a self-contained HTML report (S-6.03 AC-001).
+///
+/// Produces a self-contained HTML document with sections for new, recurring,
+/// and resolved findings, host changes, role shifts, and flow shifts. All
+/// sections sort deterministically so repeated calls produce byte-identical output.
+///
+/// EC-003: `OtError::Render` propagation is satisfied by the `?` on
+/// `view.render()` below. For a well-typed `DiffReportView` (all owned
+/// `String` / `Vec<…>` fields, askama `escape="html"`) the inner template
+/// render is infallible in practice — but the `Result` return type and `?`
+/// propagation mean any future I/O-backed template variant will still be
+/// caught. No additional test is needed; the property is structural.
+pub fn render_diff_html(diff: &Diff) -> Result<String> {
+    const MAX_EVIDENCE: usize = 5;
+
+    let no_deltas = diff.hosts_new.is_empty()
+        && diff.hosts_gone.is_empty()
+        && diff.findings_new.is_empty()
+        && diff.findings_recurring.is_empty()
+        && diff.findings_resolved.is_empty()
+        && diff.role_shifts.is_empty()
+        && diff.flow_shifts.is_empty()
+        && diff.flows_new.is_empty()
+        && diff.flows_gone.is_empty();
+
+    // C-1 (AC-003): sort each finding slice by a total key before rendering
+    // so that two findings sharing the same rule `id` produce a deterministic
+    // order regardless of the order they came out of HashSet iteration in
+    // `diff::compute`. We clone into a local sorted vec rather than mutating
+    // the input `Diff`.
+    let mut sorted_new = diff.findings_new.clone();
+    sort_findings_total(&mut sorted_new);
+    let mut sorted_recurring = diff.findings_recurring.clone();
+    sort_findings_total(&mut sorted_recurring);
+    let mut sorted_resolved = diff.findings_resolved.clone();
+    sort_findings_total(&mut sorted_resolved);
+
+    let findings_new: Vec<DiffFindingView> = sorted_new
+        .iter()
+        .map(|f| diff_finding_view(f, MAX_EVIDENCE))
+        .collect();
+
+    let findings_recurring: Vec<DiffFindingView> = sorted_recurring
+        .iter()
+        .map(|f| diff_finding_view(f, MAX_EVIDENCE))
+        .collect();
+
+    let findings_resolved: Vec<DiffFindingView> = sorted_resolved
+        .iter()
+        .map(|f| diff_finding_view(f, MAX_EVIDENCE))
+        .collect();
+
+    // F-4: defensively sort non-finding sections on local clones so the
+    // renderer is self-sufficiently deterministic even if `compute()` changes.
+    let mut sorted_hosts_new = diff.hosts_new.clone();
+    sorted_hosts_new.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
+    let mut sorted_hosts_gone = diff.hosts_gone.clone();
+    sorted_hosts_gone.sort_by(|a, b| a.pseudonym.cmp(&b.pseudonym));
+    let mut sorted_role_shifts = diff.role_shifts.clone();
+    sorted_role_shifts.sort_by(|a, b| {
+        a.pseudonym
+            .cmp(&b.pseudonym)
+            .then_with(|| a.old_role.cmp(&b.old_role))
+            .then_with(|| a.new_role.cmp(&b.new_role))
+    });
+    let mut sorted_flow_shifts = diff.flow_shifts.clone();
+    sorted_flow_shifts.sort_by(|a, b| {
+        // Largest-ratio first ("loudest signal first") — mirrors diff.rs intent.
+        b.ratio
+            .partial_cmp(&a.ratio)
+            .unwrap_or(core::cmp::Ordering::Equal)
+            .then_with(|| a.src.cmp(&b.src))
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+    let mut sorted_flows_new = diff.flows_new.clone();
+    sorted_flows_new.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+    let mut sorted_flows_gone = diff.flows_gone.clone();
+    sorted_flows_gone.sort_by(|a, b| {
+        a.src
+            .cmp(&b.src)
+            .then_with(|| a.dst.cmp(&b.dst))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
+
+    let hosts_new: Vec<DiffHostView> = sorted_hosts_new.iter().map(diff_host_view).collect();
+
+    let hosts_gone: Vec<DiffHostView> = sorted_hosts_gone.iter().map(diff_host_view).collect();
+
+    let role_shifts: Vec<DiffRoleShiftView> = sorted_role_shifts
+        .iter()
+        .map(|r| DiffRoleShiftView {
+            pseudonym: r.pseudonym.clone(),
+            old_role: r.old_role.clone(),
+            new_role: r.new_role.clone(),
+        })
+        .collect();
+
+    let flow_shifts: Vec<DiffFlowShiftView> = sorted_flow_shifts
+        .iter()
+        .map(|f| DiffFlowShiftView {
+            src: f.src.clone(),
+            dst: f.dst.clone(),
+            dst_port: f.dst_port,
+            proto: f.proto.clone(),
+            baseline_bytes: f.baseline_bytes.to_string(),
+            current_bytes: f.current_bytes.to_string(),
+            ratio: format!("{:.2}", f.ratio),
+        })
+        .collect();
+
+    let flows_new: Vec<DiffFlowSummaryView> = sorted_flows_new
+        .iter()
+        .map(diff_flow_summary_view)
+        .collect();
+
+    let flows_gone: Vec<DiffFlowSummaryView> = sorted_flows_gone
+        .iter()
+        .map(diff_flow_summary_view)
+        .collect();
+
+    let view = DiffReportView {
+        version: crate::VERSION.to_string(),
+        no_deltas,
+        findings_new_count: diff.findings_new.len(),
+        findings_recurring_count: diff.findings_recurring.len(),
+        findings_resolved_count: diff.findings_resolved.len(),
+        hosts_new_count: diff.hosts_new.len(),
+        hosts_gone_count: diff.hosts_gone.len(),
+        flow_shifts_count: diff.flow_shifts.len(),
+        flow_shift_label: format!("≥{}", fmt_multiplier(diff.flow_shift_multiplier)),
+        findings_new,
+        findings_recurring,
+        findings_resolved,
+        hosts_new,
+        hosts_gone,
+        role_shifts,
+        flow_shifts,
+        flows_new,
+        flows_gone,
+    };
+    Ok(view.render()?)
+}
+
+#[derive(Template)]
+#[template(path = "diff.html", escape = "html")]
+struct DiffReportView {
+    version: String,
+    no_deltas: bool,
+    findings_new_count: usize,
+    findings_recurring_count: usize,
+    findings_resolved_count: usize,
+    hosts_new_count: usize,
+    hosts_gone_count: usize,
+    flow_shifts_count: usize,
+    /// Pre-formatted label for the flow-shift threshold, e.g. `"≥2×"` or `"≥3×"`.
+    /// Computed from `Diff::flow_shift_multiplier` so the template stays logic-light
+    /// per ADR-0003.
+    flow_shift_label: String,
+    findings_new: Vec<DiffFindingView>,
+    findings_recurring: Vec<DiffFindingView>,
+    findings_resolved: Vec<DiffFindingView>,
+    hosts_new: Vec<DiffHostView>,
+    hosts_gone: Vec<DiffHostView>,
+    role_shifts: Vec<DiffRoleShiftView>,
+    flow_shifts: Vec<DiffFlowShiftView>,
+    flows_new: Vec<DiffFlowSummaryView>,
+    flows_gone: Vec<DiffFlowSummaryView>,
+}
+
+struct DiffFindingView {
+    id: String,
+    severity_label: String,
+    severity_class: String,
+    title: String,
+    summary: String,
+    evidence: Vec<String>,
+    /// Number of evidence rows after capping (≤ MAX_EVIDENCE).
+    evidence_count: usize,
+    /// Total evidence rows before capping. When `evidence_total > evidence_count`
+    /// the template renders "showing {evidence_count} of {evidence_total}";
+    /// otherwise it renders "{evidence_count} sample(s)".
+    evidence_total: usize,
+    recommendation: String,
+}
+
+struct DiffHostView {
+    pseudonym: String,
+    role: String,
+    protocols: String,
+    zone: String,
+    packets: String,
+    bytes: String,
+}
+
+struct DiffRoleShiftView {
+    pseudonym: String,
+    old_role: String,
+    new_role: String,
+}
+
+struct DiffFlowShiftView {
+    src: String,
+    dst: String,
+    dst_port: u16,
+    proto: String,
+    baseline_bytes: String,
+    current_bytes: String,
+    ratio: String,
+}
+
+struct DiffFlowSummaryView {
+    src: String,
+    dst: String,
+    dst_port: u16,
+    proto: String,
+    bytes: String,
+}
+
+/// Format a flow-shift multiplier for display labels.
+///
+/// Integer values (fract == 0) are rendered without a trailing ".0":
+/// `2.0 → "2×"`, `3.0 → "3×"`. Non-integer values use one decimal place:
+/// `1.5 → "1.5×"`. Always includes the "×" suffix.
+fn fmt_multiplier(m: f64) -> String {
+    if m.fract() == 0.0 {
+        format!("{}×", m as i64)
+    } else {
+        format!("{:.1}×", m)
+    }
+}
+
+fn diff_finding_view(f: &Finding, max_evidence: usize) -> DiffFindingView {
+    let evidence_total = f.evidence.len();
+    let capped: Vec<String> = f.evidence.iter().take(max_evidence).cloned().collect();
+    let evidence_count = capped.len();
+    DiffFindingView {
+        id: f.id.to_string(),
+        severity_label: severity_label(f.severity).to_string(),
+        severity_class: severity_class(f.severity).to_string(),
+        title: f.title.clone(),
+        summary: f.summary.clone(),
+        evidence: capped,
+        evidence_count,
+        evidence_total,
+        recommendation: f.recommendation.to_string(),
+    }
+}
+
+/// C-1 (AC-003): sort a findings slice by a provably total key
+/// `(id, title, severity, evidence_all_joined, summary, recommendation)`
+/// to guarantee a deterministic order even when two findings share the same
+/// rule `id`. The key is total: every component is total-ordered, and the
+/// final `recommendation` field eliminates the last remaining source of
+/// input-order dependency.
+fn sort_findings_total(findings: &mut [Finding]) {
+    findings.sort_by(|a, b| {
+        a.id.cmp(b.id)
+            .then_with(|| a.title.cmp(&b.title))
+            .then_with(|| a.severity.cmp(&b.severity))
+            .then_with(|| a.evidence.join("\n").cmp(&b.evidence.join("\n")))
+            .then_with(|| a.summary.cmp(&b.summary))
+            .then_with(|| a.recommendation.cmp(b.recommendation))
+    });
+}
+
+fn diff_host_view(h: &crate::diff::HostRef) -> DiffHostView {
+    DiffHostView {
+        pseudonym: h.pseudonym.clone(),
+        role: h.role.clone(),
+        protocols: if h.protocols.is_empty() {
+            "—".to_string()
+        } else {
+            h.protocols.join(", ")
+        },
+        zone: if h.in_ot_zone {
+            "OT".to_string()
+        } else {
+            "IT".to_string()
+        },
+        packets: h.packets.to_string(),
+        bytes: human_bytes(h.bytes),
+    }
+}
+
+fn diff_flow_summary_view(f: &crate::diff::FlowSummary) -> DiffFlowSummaryView {
+    DiffFlowSummaryView {
+        src: f.src.clone(),
+        dst: f.dst.clone(),
+        dst_port: f.dst_port,
+        proto: f.proto.clone(),
+        bytes: human_bytes(f.bytes),
+    }
 }
 
 fn html_escape(s: &str) -> String {

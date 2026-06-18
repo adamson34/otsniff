@@ -3503,3 +3503,586 @@ fn augment_failure_after_analyze_success_renders_without_augment() {
         "EC-004: markdown augmented section must be absent when augmented findings are empty"
     );
 }
+
+// ---------------------------------------------------------------------------
+// S-6.03 / BC-8.04.001 — diff renderer tests
+//
+// AC-001: HTML renderer produces a summary banner and labelled sections.
+// AC-002: Markdown renderer produces the same data in LLM-friendly form.
+// AC-003: Both renderers are deterministic (two calls on the same Diff are equal).
+// EC-001: Empty Diff produces a "No deltas detected" banner in both renderers.
+// ---------------------------------------------------------------------------
+
+use otsniff::diff::{Diff, FlowDelta, FlowSummary, HostRef, RoleShift};
+use otsniff::report::render_diff_html;
+use otsniff::report_md::render_diff_markdown;
+
+/// Build a deterministic non-empty Diff fixture covering every section:
+/// - `findings_new` (1 finding)
+/// - `findings_recurring` (1 finding)
+/// - `findings_resolved` (1 finding)
+/// - `hosts_new` (1 host)
+/// - `hosts_gone` (1 host)
+/// - `role_shifts` (1 shift — host_003 changed plc → hmi)
+/// - `flow_shifts` (1 shift — ratio 4.0x, above the default 2.0 threshold)
+/// - `flows_new` (1 flow — host_004 → host_002:102)
+/// - `flows_gone` (1 flow — host_005 → host_001:44818)
+fn build_diff_fixture() -> Diff {
+    use otsniff::findings::Severity;
+
+    let finding_new = otsniff::findings::Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "NEW: Modbus write commands observed".to_string(),
+        summary: "Engineering writes seen in current capture that were absent in baseline."
+            .to_string(),
+        evidence: vec!["host_001 -> host_002:502".to_string()],
+        recommendation: "Verify write commands are expected for this capture window.",
+        playbook: vec![
+            "Review Modbus write targets against change management records.".to_string(),
+        ],
+    };
+
+    let finding_recurring = otsniff::findings::Finding {
+        id: "egress.ot_to_internet",
+        severity: Severity::Medium,
+        title: "RECURRING: OT-to-internet egress still present".to_string(),
+        summary: "Outbound internet traffic from OT subnet observed in both captures.".to_string(),
+        evidence: vec!["host_001 -> 8.8.8.8:80".to_string()],
+        recommendation: "Block outbound internet traffic from OT zone at the perimeter firewall.",
+        playbook: vec![
+            "Identify source and destination of each egress flow.".to_string(),
+            "Confirm with network owner whether this connection is expected.".to_string(),
+        ],
+    };
+
+    let finding_resolved = otsniff::findings::Finding {
+        id: "creds.telnet",
+        severity: Severity::High,
+        title: "RESOLVED: Plaintext Telnet session no longer present".to_string(),
+        summary: "Telnet session observed in baseline is absent from current capture.".to_string(),
+        evidence: vec!["host_003:23".to_string()],
+        recommendation: "Confirm Telnet is permanently disabled and not re-enabled.",
+        playbook: vec!["Verify Telnet service is disabled on all OT devices.".to_string()],
+    };
+
+    let host_new = HostRef {
+        pseudonym: "host_004".to_string(),
+        role: "engineering".to_string(),
+        protocols: vec!["modbus".to_string(), "smb".to_string()],
+        packets: 300,
+        bytes: 28_800,
+        in_ot_zone: true,
+    };
+
+    let host_gone = HostRef {
+        pseudonym: "host_005".to_string(),
+        role: "plc".to_string(),
+        protocols: vec!["modbus".to_string()],
+        packets: 150,
+        bytes: 14_400,
+        in_ot_zone: true,
+    };
+
+    let role_shift = RoleShift {
+        pseudonym: "host_003".to_string(),
+        old_role: "plc".to_string(),
+        new_role: "hmi".to_string(),
+    };
+
+    let flow_shift = FlowDelta {
+        src: "host_001".to_string(),
+        dst: "host_002".to_string(),
+        dst_port: 502,
+        proto: "tcp".to_string(),
+        baseline_bytes: 10_000,
+        current_bytes: 40_000,
+        ratio: 4.0,
+    };
+
+    let flow_new = FlowSummary {
+        src: "host_004".to_string(),
+        dst: "host_002".to_string(),
+        dst_port: 102,
+        proto: "tcp".to_string(),
+        bytes: 5_000,
+    };
+
+    let flow_gone = FlowSummary {
+        src: "host_005".to_string(),
+        dst: "host_001".to_string(),
+        dst_port: 44818,
+        proto: "tcp".to_string(),
+        bytes: 3_200,
+    };
+
+    Diff {
+        hosts_new: vec![host_new],
+        hosts_gone: vec![host_gone],
+        findings_new: vec![finding_new],
+        findings_recurring: vec![finding_recurring],
+        findings_resolved: vec![finding_resolved],
+        role_shifts: vec![role_shift],
+        flow_shifts: vec![flow_shift],
+        flows_new: vec![flow_new],
+        flows_gone: vec![flow_gone],
+        flow_shift_multiplier: 2.0,
+    }
+}
+
+// ── AC-001 (BC-8.04.001) — HTML diff renderer snapshot + structural assertions ──
+
+/// AC-001 / BC-8.04.001: `render_diff_html` must produce an HTML report with:
+/// - a summary banner showing counts for new / recurring / resolved findings,
+///   new / gone hosts, and flow shifts,
+/// - a "NEW since baseline" section,
+/// - a "RESOLVED" section,
+/// - a recurring badge or label on the recurring finding,
+/// - a host-changes section covering hosts_new and hosts_gone,
+/// - a role-shifts section,
+/// - a flow-shifts section.
+///
+/// Red Gate: panics on `todo!("S-6.03: implement render_diff_html")` until
+/// the implementer writes real rendering logic.
+#[test]
+fn test_bc_8_04_001_diff_html_snapshot_and_sections() {
+    let diff = build_diff_fixture();
+    let html = render_diff_html(&diff)
+        .expect("BC-8.04.001 AC-001: render_diff_html must return Ok for a well-formed Diff");
+
+    // Snapshot: captures full output for regression detection.
+    // Leave un-accepted so the implementer accepts after writing real output.
+    insta::assert_snapshot!("diff_html_report", html);
+
+    // --- Summary banner ---
+    // Must contain counts for the three finding buckets.
+    let lower = html.to_lowercase();
+    assert!(
+        lower.contains("new") && lower.contains("1"),
+        "BC-8.04.001 AC-001: summary banner must include new-finding count (1)"
+    );
+    assert!(
+        lower.contains("resolved") || lower.contains("resolve"),
+        "BC-8.04.001 AC-001: summary banner must reference resolved findings"
+    );
+    assert!(
+        lower.contains("recurring"),
+        "BC-8.04.001 AC-001: summary banner or section must contain the word 'recurring'"
+    );
+
+    // --- Section: NEW since baseline ---
+    assert!(
+        lower.contains("new since baseline")
+            || lower.contains("new since")
+            || lower.contains("new findings"),
+        "BC-8.04.001 AC-001: HTML must contain a 'NEW since baseline' section header"
+    );
+    // The new finding's rule id must appear somewhere in the output.
+    assert!(
+        html.contains("ics.modbus_writes"),
+        "BC-8.04.001 AC-001: HTML must include the new finding id ics.modbus_writes"
+    );
+
+    // --- Section: RESOLVED ---
+    assert!(
+        html.contains("creds.telnet"),
+        "BC-8.04.001 AC-001: HTML must include the resolved finding id creds.telnet"
+    );
+
+    // --- Recurring badge ---
+    assert!(
+        html.contains("egress.ot_to_internet"),
+        "BC-8.04.001 AC-001: HTML must include the recurring finding id egress.ot_to_internet"
+    );
+
+    // --- Host changes section ---
+    // The new host pseudonym and gone host pseudonym must appear.
+    assert!(
+        html.contains("host_004"),
+        "BC-8.04.001 AC-001: HTML must mention the new host pseudonym (host_004)"
+    );
+    assert!(
+        html.contains("host_005"),
+        "BC-8.04.001 AC-001: HTML must mention the gone host pseudonym (host_005)"
+    );
+
+    // --- Role shifts section ---
+    assert!(
+        html.contains("host_003"),
+        "BC-8.04.001 AC-001: HTML must mention the role-shifted host (host_003)"
+    );
+    assert!(
+        html.contains("plc") && html.contains("hmi"),
+        "BC-8.04.001 AC-001: HTML must show old role (plc) and new role (hmi) for the shift"
+    );
+
+    // --- Flow shifts section ---
+    // The flow shift (ratio 4.0, host_001 -> host_002:502) must be represented.
+    assert!(
+        html.contains("host_001") && html.contains("host_002"),
+        "BC-8.04.001 AC-001: HTML must include the flow-shift endpoints (host_001, host_002)"
+    );
+    assert!(
+        html.contains("4") || html.contains("4.0"),
+        "BC-8.04.001 AC-001: HTML must show the flow-shift ratio (4.0x)"
+    );
+}
+
+// ── AC-002 (BC-8.04.001) — markdown diff renderer snapshot ───────────────────
+
+/// AC-002 / BC-8.04.001: `render_diff_markdown` must produce an LLM-friendly
+/// markdown report covering the same sections as the HTML renderer.
+///
+/// Red Gate: panics on `todo!("S-6.03: implement render_diff_markdown")`.
+#[test]
+fn test_bc_8_04_001_diff_markdown_snapshot() {
+    let diff = build_diff_fixture();
+    let md = render_diff_markdown(&diff);
+
+    // Snapshot: captures full output for regression detection.
+    insta::assert_snapshot!("diff_markdown_report", md);
+
+    // --- Structural content assertions ---
+    let lower = md.to_lowercase();
+    assert!(
+        lower.contains("new") || lower.contains("finding"),
+        "BC-8.04.001 AC-002: markdown report must contain findings section"
+    );
+    assert!(
+        md.contains("ics.modbus_writes"),
+        "BC-8.04.001 AC-002: markdown must include new finding id ics.modbus_writes"
+    );
+    assert!(
+        md.contains("creds.telnet"),
+        "BC-8.04.001 AC-002: markdown must include resolved finding id creds.telnet"
+    );
+    assert!(
+        md.contains("egress.ot_to_internet"),
+        "BC-8.04.001 AC-002: markdown must include recurring finding id egress.ot_to_internet"
+    );
+    assert!(
+        md.contains("host_003") && md.contains("plc") && md.contains("hmi"),
+        "BC-8.04.001 AC-002: markdown must show role shift host_003 plc -> hmi"
+    );
+    assert!(
+        md.contains("host_004") && md.contains("host_005"),
+        "BC-8.04.001 AC-002: markdown must mention host_004 (new) and host_005 (gone)"
+    );
+}
+
+// ── AC-003 (BC-8.04.001) — determinism: same Diff → identical output ─────────
+
+/// AC-003 / BC-8.04.001: `render_diff_html` called twice on the same `Diff`
+/// must produce byte-for-byte identical output.
+///
+/// Red Gate: panics on `todo!()` before producing any output at all.
+#[test]
+fn test_bc_8_04_001_diff_html_is_deterministic() {
+    let diff = build_diff_fixture();
+    let first = render_diff_html(&diff)
+        .expect("BC-8.04.001 AC-003: first render_diff_html call must succeed");
+    let second = render_diff_html(&diff)
+        .expect("BC-8.04.001 AC-003: second render_diff_html call must succeed");
+    assert_eq!(
+        first, second,
+        "BC-8.04.001 AC-003: render_diff_html must be deterministic — \
+         two calls on the same Diff produced different output"
+    );
+}
+
+/// AC-003 / BC-8.04.001: `render_diff_markdown` called twice on the same `Diff`
+/// must produce byte-for-byte identical output.
+///
+/// Red Gate: panics on `todo!()` before producing any output at all.
+#[test]
+fn test_bc_8_04_001_diff_markdown_is_deterministic() {
+    let diff = build_diff_fixture();
+    let first = render_diff_markdown(&diff);
+    let second = render_diff_markdown(&diff);
+    assert_eq!(
+        first, second,
+        "BC-8.04.001 AC-003: render_diff_markdown must be deterministic — \
+         two calls on the same Diff produced different output"
+    );
+}
+
+// ── EC-001 — empty Diff emits "No deltas detected" banner in both renderers ──
+
+/// EC-001: when `Diff` is fully empty (all vecs empty), both renderers must
+/// emit a "No deltas detected" banner rather than an empty or malformed document.
+///
+/// Red Gate: panics on `todo!()` before producing any output at all.
+#[test]
+fn test_bc_8_04_001_empty_diff_html_no_deltas_banner() {
+    let diff = Diff::default();
+    let html =
+        render_diff_html(&diff).expect("EC-001: render_diff_html must return Ok for an empty Diff");
+    let lower = html.to_lowercase();
+    assert!(
+        lower.contains("no deltas detected")
+            || lower.contains("no changes")
+            || lower.contains("no delta"),
+        "EC-001: empty Diff HTML output must contain a 'No deltas detected' banner; got:\n{}",
+        &html[..html.len().min(800)]
+    );
+}
+
+/// EC-001: same "No deltas detected" invariant for the markdown renderer.
+///
+/// Red Gate: panics on `todo!()` before producing any output at all.
+#[test]
+fn test_bc_8_04_001_empty_diff_markdown_no_deltas_banner() {
+    let diff = Diff::default();
+    let md = render_diff_markdown(&diff);
+    let lower = md.to_lowercase();
+    assert!(
+        lower.contains("no deltas detected")
+            || lower.contains("no changes")
+            || lower.contains("no delta"),
+        "EC-001: empty Diff markdown output must contain a 'No deltas detected' banner; got:\n{}",
+        &md[..md.len().min(800)]
+    );
+}
+
+// ── C-1 (AC-003) — determinism with findings sharing the same rule id ────────
+
+/// C-1 / AC-003: when two findings share the same rule `id` but differ by
+/// endpoint (simulating two Modbus write flows to distinct destinations),
+/// calling `diff::compute` twice on the same inputs and rendering both
+/// results must produce byte-identical HTML and markdown.
+///
+/// This exercises the real `compute -> render` pipeline — not just rendering
+/// a pre-built `Diff` — so any non-determinism in HashSet iteration order
+/// in `compute` is caught.
+#[test]
+fn test_bc_8_04_001_determinism_with_shared_rule_id() {
+    use otsniff::diff::{compute, DiffInput};
+    use otsniff::findings::{Finding, Severity};
+    use otsniff::observe::Observations;
+    use otsniff::scrub::ScrubMap;
+    use std::collections::BTreeMap;
+
+    // Build two findings sharing rule id "ics.modbus_writes" but with
+    // distinct src/dst/port tuples encoded in evidence (test-helper format
+    // recognised by finding_diff_key).
+    let f1 = Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "Modbus write commands".to_string(),
+        summary: "Modbus write from host A".to_string(),
+        evidence: vec!["src=10.0.0.1 dst=10.0.0.10 port=502".to_string()],
+        recommendation: "Review writes.",
+        playbook: vec![],
+    };
+    let f2 = Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "Modbus write commands".to_string(),
+        summary: "Modbus write from host B".to_string(),
+        evidence: vec!["src=10.0.0.2 dst=10.0.0.10 port=502".to_string()],
+        recommendation: "Review writes.",
+        playbook: vec![],
+    };
+
+    let empty_obs = Observations::default();
+    let empty_map = ScrubMap {
+        version: 1,
+        created_at: chrono::Utc::now(),
+        ips: BTreeMap::from([
+            ("host_001".to_string(), "10.0.0.1".to_string()),
+            ("host_002".to_string(), "10.0.0.2".to_string()),
+            ("host_010".to_string(), "10.0.0.10".to_string()),
+        ]),
+        macs: BTreeMap::new(),
+        names: BTreeMap::new(),
+    };
+
+    // Both sides see f1; current also adds f2 (so f2 is "new").
+    let baseline_findings = vec![f1.clone()];
+    let current_findings = vec![f1.clone(), f2.clone()];
+
+    let baseline = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &baseline_findings,
+    };
+    let current = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &current_findings,
+    };
+
+    // Compute twice — HashSet iteration order may differ between runs.
+    let diff_a = compute(baseline, current);
+    let baseline2 = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &baseline_findings,
+    };
+    let current2 = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &current_findings,
+    };
+    let diff_b = compute(baseline2, current2);
+
+    let html_a = render_diff_html(&diff_a).expect("C-1: first render_diff_html call must succeed");
+    let html_b = render_diff_html(&diff_b).expect("C-1: second render_diff_html call must succeed");
+    assert_eq!(
+        html_a, html_b,
+        "C-1 / AC-003: render_diff_html must be deterministic even when \
+         findings share the same rule id — two compute→render runs differed"
+    );
+
+    let md_a = render_diff_markdown(&diff_a);
+    let md_b = render_diff_markdown(&diff_b);
+    assert_eq!(
+        md_a, md_b,
+        "C-1 / AC-003: render_diff_markdown must be deterministic even when \
+         findings share the same rule id — two compute→render runs differed"
+    );
+}
+
+// ── I-3 / EC-002 — evidence-cap label shows "showing X of N" ─────────────────
+
+/// I-3 / EC-002: when a finding carries more than 5 evidence rows, both
+/// renderers must show exactly 5 rows AND display "showing 5 of N" rather
+/// than "5 sample(s)".
+#[test]
+fn test_ec_002_evidence_cap_label_shows_showing_x_of_n() {
+    use otsniff::findings::{Finding, Severity};
+
+    // Build a finding with 8 evidence rows (> MAX_EVIDENCE = 5).
+    let evidence: Vec<String> = (1..=8).map(|i| format!("evidence row {i}")).collect();
+    let finding = Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "Test finding".to_string(),
+        summary: "Summary".to_string(),
+        evidence,
+        recommendation: "Rec.",
+        playbook: vec![],
+    };
+
+    let diff = Diff {
+        findings_new: vec![finding],
+        ..Diff::default()
+    };
+
+    // HTML: must show "showing 5 of 8" and exactly 5 evidence rows.
+    let html = render_diff_html(&diff).expect("EC-002: render_diff_html must succeed");
+    assert!(
+        html.contains("showing 5 of 8"),
+        "EC-002: HTML must show 'showing 5 of 8' when evidence is capped; got evidence section: {}",
+        &html[html.find("Evidence").unwrap_or(0)
+            ..html.len().min(html.find("Evidence").unwrap_or(0) + 200)]
+    );
+    // Exactly 5 evidence rows must appear in the rendered <pre> block.
+    let row_count = (1..=8)
+        .filter(|i| html.contains(&format!("evidence row {i}")))
+        .count();
+    assert_eq!(
+        row_count, 5,
+        "EC-002: HTML must render exactly 5 evidence rows (got {row_count})"
+    );
+    assert!(
+        !html.contains("evidence row 6"),
+        "EC-002: HTML must not render evidence row 6 (beyond cap)"
+    );
+
+    // Markdown: must also show "showing 5 of 8".
+    let md = render_diff_markdown(&diff);
+    assert!(
+        md.contains("showing 5 of 8"),
+        "EC-002: markdown must show 'showing 5 of 8' when evidence is capped; got:\n{}",
+        &md[..md.len().min(600)]
+    );
+    let md_row_count = (1..=8)
+        .filter(|i| md.contains(&format!("evidence row {i}")))
+        .count();
+    assert_eq!(
+        md_row_count, 5,
+        "EC-002: markdown must render exactly 5 evidence rows (got {md_row_count})"
+    );
+    assert!(
+        !md.contains("evidence row 6"),
+        "EC-002: markdown must not render evidence row 6 (beyond cap)"
+    );
+}
+
+// ── F-1 (adv pass 4): flow-shift label reflects actual threshold ──────────────
+
+/// F-1 (adv pass 4): when `--flow-shift-multiplier` is set to a non-default
+/// value, both renderers must label the section with the actual threshold, not
+/// the hardcoded default "2×".
+///
+/// Two sub-cases:
+///   (a) multiplier 3.0 → labels must say "≥3×" and must NOT say "≥2×".
+///   (b) default multiplier 2.0 → labels must still say "≥2×" (regression guard).
+#[test]
+fn test_flow_shift_label_reflects_actual_multiplier() {
+    use otsniff::diff::{Diff, FlowDelta};
+
+    let flow_shift = FlowDelta {
+        src: "host_001".to_string(),
+        dst: "host_002".to_string(),
+        dst_port: 502,
+        proto: "tcp".to_string(),
+        baseline_bytes: 1_000,
+        current_bytes: 4_000,
+        ratio: 4.0,
+    };
+
+    // ── (a) non-default multiplier 3.0 ──────────────────────────────────────
+    let diff_3x = Diff {
+        flow_shifts: vec![flow_shift.clone()],
+        flow_shift_multiplier: 3.0,
+        ..Diff::default()
+    };
+
+    let html_3x =
+        render_diff_html(&diff_3x).expect("render_diff_html must succeed for multiplier=3.0 diff");
+    assert!(
+        html_3x.contains("≥3×"),
+        "HTML with multiplier=3.0 must contain '≥3×'; got a snippet:\n{}",
+        &html_3x[html_3x.find("Flow shifts").unwrap_or(0)
+            ..html_3x
+                .len()
+                .min(html_3x.find("Flow shifts").unwrap_or(0) + 200)]
+    );
+    assert!(
+        !html_3x.contains("≥2×"),
+        "HTML with multiplier=3.0 must NOT contain '≥2×'"
+    );
+
+    let md_3x = render_diff_markdown(&diff_3x);
+    assert!(
+        md_3x.contains("≥3×"),
+        "Markdown with multiplier=3.0 must contain '≥3×'; got:\n{}",
+        &md_3x[..md_3x.len().min(600)]
+    );
+    assert!(
+        !md_3x.contains("≥2×"),
+        "Markdown with multiplier=3.0 must NOT contain '≥2×'"
+    );
+
+    // ── (b) default multiplier 2.0 — regression guard ───────────────────────
+    let diff_2x = Diff {
+        flow_shifts: vec![flow_shift],
+        flow_shift_multiplier: 2.0,
+        ..Diff::default()
+    };
+
+    let html_2x =
+        render_diff_html(&diff_2x).expect("render_diff_html must succeed for multiplier=2.0 diff");
+    assert!(
+        html_2x.contains("≥2×"),
+        "HTML with default multiplier=2.0 must still contain '≥2×' (regression guard)"
+    );
+
+    let md_2x = render_diff_markdown(&diff_2x);
+    assert!(
+        md_2x.contains("≥2×"),
+        "Markdown with default multiplier=2.0 must still contain '≥2×' (regression guard)"
+    );
+}
