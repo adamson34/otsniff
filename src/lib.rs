@@ -12,6 +12,7 @@
 
 pub mod digest;
 pub mod errors;
+pub mod multicast;
 pub mod portset;
 pub mod resolver;
 pub mod severity;

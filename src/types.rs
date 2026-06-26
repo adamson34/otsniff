@@ -210,6 +210,16 @@ pub struct ResolvedEndpoint {
     pub match_kind: MatchKind,
 }
 
+/// Destination-address classification computed before zone-pair classification
+/// (DI-016 Steps 1-2). A multicast / limited-broadcast / directed-broadcast dst
+/// short-circuits to the `MulticastExempt` verdict (BC-1.03.003 / BC-1.03.004),
+/// avoiding false `NoMatchingConduit` violations on cyclic OT I/O patterns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DstKind {
+    Normal,
+    MulticastBroadcast,
+}
+
 /// Both endpoints of a flow resolved to zones (the classifier's input).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedPair {
