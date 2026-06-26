@@ -53,6 +53,64 @@ fn ports(pairs: &[(u16, u16)]) -> PortSet {
 
 // ── AC-001: structurally-equal policies → same digest ────────────────────────
 
+// Phase 6 mutation-hardening: the digest must be SENSITIVE to every canonical
+// token — two policies differing in exactly one field must hash differently.
+// Replacing any digest token function with a constant collapses a distinction
+// here (kills the digest.rs cargo-mutants survivors).
+#[test]
+fn test_BC_1_05_003_digest_sensitive_to_each_token() {
+    let z0 = zone("z", &["10.0.0.0/24"], None);
+    let z1 = zone("y", &["10.0.1.0/24"], None);
+    let base_cond = cond("z", "y", ports(&[(502, 502)]));
+    let d = compute(&policy(
+        vec![z0.clone(), z1.clone()],
+        vec![base_cond.clone()],
+    ));
+
+    let mut z = z0.clone();
+    z.purdue_level = PurdueLevel::L4;
+    assert_ne!(
+        d,
+        compute(&policy(vec![z, z1.clone()], vec![base_cond.clone()])),
+        "digest must depend on purdue_level"
+    );
+
+    let mut z = z0.clone();
+    z.sl_t = Some(SlTarget {
+        overall: Some(3),
+        fr_vector: None,
+    });
+    assert_ne!(
+        d,
+        compute(&policy(vec![z, z1.clone()], vec![base_cond.clone()])),
+        "digest must depend on sl_t"
+    );
+
+    let mut c = base_cond.clone();
+    c.direction = Direction::Bidirectional;
+    assert_ne!(
+        d,
+        compute(&policy(vec![z0.clone(), z1.clone()], vec![c])),
+        "digest must depend on direction"
+    );
+
+    let mut c = base_cond.clone();
+    c.proto = Proto::Udp;
+    assert_ne!(
+        d,
+        compute(&policy(vec![z0.clone(), z1.clone()], vec![c])),
+        "digest must depend on proto"
+    );
+
+    let mut c = base_cond.clone();
+    c.ports = ports(&[(44818, 44818)]);
+    assert_ne!(
+        d,
+        compute(&policy(vec![z0.clone(), z1.clone()], vec![c])),
+        "digest must depend on ports"
+    );
+}
+
 #[test]
 fn test_BC_1_05_003_structurally_equal_policies_same_digest() {
     // Same model: reversed zone order, reversed member order, and a duplicate
