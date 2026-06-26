@@ -136,6 +136,23 @@ fn test_BC_1_01_005_host_tie_rejected() {
 }
 
 #[test]
+fn test_BC_1_01_005_ipv4_mapped_member_ties_with_ipv4() {
+    // EC-005: ::ffff:10.0.0.0/120 canonicalizes to IPv4 10.0.0.0/24 and ties
+    // with a literal IPv4 10.0.0.0/24 in another zone (WAVE3-002 fix).
+    let p = policy(
+        vec![
+            zone("a", &["10.0.0.0/24"]),
+            zone("b", &["::ffff:10.0.0.0/120"]),
+        ],
+        vec![],
+    );
+    assert!(
+        matches!(validate(p), Err(PolicyError::PrefixTie { .. })),
+        "IPv4-mapped IPv6 member must canonicalize to IPv4 and tie"
+    );
+}
+
+#[test]
 fn test_BC_1_01_005_disjoint_same_length_ok() {
     // EC-002: disjoint same-length CIDRs are not a tie (DEC-022).
     let p = policy(

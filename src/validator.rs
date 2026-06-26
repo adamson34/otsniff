@@ -11,6 +11,7 @@
 //! type system makes that contract unrepresentable here.
 
 use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 
 use ipnet::IpNet;
 
@@ -103,20 +104,35 @@ pub fn validate(policy: Policy) -> Result<ValidatedPolicy, PolicyError> {
 }
 
 /// Convert a zone member to its canonical network (host bits cleared). A bare
-/// `IpAddr` is a host route (`/32` or `/128`).
+/// `IpAddr` is a host route (`/32` or `/128`). IPv4-mapped IPv6 members are
+/// folded to IPv4 so they match IPv4 flows and tie with IPv4 matchers
+/// (BC-1.02.005 / BC-1.01.005 EC-005 — WAVE3-002).
 fn matcher_to_net(m: &AssetMatcher) -> Result<IpNet, PolicyError> {
-    let net = match m {
-        AssetMatcher::Ip(ip) => {
-            let plen = if ip.is_ipv4() { 32 } else { 128 };
-            IpNet::new(*ip, plen)
-        }
-        AssetMatcher::Cidr { addr, prefix_len } => IpNet::new(*addr, *prefix_len),
+    let (addr, prefix_len) = match m {
+        AssetMatcher::Ip(ip) => (*ip, if ip.is_ipv4() { 32 } else { 128 }),
+        AssetMatcher::Cidr { addr, prefix_len } => (*addr, *prefix_len),
     };
-    net.map(|n| n.trunc())
+    let (addr, prefix_len) = canonicalize_mapped(addr, prefix_len);
+    IpNet::new(addr, prefix_len)
+        .map(|n| n.trunc())
         .map_err(|_| PolicyError::InvalidToken {
             field: "members".to_string(),
             value: matcher_str(m),
         })
+}
+
+/// Fold an IPv4-mapped IPv6 network (`::ffff:a.b.c.d/N`, `N >= 96`) to its IPv4
+/// form (`a.b.c.d/(N-96)`); the mapped space is `::ffff:0:0/96`, so the IPv4
+/// prefix is `N - 96`. Non-mapped addresses are returned unchanged.
+fn canonicalize_mapped(addr: IpAddr, prefix_len: u8) -> (IpAddr, u8) {
+    if let IpAddr::V6(v6) = addr {
+        if let Some(v4) = v6.to_ipv4_mapped() {
+            if prefix_len >= 96 {
+                return (IpAddr::V4(v4), prefix_len - 96);
+            }
+        }
+    }
+    (addr, prefix_len)
 }
 
 /// Render a member as the user wrote it, for diagnostics.

@@ -13,6 +13,7 @@
 pub mod digest;
 pub mod errors;
 pub mod portset;
+pub mod resolver;
 pub mod severity;
 pub mod types;
 pub mod validator;

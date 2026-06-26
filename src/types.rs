@@ -210,6 +210,29 @@ pub struct ResolvedEndpoint {
     pub match_kind: MatchKind,
 }
 
+/// Both endpoints of a flow resolved to zones (the classifier's input).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedPair {
+    pub src: ResolvedEndpoint,
+    pub dst: ResolvedEndpoint,
+}
+
+impl ResolvedPair {
+    /// Whether both endpoints resolved to the same zone (DI-002). The classifier
+    /// turns this into an `IntraZone` verdict. Both-EXTERNAL is the special case
+    /// of this predicate (BC-1.03.005) since EXTERNAL is a single zone.
+    pub fn same_zone(&self) -> bool {
+        self.src.zone_id == self.dst.zone_id
+    }
+
+    /// Whether both endpoints resolved to the implicit EXTERNAL zone
+    /// (BC-1.03.005). A both-EXTERNAL flow is IntraZone and never carries an
+    /// IDMZ-bypass finding (DI-006).
+    pub fn both_external(&self) -> bool {
+        self.src.zone_id.is_external() && self.dst.zone_id.is_external()
+    }
+}
+
 /// The single, mutually-exclusive per-flow conduit/zone classification (DI-015).
 /// `IdmzBypass` is intentionally NOT here — it is an additive finding on `Verdict`.
 #[derive(Debug, Clone, PartialEq, Eq)]
