@@ -7,6 +7,8 @@
 
 use std::net::IpAddr;
 
+use ipnet::IpNet;
+
 use crate::portset::PortSet;
 
 /// Identifier for a zone (e.g. `"plc_cell_1"`, or the reserved `EXTERNAL`).
@@ -119,6 +121,21 @@ pub struct Conduit {
 pub struct Policy {
     pub zones: Vec<Zone>,
     pub conduits: Vec<Conduit>,
+}
+
+/// The longest-prefix resolution index: every zone member as a canonical network
+/// paired with its owning zone, sorted descending by prefix length so the first
+/// containing entry is the most-specific match (ADR-003, consumed by S-3.01).
+pub type PrefixIndex = Vec<(IpNet, ZoneId)>;
+
+/// A `Policy` that has passed semantic validation (BC-1.01.004–008), together
+/// with its prebuilt longest-prefix index and any non-fatal warnings (zero-member
+/// zones, very-short prefixes). Produced by `validator::validate`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedPolicy {
+    pub policy: Policy,
+    pub prefix_index: PrefixIndex,
+    pub warnings: Vec<String>,
 }
 
 /// Application-layer protocol identity (distinct from transport `Proto`).

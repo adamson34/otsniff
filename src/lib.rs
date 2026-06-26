@@ -14,6 +14,7 @@ pub mod errors;
 pub mod portset;
 pub mod severity;
 pub mod types;
+pub mod validator;
 
 use crate::errors::FlowParseError;
 use crate::types::Flow;

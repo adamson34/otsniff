@@ -13,6 +13,7 @@ rust-version.workspace = true
 # the effectful shell (zonewarden binary) owns wire formats.
 [dependencies]
 thiserror = "1.0"
+ipnet = "2.9"   # IpNet for the longest-prefix index + equal-prefix tie detection (ADR-003)
 
 [dev-dependencies]
 proptest = "1"

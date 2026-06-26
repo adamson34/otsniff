@@ -22,6 +22,35 @@ pub enum PolicyError {
     /// E-POL-004 — a YAML mapping contains a duplicate key (DEC-028 / DI-010).
     #[error("E-POL-004: duplicate mapping key in policy: {detail}")]
     DuplicateKey { detail: String },
+
+    /// E-POL-005 — two zones share an `id`, or a zone redeclares the reserved
+    /// `EXTERNAL` id (BC-1.01.004 / DI-010).
+    #[error("E-POL-005: duplicate or reserved zone id: `{id}`")]
+    DuplicateZoneId { id: String },
+
+    /// E-POL-006 — a conduit references a zone that is neither declared nor the
+    /// reserved `EXTERNAL` (BC-1.01.004).
+    #[error("E-POL-006: conduit ({from} -> {to}) references unknown zone: `{zone}`")]
+    UnknownConduitZone {
+        from: String,
+        to: String,
+        zone: String,
+    },
+
+    /// E-POL-007 — two zones declare the same prefix (same family + length +
+    /// network), an equal-prefix tie that makes resolution ambiguous
+    /// (BC-1.01.005).
+    #[error("E-POL-007: equal-prefix tie on `{cidr}` between zones `{zone_a}` and `{zone_b}`")]
+    PrefixTie {
+        cidr: String,
+        zone_a: String,
+        zone_b: String,
+    },
+
+    /// E-POL-008 — a zone member uses the catch-all `/0` prefix, which would
+    /// shadow the implicit `EXTERNAL` zone (BC-1.01.006).
+    #[error("E-POL-008: zone `{zone}` member `{cidr}` uses the forbidden /0 catch-all prefix")]
+    CatchAllPrefix { zone: String, cidr: String },
 }
 
 /// Filesystem errors reading an input file.
