@@ -88,6 +88,38 @@ pub enum FlowParseError {
     UnspecifiedAddress { line: u64, role: String },
 }
 
+/// System / resource limits (E-SYS-*). Fatal: unlike [`FlowParseError`] these
+/// abort the run cleanly (no partial output — BC-1.02.006, OQ-006).
+#[derive(Debug, Error, PartialEq, Eq, Clone)]
+pub enum SysError {
+    /// E-SYS-001 — the ingest cap was reached; the run aborts with no output.
+    #[error(
+        "E-SYS-001: ingest cap exceeded: max_flows = {max}. Run aborted after {count} flows. \
+         Re-run with a higher --max-flows cap or split the input."
+    )]
+    CapExceeded { max: u64, count: u64 },
+
+    /// E-SYS-002 — `--max-flows 0` is a usage error (the cap must be >= 1).
+    #[error("E-SYS-002: --max-flows must be > 0")]
+    ZeroMaxFlows,
+
+    /// E-SYS-003 — a `u64` tally would overflow (defensive; far above the cap).
+    #[error("E-SYS-003: numeric tally overflow")]
+    TallyOverflow,
+}
+
+/// The error channel of a flow stream: either a per-record skip signal
+/// ([`FlowParseError`], non-fatal) or a fatal [`SysError`] (e.g. ingest cap).
+/// Keeping both in one stream lets the adapter abort mid-iteration on a cap
+/// breach while still surfacing skips inline (BC-1.02.002 / BC-1.02.006).
+#[derive(Debug, Error, PartialEq, Eq, Clone)]
+pub enum IngestError {
+    #[error(transparent)]
+    Parse(#[from] FlowParseError),
+    #[error(transparent)]
+    Sys(#[from] SysError),
+}
+
 /// Top-level error type returned across the tool boundary.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ZonewardenError {
@@ -95,14 +127,16 @@ pub enum ZonewardenError {
     Policy(#[from] PolicyError),
     #[error(transparent)]
     Io(#[from] IoError),
+    #[error(transparent)]
+    Sys(#[from] SysError),
 }
 
 impl ZonewardenError {
     /// Process exit code per the ST-8 model (S-6.03 owns the full mapping).
-    /// Policy and I/O errors are usage/config errors → exit 2.
+    /// Policy, I/O, and system errors are all usage/config/limit errors → exit 2.
     pub fn exit_code(&self) -> u8 {
         match self {
-            ZonewardenError::Policy(_) | ZonewardenError::Io(_) => 2,
+            ZonewardenError::Policy(_) | ZonewardenError::Io(_) | ZonewardenError::Sys(_) => 2,
         }
     }
 }
