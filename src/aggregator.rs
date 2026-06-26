@@ -77,6 +77,22 @@ pub fn aggregate(
     }
 
     r.distinct_violating_flows = violating.len() as u64;
+
+    // Deterministic total-order sort (BC-1.05.002 / DI-009): identical input →
+    // byte-identical output. `flow_index` is the final tiebreaker (unique per
+    // run), so the order is strict and stable regardless of insertion order.
+    r.violations.sort_by_key(|v| {
+        (
+            v.ts,
+            v.src_ip,
+            v.src_port,
+            v.dst_ip,
+            v.dst_port,
+            v.proto.clone(),
+            v.flow_index,
+        )
+    });
+
     r.policy_digest = digest::compute(&policy.policy);
     Ok(r)
 }

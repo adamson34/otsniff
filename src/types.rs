@@ -91,7 +91,9 @@ pub enum Direction {
 }
 
 /// Transport protocol. `Icmp` and `Other` are portless (see PortSet / DEC-021).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Ord` (Tcp < Udp < Icmp < Other(n), by declaration order then u8) gives the
+/// deterministic proto component of the violation sort key (BC-1.05.002).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Proto {
     Tcp,
     Udp,
@@ -288,6 +290,9 @@ pub struct Violation {
     /// carried on every violation row for that flow.
     pub idmz_bypass: bool,
     pub explanation: String,
+    /// Flow timestamp — the primary component of the deterministic violation
+    /// sort key (BC-1.05.002).
+    pub ts: Timestamp,
     pub src_ip: IpAddr,
     pub dst_ip: IpAddr,
     pub src_port: Option<u16>,

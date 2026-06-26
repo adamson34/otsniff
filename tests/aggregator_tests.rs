@@ -9,9 +9,63 @@ use zonewarden_core::aggregator::{aggregate, checked_inc};
 use zonewarden_core::errors::SysError;
 use zonewarden_core::types::ValidatedPolicy;
 use zonewarden_core::types::{
-    AssetMatcher, ConduitId, Policy, PurdueLevel, Verdict, VerdictKind, Violation, Zone, ZoneId,
+    AssetMatcher, ConduitId, Policy, Proto, PurdueLevel, ServiceSource, Severity, Timestamp,
+    Verdict, VerdictKind, Violation, ViolationKind, Zone, ZoneId,
 };
 use zonewarden_core::validator::validate;
+
+/// A violation with the sort-key fields set; other fields fixed.
+fn vio(
+    ts: i128,
+    src: &str,
+    sp: Option<u16>,
+    dst: &str,
+    dp: Option<u16>,
+    proto: Proto,
+    flow_index: u64,
+) -> Violation {
+    Violation {
+        flow_index,
+        src_zone: ZoneId("a".to_string()),
+        dst_zone: ZoneId("b".to_string()),
+        kind: ViolationKind::NoMatchingConduit,
+        severity: Severity::Established,
+        idmz_bypass: false,
+        explanation: String::new(),
+        ts: Timestamp(ts),
+        src_ip: src.parse().unwrap(),
+        dst_ip: dst.parse().unwrap(),
+        src_port: sp,
+        dst_port: dp,
+        proto,
+        service: None,
+        service_source: ServiceSource::Unknown,
+        conn_state: None,
+    }
+}
+
+/// The 7-field total-order sort key for a violation (BC-1.05.002).
+fn key(
+    v: &Violation,
+) -> (
+    Timestamp,
+    std::net::IpAddr,
+    Option<u16>,
+    std::net::IpAddr,
+    Option<u16>,
+    Proto,
+    u64,
+) {
+    (
+        v.ts,
+        v.src_ip,
+        v.src_port,
+        v.dst_ip,
+        v.dst_port,
+        v.proto.clone(),
+        v.flow_index,
+    )
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -185,6 +239,7 @@ fn test_violations_collected_into_result() {
         severity: zonewarden_core::types::Severity::Established,
         idmz_bypass: false,
         explanation: "x".to_string(),
+        ts: Timestamp(0),
         src_ip: "10.0.0.1".parse().unwrap(),
         dst_ip: "10.0.1.1".parse().unwrap(),
         src_port: Some(1),
@@ -222,5 +277,176 @@ proptest! {
         prop_assert!(r.idmz_bypasses <= r.total_flows);
         prop_assert!(r.distinct_violating_flows <= r.total_flows);
         prop_assert!(r.external_endpoints <= r.total_flows);
+    }
+}
+
+// ── S-5.03: deterministic violation sort (BC-1.05.002) ───────────────────────
+
+fn items_with_vios(vios: Vec<Violation>) -> Vec<(Verdict, Vec<Violation>)> {
+    vios.into_iter()
+        .map(|v| {
+            (
+                verdict(
+                    v.flow_index,
+                    "a",
+                    "b",
+                    VerdictKind::NoMatchingConduit,
+                    false,
+                ),
+                vec![v],
+            )
+        })
+        .collect()
+}
+
+fn assert_sorted(r: &zonewarden_core::types::ConformanceResult) {
+    for w in r.violations.windows(2) {
+        assert!(key(&w[0]) <= key(&w[1]), "violations not in total order");
+    }
+}
+
+// AC-001: violations sorted by the total-order key (here: ts ascending).
+#[test]
+fn test_BC_1_05_002_violations_sorted_total_order() {
+    let p = vp();
+    let vios = vec![
+        vio(
+            30,
+            "10.0.0.1",
+            Some(1),
+            "10.0.0.2",
+            Some(502),
+            Proto::Tcp,
+            0,
+        ),
+        vio(
+            10,
+            "10.0.0.1",
+            Some(1),
+            "10.0.0.2",
+            Some(502),
+            Proto::Tcp,
+            1,
+        ),
+        vio(
+            20,
+            "10.0.0.1",
+            Some(1),
+            "10.0.0.2",
+            Some(502),
+            Proto::Tcp,
+            2,
+        ),
+    ];
+    let r = aggregate(items_with_vios(vios), &p, 0, vec![]).expect("ok");
+    let tss: Vec<i128> = r.violations.iter().map(|v| v.ts.0).collect();
+    assert_eq!(tss, vec![10, 20, 30]);
+    assert_sorted(&r);
+}
+
+// AC-002 / EC-001: flow_index is the final tiebreaker.
+#[test]
+fn test_BC_1_05_002_flow_index_tiebreaker() {
+    let p = vp();
+    // identical except flow_index (5 then 2) → output ordered 2, 5
+    let vios = vec![
+        vio(
+            10,
+            "10.0.0.1",
+            Some(1),
+            "10.0.0.2",
+            Some(502),
+            Proto::Tcp,
+            5,
+        ),
+        vio(
+            10,
+            "10.0.0.1",
+            Some(1),
+            "10.0.0.2",
+            Some(502),
+            Proto::Tcp,
+            2,
+        ),
+    ];
+    let r = aggregate(items_with_vios(vios), &p, 0, vec![]).expect("ok");
+    let fis: Vec<u64> = r.violations.iter().map(|v| v.flow_index).collect();
+    assert_eq!(fis, vec![2, 5]);
+}
+
+// AC-004 / EC-003: IP comparison via std IpAddr ordering (and IPv4 < IPv6).
+#[test]
+fn test_BC_1_05_002_ip_comparison_order() {
+    let p = vp();
+    let vios = vec![
+        vio(
+            10,
+            "10.0.0.2",
+            Some(1),
+            "10.0.0.9",
+            Some(502),
+            Proto::Tcp,
+            0,
+        ),
+        vio(
+            10,
+            "10.0.0.1",
+            Some(1),
+            "10.0.0.9",
+            Some(502),
+            Proto::Tcp,
+            1,
+        ),
+        vio(10, "::1", Some(1), "10.0.0.9", Some(502), Proto::Tcp, 2), // IPv6 sorts after IPv4
+    ];
+    let r = aggregate(items_with_vios(vios), &p, 0, vec![]).expect("ok");
+    let ips: Vec<String> = r.violations.iter().map(|v| v.src_ip.to_string()).collect();
+    assert_eq!(ips, vec!["10.0.0.1", "10.0.0.2", "::1"]);
+}
+
+// EC-002: Other(u8) ordered by byte value (and Tcp < Udp < Icmp < Other).
+#[test]
+fn test_BC_1_05_002_proto_order() {
+    let p = vp();
+    let vios = vec![
+        vio(10, "10.0.0.1", None, "10.0.0.9", None, Proto::Other(17), 0),
+        vio(10, "10.0.0.1", None, "10.0.0.9", None, Proto::Icmp, 1),
+        vio(10, "10.0.0.1", None, "10.0.0.9", None, Proto::Other(6), 2),
+    ];
+    let r = aggregate(items_with_vios(vios), &p, 0, vec![]).expect("ok");
+    let protos: Vec<Proto> = r.violations.iter().map(|v| v.proto.clone()).collect();
+    assert_eq!(protos, vec![Proto::Icmp, Proto::Other(6), Proto::Other(17)]);
+}
+
+// AC-005: empty result unchanged by the sort step.
+#[test]
+fn test_BC_1_05_005_empty_result_unchanged_by_sort() {
+    let p = vp();
+    let r = aggregate(Vec::new(), &p, 0, vec![]).expect("ok");
+    assert!(r.violations.is_empty());
+}
+
+// AC-003: sort is deterministic — output is fully ordered and run-to-run stable.
+proptest! {
+    #[test]
+    fn test_BC_1_05_002_sort_deterministic_proptest(
+        raw in prop::collection::vec((0i128..50, 0u8..5, any::<u16>(), any::<u64>()), 0..60)
+    ) {
+        let p = vp();
+        let vios: Vec<Violation> = raw.iter().map(|&(ts, oct, port, fi)| {
+            vio(ts, &format!("10.0.0.{oct}"), Some(port), "10.0.9.9", Some(502), Proto::Tcp, fi)
+        }).collect();
+        let r1 = aggregate(items_with_vios(vios.clone()), &p, 0, vec![]).expect("ok");
+        // fully ordered
+        for w in r1.violations.windows(2) {
+            prop_assert!(key(&w[0]) <= key(&w[1]));
+        }
+        // stable across an independent run with reversed input order
+        let mut rev = vios;
+        rev.reverse();
+        let r2 = aggregate(items_with_vios(rev), &p, 0, vec![]).expect("ok");
+        let k1: Vec<_> = r1.violations.iter().map(key).collect();
+        let k2: Vec<_> = r2.violations.iter().map(key).collect();
+        prop_assert_eq!(k1, k2);
     }
 }

@@ -127,6 +127,7 @@ pub fn violations_for(flow: &Flow, pair: &ResolvedPair, verdict: &Verdict) -> Ve
         severity,
         idmz_bypass: verdict.idmz_bypass,
         explanation,
+        ts: flow.ts,
         src_ip: flow.src_ip,
         dst_ip: flow.dst_ip,
         src_port: flow.src_port,
