@@ -14,6 +14,11 @@ rust-version.workspace = true
 [dependencies]
 thiserror = "1.0"
 ipnet = "2.9"   # IpNet for the longest-prefix index + equal-prefix tie detection (ADR-003)
+# Pure (no-I/O) deps for the policy digest (ADR-004). serde_json builds the
+# canonical JSON (default BTreeMap Map => lexicographically-sorted keys, DI-018);
+# sha2 hashes it. The YAML *wire parser* (serde_norway) stays in the shell.
+serde_json = "1.0"
+sha2 = "0.10"
 
 [dev-dependencies]
 proptest = "1"
