@@ -20,7 +20,8 @@ fn grade_token(token: &str) -> Severity {
 // Established.
 #[test]
 fn test_BC_1_04_009_established_states_map_to_established() {
-    for token in ["SF", "S2", "S3", "RSTO", "RSTR", "OTH"] {
+    // S1 ("established, not terminated") grades Established (DI-017 — P5-CORE-003).
+    for token in ["S1", "SF", "S2", "S3", "RSTO", "RSTR", "OTH"] {
         assert_eq!(grade_token(token), Severity::Established, "token {token}");
     }
     // Direct ConnState path.
@@ -31,7 +32,7 @@ fn test_BC_1_04_009_established_states_map_to_established() {
 // Attempted.
 #[test]
 fn test_BC_1_04_009_attempted_states_map_to_attempted() {
-    for token in ["S0", "S1", "REJ", "RSTOS0", "RSTRH", "SH", "SHR"] {
+    for token in ["S0", "REJ", "RSTOS0", "RSTRH", "SH", "SHR"] {
         assert_eq!(grade_token(token), Severity::Attempted, "token {token}");
     }
     // Direct ConnState path.
@@ -50,7 +51,7 @@ fn test_BC_1_04_009_none_conn_state_defaults_to_established() {
 fn test_BC_1_04_009_full_13_state_table_correct() {
     let table = [
         ("S0", Severity::Attempted),
-        ("S1", Severity::Attempted),
+        ("S1", Severity::Established),
         ("S2", Severity::Established),
         ("S3", Severity::Established),
         ("SF", Severity::Established),

@@ -17,10 +17,12 @@ use crate::types::{ConnState, Severity};
 /// [`Severity::Established`].
 pub fn conn_state_from_token(token: &str) -> ConnState {
     match token {
-        // Established bucket: connection reached an established state.
-        "S2" | "S3" | "SF" | "RSTO" | "RSTR" | "OTH" => ConnState::Established,
+        // Established bucket: connection reached an established state. S1
+        // ("established, not terminated") is a CONFIRMED established connection;
+        // grading it Attempted would under-report a breach (DI-017 — P5-CORE-003).
+        "S1" | "S2" | "S3" | "SF" | "RSTO" | "RSTR" | "OTH" => ConnState::Established,
         // Attempted bucket: handshake never completed (conservative for partials).
-        "S0" | "S1" | "REJ" | "RSTOS0" | "RSTRH" | "SH" | "SHR" => ConnState::Attempted,
+        "S0" | "REJ" | "RSTOS0" | "RSTRH" | "SH" | "SHR" => ConnState::Attempted,
         // Unrecognized token: preserve it; grades conservatively to Established.
         other => ConnState::Other(other.to_string()),
     }

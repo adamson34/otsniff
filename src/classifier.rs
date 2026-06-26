@@ -86,12 +86,14 @@ pub fn classify(ctx: &ClassifyCtx, flow: &Flow, pair: &ResolvedPair, dst_kind: D
                 if forward && dst_match {
                     allowed = Some(i as u32);
                     break;
-                } else if reverse && (dst_match || c.ports.matches_port(flow.src_port)) {
-                    // Reverse orientation is WrongDirection (BC-1.04.004) when the
-                    // conduit's service port appears on EITHER side: dst-port match
-                    // is a flow reaching into from_zone's service (EC-001/EC-005);
-                    // src-port match is the return/reverse 4-tuple of a permitted
-                    // flow (HS-010) — the canonical wrong-direction case.
+                } else if reverse && dst_match {
+                    // Reverse orientation with a matching RESPONDER (dst) port is
+                    // WrongDirection (BC-1.04.004 EC-001/EC-005). The matched port
+                    // is the responder port only: a flow whose dst-port matches no
+                    // conduit is NoMatchingConduit even if its source port happens
+                    // to equal a conduit port (BC-1.04.004 inv 2 / DEC-016 — the
+                    // src-port is unreliable as a "return traffic" signal and would
+                    // produce false WrongDirection verdicts).
                     wrong_direction = true;
                 }
             }

@@ -246,13 +246,14 @@ fn test_BC_1_04_004_wrong_direction_beats_no_match() {
     );
 }
 
-// ── HS-010: return/reverse 4-tuple of a permitted flow → WrongDirection ───────
-// Conduit a->b TCP 502 forward; the allowed flow is a:1234 -> b:502. Its literal
-// reverse 4-tuple is b:502 -> a:1234 (service port now on the SOURCE side). This
-// is the canonical wrong-direction case and must not fall through to
-// NoMatchingConduit.
+// ── BC-1.04.004 inv 2 / DEC-016: the matched port is the RESPONDER (dst) port ──
+// A reverse-orientation flow whose dst-port matches no conduit is
+// NoMatchingConduit, even when its SOURCE port coincides with a conduit's
+// service port. The source port is not a reliable "return traffic" signal
+// (ephemeral ports collide), so treating it as WrongDirection would be a false
+// positive (P5-CORE-002 — reverted to spec).
 #[test]
-fn test_BC_1_04_004_reverse_four_tuple_is_wrong_direction() {
+fn test_BC_1_04_004_src_port_coincidence_is_not_wrong_direction() {
     let p = vp(vec![conduit(
         "a",
         "b",
@@ -261,7 +262,8 @@ fn test_BC_1_04_004_reverse_four_tuple_is_wrong_direction() {
         ports(&[(502, 502)]),
     )]);
     let ctx = ClassifyCtx { policy: &p };
-    // b:502 -> a:1234  (src_port=502 service port, dst_port=1234), zone-pair reversed.
+    // b:502 -> a:1234  (src_port=502 coincides with the conduit port; dst_port=1234
+    // matches no conduit), zone-pair reversed.
     let rev_flow = Flow {
         flow_index: 7,
         ts: Timestamp(0),
@@ -275,7 +277,7 @@ fn test_BC_1_04_004_reverse_four_tuple_is_wrong_direction() {
         conn_state: None,
     };
     let rev = classify_normal(&ctx, &rev_flow, &pair("b", "a"));
-    assert_eq!(rev.kind, VerdictKind::WrongDirection);
+    assert_eq!(rev.kind, VerdictKind::NoMatchingConduit);
 }
 
 // ── AC-005: Bidirectional permits both directions ────────────────────────────
