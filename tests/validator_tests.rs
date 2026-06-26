@@ -203,6 +203,18 @@ fn test_BC_1_01_006_ipv6_catch_all_rejected() {
     ));
 }
 
+#[test]
+fn test_BC_1_01_006_ipv4_mapped_96_catch_all_rejected() {
+    // P5-CORE-001: an IPv4-mapped IPv6 /96 member folds to 0.0.0.0/0 and must be
+    // rejected as a catch-all (post-fold), not slip past the pre-fold guard and
+    // silently shadow EXTERNAL.
+    let p = policy(vec![zone("field", &["::ffff:10.0.0.0/96"])], vec![]);
+    assert!(
+        matches!(validate(p), Err(PolicyError::CatchAllPrefix { .. })),
+        "IPv4-mapped /96 must be rejected as a 0.0.0.0/0 catch-all"
+    );
+}
+
 // ── AC-006: zero-member zone → OK + warning ──────────────────────────────────
 
 #[test]

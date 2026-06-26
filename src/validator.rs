@@ -54,15 +54,19 @@ pub fn validate(policy: Policy) -> Result<ValidatedPolicy, PolicyError> {
             warnings.push(format!("zone '{}' has no members", z.id.0));
         }
         for m in &z.members {
-            if let AssetMatcher::Cidr { prefix_len: 0, .. } = m {
+            let net = matcher_to_net(m)?;
+            let plen = net.prefix_len();
+            // Reject /0 catch-alls (AC-004 / DEC-029 / E-POL-008) AFTER the
+            // IPv4-mapped fold: a `::ffff:x/96` member folds to 0.0.0.0/0, which
+            // would otherwise slip past a pre-fold `prefix_len: 0` check and
+            // silently shadow the implicit EXTERNAL zone (P5-CORE-001).
+            if plen == 0 {
                 return Err(PolicyError::CatchAllPrefix {
                     zone: z.id.0.clone(),
                     cidr: matcher_str(m),
                 });
             }
-            let net = matcher_to_net(m)?;
-            let plen = net.prefix_len();
-            if plen > 0 && plen < 8 {
+            if plen < 8 {
                 warnings.push(format!(
                     "zone '{}': member '{}' has very short prefix (< /8); may partially shadow EXTERNAL",
                     z.id.0,
