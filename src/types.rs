@@ -273,7 +273,10 @@ pub enum ViolationKind {
     IdmzBypass,
 }
 
-/// A reported breach (a derived view over `Verdict`s).
+/// A reported breach (a derived view over `Verdict`s). Denormalized with the
+/// originating flow's fields so the reporter (S-6.x) can render each violation
+/// without re-joining against the flow list. A single flow can yield more than
+/// one `Violation` (e.g. `NoMatchingConduit` plus an additive `IdmzBypass`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Violation {
     pub flow_index: u64,
@@ -281,7 +284,18 @@ pub struct Violation {
     pub dst_zone: ZoneId,
     pub kind: ViolationKind,
     pub severity: Severity,
+    /// The flow-level IDMZ-bypass finding (true if this flow bypassed the IDMZ),
+    /// carried on every violation row for that flow.
+    pub idmz_bypass: bool,
     pub explanation: String,
+    pub src_ip: IpAddr,
+    pub dst_ip: IpAddr,
+    pub src_port: Option<u16>,
+    pub dst_port: Option<u16>,
+    pub proto: Proto,
+    pub service: Option<Service>,
+    pub service_source: ServiceSource,
+    pub conn_state: Option<ConnState>,
 }
 
 /// The full run output. Tallies are `u64` (canonical, per ADR/FM-009). The DI-015
