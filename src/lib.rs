@@ -10,6 +10,7 @@
 //! binary crate. Keeping the core pure is what makes it a target for formal
 //! verification (Kani) and property testing.
 
+pub mod aggregator;
 pub mod classifier;
 pub mod digest;
 pub mod errors;
