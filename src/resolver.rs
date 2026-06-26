@@ -56,6 +56,7 @@ pub fn resolve_pair(index: &PrefixIndex, src_ip: IpAddr, dst_ip: IpAddr) -> Reso
 #[cfg(kani)]
 mod kani_harness {
     use super::*;
+    use ipnet::IpNet;
     use std::net::Ipv4Addr;
 
     /// Totality (DI-003): with no declared matcher, every endpoint resolves to
@@ -68,5 +69,48 @@ mod kani_harness {
         let r = resolve(&index, ip);
         assert!(r.zone_id.is_external());
         assert!(matches!(r.match_kind, MatchKind::ImplicitExternal));
+    }
+
+    /// Longest-prefix selection + uniqueness (VP-002 / BC-1.03.001): given a
+    /// validator-sorted index where a /24 precedes an overlapping /16, every IP
+    /// inside the /24 resolves to the /24's zone (the longer prefix wins), an IP
+    /// in the /16 but not the /24 resolves to the /16's zone, and anything else
+    /// is EXTERNAL. Concrete nets + a symbolic IP prove the selection over the
+    /// whole IPv4 space.
+    #[kani::proof]
+    fn longest_prefix_wins() {
+        let index: PrefixIndex = vec![
+            (
+                IpNet::new(IpAddr::V4(Ipv4Addr::new(10, 0, 1, 0)), 24).unwrap(),
+                ZoneId("inner".to_string()),
+            ),
+            (
+                IpNet::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 16).unwrap(),
+                ZoneId("outer".to_string()),
+            ),
+        ];
+        let octets: [u8; 4] = kani::any();
+        let ip = IpAddr::V4(Ipv4Addr::from(octets));
+        let r = resolve(&index, ip);
+
+        // Assert on the matched prefix length (a u8) rather than the zone-id
+        // String — a String comparison makes CBMC unwind memcmp unboundedly,
+        // and the prefix length uniquely identifies which entry was selected.
+        let in_24 = octets[0] == 10 && octets[1] == 0 && octets[2] == 1;
+        let in_16 = octets[0] == 10 && octets[1] == 0;
+        match r.match_kind {
+            MatchKind::Explicit { prefix_len } => {
+                if in_24 {
+                    assert_eq!(prefix_len, 24); // the /24 wins over the overlapping /16
+                } else {
+                    assert!(in_16);
+                    assert_eq!(prefix_len, 16);
+                }
+            }
+            MatchKind::ImplicitExternal => assert!(!in_16),
+            // resolve never produces MulticastBroadcast (multicast is handled
+            // upstream); proving this arm unreachable is part of the property.
+            MatchKind::MulticastBroadcast => unreachable!(),
+        }
     }
 }

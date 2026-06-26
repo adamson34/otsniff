@@ -96,3 +96,27 @@ pub fn aggregate(
     r.policy_digest = digest::compute(&policy.policy);
     Ok(r)
 }
+
+/// Formal-verification harness (VP-006 / FM-009). Compiled only under `cargo kani`.
+#[cfg(kani)]
+mod kani_harness {
+    use super::*;
+
+    /// Tally overflow detection (BC-1.05.004 / FM-009): `checked_inc` never
+    /// silently wraps. For every `u64`, it returns `Ok(n+1)` (strictly greater
+    /// than `n`) when `n < u64::MAX`, and `Err(TallyOverflow)` exactly at
+    /// `u64::MAX`.
+    #[kani::proof]
+    fn checked_inc_never_wraps() {
+        let n: u64 = kani::any();
+        match checked_inc(n) {
+            Ok(m) => {
+                assert!(n < u64::MAX);
+                assert_eq!(m, n + 1);
+                assert!(m > n); // monotonic — no wrap to 0
+            }
+            Err(SysError::TallyOverflow) => assert_eq!(n, u64::MAX),
+            Err(_) => unreachable!(),
+        }
+    }
+}

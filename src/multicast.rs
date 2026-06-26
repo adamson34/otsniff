@@ -43,3 +43,43 @@ pub fn classify_dst(dst: IpAddr, index: &PrefixIndex) -> DstKind {
     }
     DstKind::Normal
 }
+
+/// Formal-verification harness (VP-010 / DI-016). Compiled only under `cargo kani`.
+#[cfg(kani)]
+mod kani_harness {
+    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    /// Step-1 family-wide exemption is total and correct (DI-016 / BC-1.03.003):
+    /// with no declared zones, every IPv4 multicast (224.0.0.0/4) or limited
+    /// broadcast (255.255.255.255) destination is `MulticastBroadcast`, and any
+    /// other IPv4 destination is `Normal`. `classify_dst` always returns.
+    #[kani::proof]
+    fn step1_ipv4_multicast_broadcast_exempt() {
+        let octets: [u8; 4] = kani::any();
+        let v4 = Ipv4Addr::from(octets);
+        let index: PrefixIndex = PrefixIndex::new();
+        let kind = classify_dst(IpAddr::V4(v4), &index);
+        if v4.is_multicast() || v4.is_broadcast() {
+            assert!(matches!(kind, DstKind::MulticastBroadcast));
+        } else {
+            // empty index → no Step-2 directed-broadcast match → Normal
+            assert!(matches!(kind, DstKind::Normal));
+        }
+    }
+
+    /// Step-1 IPv6 multicast (ff00::/8) is exempt; other IPv6 with no zones is
+    /// Normal (DI-016 / BC-1.03.003).
+    #[kani::proof]
+    fn step1_ipv6_multicast_exempt() {
+        let segs: [u16; 8] = kani::any();
+        let v6 = Ipv6Addr::from(segs);
+        let index: PrefixIndex = PrefixIndex::new();
+        let kind = classify_dst(IpAddr::V6(v6), &index);
+        if v6.is_multicast() {
+            assert!(matches!(kind, DstKind::MulticastBroadcast));
+        } else {
+            assert!(matches!(kind, DstKind::Normal));
+        }
+    }
+}
