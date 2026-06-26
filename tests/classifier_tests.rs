@@ -246,6 +246,38 @@ fn test_BC_1_04_004_wrong_direction_beats_no_match() {
     );
 }
 
+// ── HS-010: return/reverse 4-tuple of a permitted flow → WrongDirection ───────
+// Conduit a->b TCP 502 forward; the allowed flow is a:1234 -> b:502. Its literal
+// reverse 4-tuple is b:502 -> a:1234 (service port now on the SOURCE side). This
+// is the canonical wrong-direction case and must not fall through to
+// NoMatchingConduit.
+#[test]
+fn test_BC_1_04_004_reverse_four_tuple_is_wrong_direction() {
+    let p = vp(vec![conduit(
+        "a",
+        "b",
+        Direction::Forward,
+        Proto::Tcp,
+        ports(&[(502, 502)]),
+    )]);
+    let ctx = ClassifyCtx { policy: &p };
+    // b:502 -> a:1234  (src_port=502 service port, dst_port=1234), zone-pair reversed.
+    let rev_flow = Flow {
+        flow_index: 7,
+        ts: Timestamp(0),
+        src_ip: "10.0.1.5".parse().unwrap(),
+        src_port: Some(502),
+        dst_ip: "10.0.0.5".parse().unwrap(),
+        dst_port: Some(1234),
+        proto: Proto::Tcp,
+        service: None,
+        service_source: ServiceSource::Unknown,
+        conn_state: None,
+    };
+    let rev = classify_normal(&ctx, &rev_flow, &pair("b", "a"));
+    assert_eq!(rev.kind, VerdictKind::WrongDirection);
+}
+
 // ── AC-005: Bidirectional permits both directions ────────────────────────────
 
 #[test]

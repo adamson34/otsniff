@@ -68,23 +68,30 @@ pub fn classify(ctx: &ClassifyCtx, flow: &Flow, pair: &ResolvedPair, dst_kind: D
     let mut allowed: Option<u32> = None;
     let mut wrong_direction = false;
     for (i, c) in ctx.policy.policy.conduits.iter().enumerate() {
-        if c.proto != flow.proto || !c.ports.matches_port(flow.dst_port) {
+        if c.proto != flow.proto {
             continue;
         }
         let forward = src_zone == c.from_zone && dst_zone == c.to_zone;
         let reverse = src_zone == c.to_zone && dst_zone == c.from_zone;
+        // In the forward orientation the service port is the responder (dst) port.
+        let dst_match = c.ports.matches_port(flow.dst_port);
         match c.direction {
             Direction::Bidirectional => {
-                if forward || reverse {
+                if (forward || reverse) && dst_match {
                     allowed = Some(i as u32);
                     break;
                 }
             }
             Direction::Forward => {
-                if forward {
+                if forward && dst_match {
                     allowed = Some(i as u32);
                     break;
-                } else if reverse {
+                } else if reverse && (dst_match || c.ports.matches_port(flow.src_port)) {
+                    // Reverse orientation is WrongDirection (BC-1.04.004) when the
+                    // conduit's service port appears on EITHER side: dst-port match
+                    // is a flow reaching into from_zone's service (EC-001/EC-005);
+                    // src-port match is the return/reverse 4-tuple of a permitted
+                    // flow (HS-010) — the canonical wrong-direction case.
                     wrong_direction = true;
                 }
             }
