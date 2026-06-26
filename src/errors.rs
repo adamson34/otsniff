@@ -67,6 +67,16 @@ pub enum IoError {
     /// E-IO-003 — any other read failure.
     #[error("E-IO-003: could not read {path}: {detail}")]
     Read { path: String, detail: String },
+
+    /// E-IO-005 — could not create the temporary file for an atomic write
+    /// (FM-006; BC-1.06.008).
+    #[error("E-IO-005: could not create temporary output file {path}: {detail}")]
+    TempCreate { path: String, detail: String },
+
+    /// E-IO-006 — writing or renaming the output artifact failed; the target is
+    /// left untouched (atomic write — FM-006; BC-1.06.008).
+    #[error("E-IO-006: could not write output file {path}: {detail}")]
+    OutputWrite { path: String, detail: String },
 }
 
 /// Per-record flow-ingest errors (E-FLW-*). These are **skip signals**, never
