@@ -40,6 +40,25 @@ pub enum IoError {
     Read { path: String, detail: String },
 }
 
+/// Per-record flow-ingest errors (E-FLW-*). These are **skip signals**, never
+/// fatal: the adapter yields one per malformed or unusable line and continues to
+/// the next record (DI-013, "degrade gracefully on flows"). They are
+/// deliberately NOT part of [`ZonewardenError`] — a bad flow record must never
+/// abort the run.
+#[derive(Debug, Error, PartialEq, Eq, Clone)]
+pub enum FlowParseError {
+    /// E-FLW-001 — a data line could not be normalized into a `Flow` (missing
+    /// column, wrong field count, unparseable timestamp/port/proto, etc.).
+    #[error("E-FLW-001: malformed flow record at line {line}: {detail}")]
+    Malformed { line: u64, detail: String },
+
+    /// E-FLW-002 — a structurally valid line carries the unspecified address
+    /// (`0.0.0.0` or `::`) as `src` or `dst` (DEC-033); meaningless for
+    /// segmentation analysis, so it is skipped and warned.
+    #[error("E-FLW-002: unspecified address (0.0.0.0/::) in {role} at line {line}")]
+    UnspecifiedAddress { line: u64, role: String },
+}
+
 /// Top-level error type returned across the tool boundary.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ZonewardenError {

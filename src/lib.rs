@@ -14,3 +14,19 @@ pub mod errors;
 pub mod portset;
 pub mod severity;
 pub mod types;
+
+use crate::errors::FlowParseError;
+use crate::types::Flow;
+
+/// A source of observed network flows for the conformance pipeline (ADR-002).
+///
+/// The v1 implementation is the Zeek `conn.log` adapter (S-2.01). Each yielded
+/// item is either a successfully normalized [`Flow`] — carrying a dense,
+/// gap-free `flow_index` — or a [`FlowParseError`] marking a skipped record.
+/// Implementations MUST never abort the run on a single bad record (DI-013):
+/// malformed and unspecified-address lines surface as `Err` items, not as a
+/// terminal error.
+pub trait RealitySource {
+    /// Stream the normalized flows, one result per data record.
+    fn flows(&mut self) -> impl Iterator<Item = Result<Flow, FlowParseError>>;
+}
