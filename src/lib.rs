@@ -12,4 +12,5 @@
 
 pub mod errors;
 pub mod portset;
+pub mod severity;
 pub mod types;
