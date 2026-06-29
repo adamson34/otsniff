@@ -85,9 +85,16 @@ pub fn parse(payload: &[u8]) -> Vec<LlmnrHostname> {
             ]);
             // BC-1.02.013 precondition: strip trailing dot only.
             let normalized = name.trim_end_matches('.');
-            if !normalized.is_empty() {
+            // F-001: sanitize to printable ASCII (mirror dhcp.rs) before the
+            // empty-check, so control bytes / NULs do not survive into reports.
+            let sanitized: String = normalized
+                .bytes()
+                .filter(|&b| (0x20..0x7F).contains(&b))
+                .map(|b| b as char)
+                .collect();
+            if !sanitized.is_empty() {
                 results.push(LlmnrHostname {
-                    name: normalized.to_string(),
+                    name: sanitized,
                     ip,
                 });
             }
@@ -292,5 +299,101 @@ mod tests {
     fn test_bc_1_02_012_malformed_payload_never_panics() {
         let _ = parse(&[]);
         let _ = parse(&[0xFFu8; 65535]);
+    }
+
+    // ── F-001: hostname sanitization (printable ASCII filter) ─────────────────
+
+    /// F-001 / BC-1.02.012: an LLMNR A-record owner name containing a control
+    /// byte (0x07, bell) must have that byte stripped; the remaining printable
+    /// chars must be returned.
+    ///
+    /// Fixture: label "ENG\x07-WS-01" → after filter → "ENG-WS-01".
+    #[test]
+    fn test_f001_sanitize_strips_control_byte() {
+        let label: &[u8] = b"ENG\x07-WS-01";
+        let name = dns_name(&[label]);
+        let ans = a_record(&name, [10, 0, 1, 30]);
+        let mut msg = llmnr_header(true, 1);
+        msg.extend_from_slice(&ans);
+        let results = parse(&msg);
+        assert_eq!(
+            results.len(),
+            1,
+            "F-001 LLMNR: name with control byte must yield one record after sanitization"
+        );
+        assert_eq!(
+            results[0].name, "ENG-WS-01",
+            "F-001 LLMNR: control byte (0x07) must be stripped; remaining chars preserved"
+        );
+    }
+
+    /// F-001 / BC-1.02.012: a name consisting entirely of control bytes must
+    /// be discarded (sanitizes to empty string → no record pushed).
+    #[test]
+    fn test_f001_sanitize_discards_all_control_byte_name() {
+        let label: &[u8] = &[0x01, 0x0A, 0x1F]; // SOH, LF, US — all below 0x20
+        let name = dns_name(&[label]);
+        let ans = a_record(&name, [10, 0, 1, 31]);
+        let mut msg = llmnr_header(true, 1);
+        msg.extend_from_slice(&ans);
+        let results = parse(&msg);
+        assert!(
+            results.is_empty(),
+            "F-001 LLMNR: name consisting entirely of control bytes must be discarded"
+        );
+    }
+
+    // ── F-003: question-section skip path ────────────────────────────────────
+
+    /// Build a 12-byte LLMNR header with explicit QDCOUNT and ANCOUNT.
+    fn llmnr_header_qd(qr_response: bool, qdcount: u16, ancount: u16) -> Vec<u8> {
+        let flags_hi = if qr_response { 0x80u8 } else { 0x00u8 };
+        vec![
+            0x00, 0x00, // TxID
+            flags_hi, 0x00, // Flags
+            (qdcount >> 8) as u8, (qdcount & 0xFF) as u8, // QDCOUNT
+            (ancount >> 8) as u8, (ancount & 0xFF) as u8, // ANCOUNT
+            0x00, 0x00, // NSCOUNT = 0
+            0x00, 0x00, // ARCOUNT = 0
+        ]
+    }
+
+    /// Build a DNS question record wire encoding (QNAME + QTYPE + QCLASS).
+    fn question_record(name: &[u8]) -> Vec<u8> {
+        let mut out = name.to_vec();
+        out.extend_from_slice(&[0x00, 0x01]); // QTYPE = A
+        out.extend_from_slice(&[0x00, 0x01]); // QCLASS = IN
+        out
+    }
+
+    /// F-003 / BC-1.02.012: real LLMNR responses echo the question section
+    /// (QDCOUNT=1).  The question-skip loop (skip_name + 4 bytes) must advance
+    /// past the question before reading the answer section.
+    ///
+    /// All previous fixtures used QDCOUNT=0, leaving this code path untested.
+    #[test]
+    fn test_f003_question_section_skipped_qdcount_1() {
+        let q_name = dns_name(&[b"ENG-WS-01"]);
+        let a_name = dns_name(&[b"ENG-WS-01"]);
+        let question = question_record(&q_name);
+        let answer = a_record(&a_name, [10, 0, 1, 20]);
+        let mut msg = llmnr_header_qd(true, 1, 1);
+        msg.extend_from_slice(&question);
+        msg.extend_from_slice(&answer);
+        let results = parse(&msg);
+        assert_eq!(
+            results.len(),
+            1,
+            "F-003 LLMNR: QDCOUNT=1 — question section must be skipped; A record must still be extracted"
+        );
+        assert_eq!(
+            results[0].name, "ENG-WS-01",
+            "F-003 LLMNR: owner name must be correctly extracted after skipping the question section"
+        );
+        assert_eq!(
+            results[0].ip,
+            std::net::Ipv4Addr::new(10, 0, 1, 20),
+            "F-003 LLMNR: RDATA IPv4 must be correct after skipping question section"
+        );
     }
 }
