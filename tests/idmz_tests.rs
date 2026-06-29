@@ -142,6 +142,60 @@ fn test_BC_1_04_008_external_endpoint_no_bypass() {
     ));
 }
 
+// ── BC-1.04.008: EXTERNAL excluded by identity, BEFORE any level lookup ───────
+// The exclusion guard is `src.is_external() || dst.is_external()` — EITHER side
+// external forces `false`, and it short-circuits before levels are resolved
+// (module doc: "EXTERNAL is excluded by zone identity, never by its level").
+// To prove the guard is an OR (not an AND) AND that it precedes level lookup, we
+// pathologically declare the reserved EXTERNAL id as a managed L5/IT zone: a
+// single-external OT↔EXTERNAL pair must STILL be excluded. With `||`→`&&` the
+// guard would not fire (only one side external) and the level lookup would
+// misreport an L1↔L5 bypass.
+#[test]
+fn test_BC_1_04_008_external_excluded_before_level_lookup() {
+    let ot = Zone {
+        id: ZoneId("l1".into()),
+        name: "l1".into(),
+        purdue_level: PurdueLevel::L1,
+        sl_t: None,
+        members: vec![AssetMatcher::Cidr {
+            addr: "10.0.1.0".parse().unwrap(),
+            prefix_len: 24,
+        }],
+    };
+    let ext = Zone {
+        id: ZoneId(ZoneId::EXTERNAL.to_string()),
+        name: "ext".into(),
+        purdue_level: PurdueLevel::L5, // pathological: EXTERNAL with an IT level
+        sl_t: None,
+        members: vec![AssetMatcher::Cidr {
+            addr: "203.0.113.0".parse().unwrap(),
+            prefix_len: 24,
+        }],
+    };
+    let p = ValidatedPolicy {
+        policy: Policy {
+            zones: vec![ot, ext],
+            conduits: vec![],
+        },
+        prefix_index: Vec::new(),
+        warnings: Vec::new(),
+    };
+    // Either ordering of the single-external pair → excluded (false).
+    assert!(!check(
+        &ep("l1"),
+        &ep(ZoneId::EXTERNAL),
+        DstKind::Normal,
+        &p
+    ));
+    assert!(!check(
+        &ep(ZoneId::EXTERNAL),
+        &ep("l1"),
+        DstKind::Normal,
+        &p
+    ));
+}
+
 // ── AC-004: MulticastBroadcast dst → no bypass ───────────────────────────────
 
 #[test]

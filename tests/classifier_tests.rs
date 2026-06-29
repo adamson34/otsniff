@@ -280,6 +280,91 @@ fn test_BC_1_04_004_src_port_coincidence_is_not_wrong_direction() {
     assert_eq!(rev.kind, VerdictKind::NoMatchingConduit);
 }
 
+// ── BC-1.04.003 zone-match conjunctions: forward/reverse require BOTH endpoints ─
+// A conduit's forward orientation is `src == from AND dst == to` (and reverse is
+// `src == to AND dst == from`). These pin each `&&` against a `||` weakening:
+// flipping either conjunction to `||` would let a flow that matches only ONE
+// endpoint of the zone-pair be treated as on-conduit. A third zone (`it`) that
+// shares neither end with the a→b conduit is the discriminator.
+
+#[test]
+fn test_BC_1_04_003_partial_forward_match_is_no_match() {
+    // a→it (502) against a forward a→b conduit: src matches `from` (a) but dst
+    // does NOT match `to` (b). `forward = src==from && dst==to` is false, so this
+    // is NoMatchingConduit. With `&&`→`||` it would wrongly become Allowed.
+    let p = vp(vec![conduit(
+        "a",
+        "b",
+        Direction::Forward,
+        Proto::Tcp,
+        ports(&[(502, 502)]),
+    )]);
+    let ctx = ClassifyCtx { policy: &p };
+    let v = classify_normal(&ctx, &flow(Proto::Tcp, Some(502), None), &pair("a", "it"));
+    assert_eq!(v.kind, VerdictKind::NoMatchingConduit);
+}
+
+#[test]
+fn test_BC_1_04_003_partial_reverse_match_is_no_match() {
+    // b→it (502) against a forward a→b conduit: src matches `to` (b) but dst does
+    // NOT match `from` (a). `reverse = src==to && dst==from` is false → no reverse
+    // match, so NoMatchingConduit (not WrongDirection). With `&&`→`||` the reverse
+    // conjunction would be true and the verdict would flip to WrongDirection.
+    let p = vp(vec![conduit(
+        "a",
+        "b",
+        Direction::Forward,
+        Proto::Tcp,
+        ports(&[(502, 502)]),
+    )]);
+    let ctx = ClassifyCtx { policy: &p };
+    let v = classify_normal(&ctx, &flow(Proto::Tcp, Some(502), None), &pair("b", "it"));
+    assert_eq!(v.kind, VerdictKind::NoMatchingConduit);
+}
+
+#[test]
+fn test_BC_1_04_005_bidirectional_requires_zone_pair_match() {
+    // a→it (502) against a Bidirectional a↔b conduit: neither forward nor reverse
+    // matches the zone-pair, even though the port matches. The bidirectional arm
+    // is `(forward || reverse) && dst_match`; flipping that `&&` to `||` would
+    // admit any port-matching flow regardless of zones → wrongly Allowed.
+    let p = vp(vec![conduit(
+        "a",
+        "b",
+        Direction::Bidirectional,
+        Proto::Tcp,
+        ports(&[(502, 502)]),
+    )]);
+    let ctx = ClassifyCtx { policy: &p };
+    let v = classify_normal(&ctx, &flow(Proto::Tcp, Some(502), None), &pair("a", "it"));
+    assert_eq!(v.kind, VerdictKind::NoMatchingConduit);
+}
+
+#[test]
+fn test_BC_1_04_009_wrong_direction_emits_violation_row() {
+    // A WrongDirection verdict must materialize exactly one WrongDirection
+    // violation row (pins the `VerdictKind::WrongDirection` match arm in
+    // `violations_for` against deletion, which would silently drop the row).
+    let p = vp(vec![conduit(
+        "a",
+        "b",
+        Direction::Forward,
+        Proto::Tcp,
+        ports(&[(502, 502)]),
+    )]);
+    let ctx = ClassifyCtx { policy: &p };
+    let f = flow(Proto::Tcp, Some(502), Some(ConnState::Established));
+    let pr = pair("b", "a"); // reverse of the forward conduit → WrongDirection
+    let v = classify_normal(&ctx, &f, &pr);
+    assert_eq!(v.kind, VerdictKind::WrongDirection);
+
+    let vios = violations_for(&f, &pr, &v);
+    assert_eq!(vios.len(), 1, "exactly one WrongDirection row: {vios:?}");
+    assert_eq!(vios[0].kind, ViolationKind::WrongDirection);
+    assert!(vios[0].explanation.contains("reverse direction"));
+    assert_eq!(vios[0].severity, Severity::Established);
+}
+
 // ── AC-005: Bidirectional permits both directions ────────────────────────────
 
 #[test]

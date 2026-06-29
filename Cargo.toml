@@ -22,6 +22,14 @@ sha2 = "0.10"
 
 [dev-dependencies]
 proptest = "1"
+criterion = "0.5"
+
+# Performance budgets (NFR-PERF). The classify hot path is the pure core's
+# throughput-critical loop; the bench establishes a baseline and guards against
+# regression. See benches/classify.rs and docs/performance.md.
+[[bench]]
+name = "classify"
+harness = false
 
 # `kani` is a known cfg: the formal-verification harnesses are compiled only under
 # `cargo kani` (--cfg kani). Declaring it here silences the unexpected-cfgs lint.

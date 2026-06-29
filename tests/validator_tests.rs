@@ -252,6 +252,20 @@ fn test_BC_1_01_006_prefix_one_through_seven_not_error() {
     assert!(validate(p).is_ok());
 }
 
+#[test]
+fn test_BC_1_01_004_prefix_eight_emits_no_short_warning() {
+    // Boundary: the short-prefix warning fires on `plen < 8`, so a /8 member is
+    // exactly at the threshold and must NOT warn. Pins the `<` against an
+    // off-by-one (`<=`), which would spuriously warn on every /8.
+    let p = policy(vec![zone("field", &["10.0.0.0/8"])], vec![]);
+    let vp = validate(p).expect("/8 is valid");
+    assert!(
+        !vp.warnings.iter().any(|w| w.contains("short prefix")),
+        "/8 is not < /8 and must not emit a short-prefix warning: {:?}",
+        vp.warnings
+    );
+}
+
 // ── AC-009: ValidatedPolicy carries the descending-sorted prefix index ───────
 
 #[test]
