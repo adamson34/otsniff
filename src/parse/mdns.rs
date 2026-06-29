@@ -1,4 +1,4 @@
-//! Minimal mDNS parser stub (S-8.01).
+//! Minimal mDNS parser (S-8.01).
 //!
 //! Extracts A-record (hostname, IPv4) pairs from mDNS (UDP/5353) payloads.
 //! See BC-1.02.010 and story S-8.01 AC-001 for the behavioral contract.
@@ -18,8 +18,137 @@ pub struct MdnsHostname {
 /// Parse an mDNS payload, returning all A-record (hostname, IPv4) pairs found
 /// in the Answer section after normalization. Returns an empty `Vec` for any
 /// malformed, truncated, or unrecognized payload; never panics.
-pub fn parse(_payload: &[u8]) -> Vec<MdnsHostname> {
-    Vec::new()
+pub fn parse(payload: &[u8]) -> Vec<MdnsHostname> {
+    // DNS header is 12 bytes minimum.
+    if payload.len() < 12 {
+        return Vec::new();
+    }
+
+    let qdcount = u16::from_be_bytes([payload[4], payload[5]]) as usize;
+    let ancount = u16::from_be_bytes([payload[6], payload[7]]) as usize;
+
+    let mut pos = 12usize;
+
+    // Skip the question section.  Each question record is:
+    //   QNAME (variable) + QTYPE (2) + QCLASS (2)
+    for _ in 0..qdcount {
+        pos = match skip_name(payload, pos) {
+            Some(p) => p,
+            None => return Vec::new(),
+        };
+        if pos + 4 > payload.len() {
+            return Vec::new();
+        }
+        pos += 4; // QTYPE + QCLASS
+    }
+
+    // Parse the answer section.  Each resource record is:
+    //   NAME (variable) + RRTYPE (2) + RRCLASS (2) + TTL (4) + RDLENGTH (2) + RDATA
+    let mut results = Vec::new();
+    for _ in 0..ancount {
+        let (name, new_pos) = match read_name(payload, pos) {
+            Some(v) => v,
+            None => return Vec::new(), // compression pointer → reject whole message
+        };
+        pos = new_pos;
+
+        // Need 10 bytes for the fixed RR fields that follow the name.
+        if pos + 10 > payload.len() {
+            return Vec::new();
+        }
+
+        let rrtype = u16::from_be_bytes([payload[pos], payload[pos + 1]]);
+        // Mask off the mDNS cache-flush bit (top bit of the class field).
+        let rrclass = u16::from_be_bytes([payload[pos + 2], payload[pos + 3]]) & 0x7FFF;
+        let rdlength = u16::from_be_bytes([payload[pos + 8], payload[pos + 9]]) as usize;
+        pos += 10;
+
+        if pos + rdlength > payload.len() {
+            return Vec::new();
+        }
+
+        if rrtype == 0x0001 && rrclass == 0x0001 && rdlength == 4 {
+            let ip = Ipv4Addr::from([
+                payload[pos],
+                payload[pos + 1],
+                payload[pos + 2],
+                payload[pos + 3],
+            ]);
+            // BC-1.02.013 precondition: strip `.local` suffix, then any trailing dot.
+            let stripped = name.strip_suffix(".local").unwrap_or(&name);
+            let normalized = stripped.trim_end_matches('.');
+            if !normalized.is_empty() {
+                results.push(MdnsHostname {
+                    name: normalized.to_string(),
+                    ip,
+                });
+            }
+        }
+
+        pos += rdlength;
+    }
+
+    results
+}
+
+/// Walk a DNS name starting at `pos`, returning the new position after the
+/// name on success.  Returns `None` if a compression pointer (top 2 bits ==
+/// 0b11, i.e. byte >= 0xC0) is encountered or if the payload is truncated.
+fn skip_name(payload: &[u8], mut pos: usize) -> Option<usize> {
+    loop {
+        if pos >= payload.len() {
+            return None;
+        }
+        let len_byte = payload[pos];
+        if len_byte == 0 {
+            return Some(pos + 1);
+        }
+        if len_byte & 0xC0 == 0xC0 {
+            // DNS compression pointer — BC-1.02.010 precondition: reject message.
+            return None;
+        }
+        let label_len = (len_byte & 0x3F) as usize;
+        pos = pos.checked_add(1 + label_len)?;
+        if pos > payload.len() {
+            return None;
+        }
+    }
+}
+
+/// Read a DNS name starting at `pos`, building a dotted-label string.
+/// Returns `(name, new_pos)` on success or `None` if a compression pointer
+/// or truncation is encountered.  The root label (0x00) terminates the name
+/// without contributing a label; labels are joined with `.`.
+fn read_name(payload: &[u8], mut pos: usize) -> Option<(String, usize)> {
+    let mut labels: Vec<String> = Vec::new();
+    let mut total_name_len = 0usize;
+
+    loop {
+        if pos >= payload.len() {
+            return None;
+        }
+        let len_byte = payload[pos];
+        if len_byte == 0 {
+            return Some((labels.join("."), pos + 1));
+        }
+        if len_byte & 0xC0 == 0xC0 {
+            // Compression pointer — reject.
+            return None;
+        }
+        let label_len = (len_byte & 0x3F) as usize;
+        pos += 1;
+        if pos + label_len > payload.len() {
+            return None;
+        }
+        // EC-008: guard against names > 253 characters (DNS limit).
+        total_name_len = total_name_len.saturating_add(label_len + 1);
+        if total_name_len > 255 {
+            return None;
+        }
+        let label = String::from_utf8_lossy(&payload[pos..pos + label_len]).into_owned();
+        labels.push(label);
+        pos += label_len;
+    }
 }
 
 #[cfg(test)]
@@ -34,12 +163,12 @@ mod tests {
     /// QDCOUNT, NSCOUNT, ARCOUNT are all zero.
     fn dns_header(ancount: u16) -> Vec<u8> {
         vec![
-            0x00, 0x00,                                   // TxID
-            0x84, 0x00,                                   // Flags: QR=1, AA=1
-            0x00, 0x00,                                   // QDCOUNT = 0
+            0x00, 0x00,                                    // TxID
+            0x84, 0x00,                                    // Flags: QR=1, AA=1
+            0x00, 0x00,                                    // QDCOUNT = 0
             (ancount >> 8) as u8, (ancount & 0xFF) as u8, // ANCOUNT
-            0x00, 0x00,                                   // NSCOUNT = 0
-            0x00, 0x00,                                   // ARCOUNT = 0
+            0x00, 0x00,                                    // NSCOUNT = 0
+            0x00, 0x00,                                    // ARCOUNT = 0
         ]
     }
 
