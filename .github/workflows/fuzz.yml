@@ -1,0 +1,78 @@
+name: Fuzz (weekly)
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        harness:
+          - parse_modbus
+          - parse_enip
+          - parse_s7comm
+          - parse_dhcp
+          - parse_dnp3
+          - scrub_text
+    steps:
+      - uses: actions/checkout@v6
+
+      # Pin the nightly toolchain. Unpinned `@nightly` broke the job:
+      # cargo-fuzz's `rustix` dep stopped compiling on bleeding-edge nightly
+      # (HS-006 / wave-2 gate). nightly-2025-11-21 is verified to build
+      # cargo-fuzz 0.13.1. Bump deliberately when a newer nightly is validated.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-11-21
+
+      - run: cargo install --locked cargo-fuzz --version "=0.13.1"
+
+      - name: Seed corpus from fuzz/corpus if present
+        run: |
+          if [ -d fuzz/corpus/${{ matrix.harness }} ]; then
+            echo "corpus directory found for ${{ matrix.harness }}"
+          fi
+
+      - name: Run fuzz harness ${{ matrix.harness }}
+        # POL-11: emit a positive-coverage assertion to GITHUB_STEP_SUMMARY so
+        # silent no-op (cargo fuzz exits 0 without running any iterations) is
+        # visible to reviewers. Fixes F-ADV-P2-006.
+        run: |
+          set -o pipefail
+          cd fuzz
+          # Capture libFuzzer stdout so we can extract the per-second exec rate
+          # and the total `Done X runs in Y second(s)` line.
+          cargo +nightly-2025-11-21 fuzz run ${{ matrix.harness }} -- -max_total_time=60 2>&1 | tee fuzz-run.log
+
+          # libFuzzer prints either `Done <N> runs in <S> second(s)` (when it
+          # exits due to -max_total_time) or `#NNN INITED` pulses during the
+          # run. We require at least one pulse line and a sensible run count.
+          PULSES=$(grep -cE "^#[0-9]+\s+(INITED|pulse|NEW|REDUCE|cov:)" fuzz-run.log || true)
+          DONE_LINE=$(grep -E "^Done [0-9]+ runs in" fuzz-run.log | tail -1 || true)
+          RUNS=$(echo "$DONE_LINE" | grep -oE "[0-9]+" | head -1 || echo "0")
+
+          # Minimum sane floor: at least one pulse OR at least 10 runs reported.
+          # An empty corpus + slow target may still emit < 10_000 runs in 60s;
+          # this floor catches the actually-broken case where libFuzzer exits
+          # immediately without running anything.
+          if [ -z "$PULSES" ] || [ "$PULSES" -lt 1 ]; then
+            if [ "$RUNS" -lt 10 ]; then
+              echo "::error::fuzz harness ${{ matrix.harness }} produced no pulses and only $RUNS runs — looks like libFuzzer never started"
+              echo "POL-11 violation: cannot assert positive coverage" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          fi
+
+          echo "## Fuzz harness ${{ matrix.harness }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Check passed: $PULSES libFuzzer pulse line(s), ${RUNS:-0} total runs in 60s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts (if crashes found)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts-${{ matrix.harness }}
+          path: fuzz/artifacts/${{ matrix.harness }}/
+          if-no-files-found: ignore

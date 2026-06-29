@@ -68,6 +68,79 @@ impl AiProvider for ClaudeCliProvider {
         "claude-cli"
     }
 
+    /// Run the AI augment pass via the Claude Code CLI (S-5.03).
+    ///
+    /// Follows the same subprocess flow as [`analyze`]: spawns `claude -p`,
+    /// pipes `scrubbed_md` to stdin, and captures stdout. The response is
+    /// expected to be a JSON array of augmented findings with optional prose.
+    fn augment(&self, system_prompt: &str, scrubbed_md: &str) -> Result<String> {
+        use std::io::IsTerminal as _;
+
+        if which_claude().is_none() {
+            return Err(OtError::Parse(
+                "Claude Code CLI not found on PATH. Install from https://claude.com/code, \
+                 then run `claude` once to authenticate."
+                    .to_string(),
+            ));
+        }
+
+        let verbose = self.verbose || std::io::stderr().is_terminal();
+        let prompt_bytes = scrubbed_md.as_bytes().to_vec();
+        let model = self.model.clone();
+        let system = system_prompt.to_string();
+
+        let task = move || -> crate::error::Result<Vec<u8>> {
+            let mut cmd = build_command(model.as_deref(), &system);
+            cmd.stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+
+            let mut child = cmd.spawn().map_err(|source| OtError::InputOpen {
+                path: "<spawn:claude>".into(),
+                source,
+            })?;
+
+            {
+                let stdin = child
+                    .stdin
+                    .as_mut()
+                    .ok_or_else(|| OtError::Parse("could not open stdin to claude".to_string()))?;
+                stdin
+                    .write_all(&prompt_bytes)
+                    .map_err(|source| OtError::WriteOutput {
+                        path: "<stdin:claude>".into(),
+                        source,
+                    })?;
+            }
+
+            let output = child
+                .wait_with_output()
+                .map_err(|source| OtError::InputOpen {
+                    path: "<wait:claude>".into(),
+                    source,
+                })?;
+
+            if !output.status.success() {
+                let stderr_text = String::from_utf8_lossy(&output.stderr);
+                return Err(OtError::Parse(format!(
+                    "claude exited with code {:?}: {}",
+                    output.status.code(),
+                    stderr_text.trim()
+                )));
+            }
+
+            Ok(output.stdout)
+        };
+
+        let clock = crate::progress::SystemClock;
+        let mut stderr = std::io::stderr();
+        let response_bytes =
+            run_with_heartbeat("claude (augment)", task, &mut stderr, &clock, verbose)?;
+
+        String::from_utf8(response_bytes)
+            .map_err(|e| OtError::Parse(format!("claude stdout was not valid UTF-8: {e}")))
+    }
+
     fn analyze(&self, system_prompt: &str, scrubbed_md: &str) -> Result<String> {
         use std::io::IsTerminal as _;
 

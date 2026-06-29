@@ -1,6 +1,14 @@
+# otsniff is the workspace root package; `crates/zonewarden` is the imported,
+# formally-verified segmentation-conformance engine (ADR-0013). resolver = "2"
+# is set explicitly: a workspace with a root package otherwise defaults to
+# resolver "1".
+[workspace]
+members = ["crates/zonewarden"]
+resolver = "2"
+
 [package]
 name = "otsniff"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.85"
 description = "One-shot OT-aware PCAP triage. Feed it a span-port capture, get an exec-readable HTML report."
@@ -20,8 +28,10 @@ thiserror = "2"
 ipnet = { version = "2.10", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.11"
-sha2 = "0.10"
-pulldown-cmark = { version = "0.10", default-features = false, features = ["html"] }
+sha2 = "0.11"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+zonewarden = { path = "crates/zonewarden" }
+serde_norway = "0.9"   # YAML parser for Zonewarden segmentation policies (ADR-0013)
 
 [dev-dependencies]
 pretty_assertions = "1.4"
@@ -29,7 +39,7 @@ assert_cmd = "2"
 predicates = "3"
 insta = { version = "1", features = ["json"] }
 tempfile = "3"
-criterion = "0.5"
+criterion = "0.8"
 
 [lints.rust]
 # `kani` is a well-known custom cfg injected by cargo-kani during proof runs.

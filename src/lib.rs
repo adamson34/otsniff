@@ -2,6 +2,7 @@ pub mod ai;
 pub mod audit;
 pub mod capture_source;
 pub mod cli;
+pub mod diff;
 pub mod error;
 pub mod findings;
 pub mod inventory;
@@ -14,6 +15,10 @@ pub mod report;
 pub mod report_md;
 pub mod rule_catalog;
 pub mod scrub;
+pub mod segmentation;
+
+#[cfg(kani)]
+mod kani_proofs;
 
 pub use error::{OtError, Result};
 

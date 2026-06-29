@@ -228,6 +228,7 @@ fn html_report_snapshot() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
     insta::assert_snapshot!("report_html", html);
@@ -552,6 +553,7 @@ fn ai_section_in_html_strips_script_tags_from_claude_response() {
         fixed_ts(),
         None,
         Some(ai_html),
+        None,
     )
     .unwrap();
 
@@ -624,6 +626,7 @@ fn audit_log_rendered_for_an_analyze_run_carries_no_real_identifiers() {
             pseudonyms_replaced: 0,
             pseudonyms_unmapped: 0,
         },
+        augment_pass: None,
     };
     let log_json = serde_json::to_string_pretty(&log).unwrap();
 
@@ -665,6 +668,7 @@ fn cred_event_note_must_not_reach_any_rendered_output() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -1685,6 +1689,7 @@ fn render_html_includes_hero_band_with_inline_svg() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1728,6 +1733,7 @@ fn render_html_finding_cards_have_severity_tinted_background() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1760,6 +1766,7 @@ fn render_html_has_dark_mode_media_query() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1789,6 +1796,7 @@ fn render_html_print_styles_preserve_color() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -1825,6 +1833,7 @@ fn render_html_snapshot_remains_data_stable() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -1883,6 +1892,7 @@ fn render_html_logo_uses_pcb_style_traces() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1912,6 +1922,7 @@ fn render_fixture() -> String {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -2122,6 +2133,7 @@ fn render_html_tables_wrapped_in_collapsible_details() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -2503,6 +2515,7 @@ fn render_report_html() -> String {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap()
 }
@@ -2617,5 +2630,1472 @@ fn test_bc_8_01_005_print_mode_forces_open() {
         "AC-005: @media print must include forced-expansion rules targeting \
          details.finding (both `@media print` and `details.finding` must appear \
          in the rendered CSS)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// S-5.03 — AI-augmented findings tests
+// BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001
+// ---------------------------------------------------------------------------
+
+// ── Mock AiProvider shared by S-5.03 integration tests ──────────────────────
+//
+// Mirrors the mock pattern from `src/ai/claude_cli.rs` unit tests but exposes
+// the `augment` capture surface needed for the privacy invariant assertions.
+
+use otsniff::ai::AiProvider;
+use otsniff::error::OtError as AugOtError;
+use std::cell::RefCell;
+
+struct MockAiProvider {
+    /// Fixed response returned by `augment`.
+    augment_response: Result<String, String>,
+    /// Captures the exact `scrubbed_md` bytes the mock received so tests can
+    /// run the leak detector on them.
+    last_augment_input: RefCell<Option<String>>,
+    /// Fixed response returned by `analyze` (unused by augment-path tests but
+    /// required by the trait).
+    analyze_response: Result<String, String>,
+}
+
+impl MockAiProvider {
+    fn with_augment(response: &str) -> Self {
+        Self {
+            augment_response: Ok(response.to_string()),
+            last_augment_input: RefCell::new(None),
+            analyze_response: Ok("## AI-augmented analysis\n\nno issues".to_string()),
+        }
+    }
+
+    fn augment_fails(reason: &str) -> Self {
+        Self {
+            augment_response: Err(reason.to_string()),
+            last_augment_input: RefCell::new(None),
+            analyze_response: Ok("## AI-augmented analysis\n\nno issues".to_string()),
+        }
+    }
+
+    fn last_augment_input(&self) -> Option<String> {
+        self.last_augment_input.borrow().clone()
+    }
+}
+
+impl AiProvider for MockAiProvider {
+    fn name(&self) -> &str {
+        "mock"
+    }
+
+    fn analyze(&self, _system_prompt: &str, _scrubbed_md: &str) -> otsniff::error::Result<String> {
+        match &self.analyze_response {
+            Ok(s) => Ok(s.clone()),
+            Err(e) => Err(AugOtError::Parse(e.clone())),
+        }
+    }
+
+    fn augment(&self, _system_prompt: &str, scrubbed_md: &str) -> otsniff::error::Result<String> {
+        *self.last_augment_input.borrow_mut() = Some(scrubbed_md.to_string());
+        match &self.augment_response {
+            Ok(s) => Ok(s.clone()),
+            Err(e) => Err(AugOtError::Parse(e.clone())),
+        }
+    }
+}
+
+/// Two-finding response in scrubbed pseudonym terms.
+fn two_augmented_findings_response() -> String {
+    r#"[
+  {
+    "id": "ai.gateway_inference",
+    "severity": "High",
+    "title": "Inferred gateway role mismatch",
+    "evidence": ["host_001 acted as default gateway but is not inventoried as a router"],
+    "confidence": "High",
+    "reasoning": "host_001 appears as the L3 hop for all OT egress."
+  },
+  {
+    "id": "ai.role_misclass",
+    "severity": "Medium",
+    "title": "Possible role misclassification",
+    "evidence": ["host_002 sends engineering-class commands but is inventoried as a workstation"],
+    "confidence": "Medium",
+    "reasoning": "host_002 generates Write-Single-Coil commands."
+  }
+]"#
+    .to_string()
+}
+
+// ── AC-001 (BC-6.05.001) — augment request invokes provider with scrubbed payload ──
+
+// BC-6.05.001 — `augment_findings` must invoke the provider's `augment` method
+// exactly once, and the bytes it passes must not contain any real identifiers
+// from the fixture observations (i.e., the scrub layer ran before the call).
+//
+// This test drives `augment_findings` through its full pipeline via a mock
+// provider that records its input.  It then runs the leak detector on those
+// bytes to enforce the scrub-before-call invariant.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn augment_request_invokes_provider_with_scrubbed_payload() {
+    // BC-6.05.001 — scrub layer must run before the provider call.
+    use otsniff::findings::augmented::augment_findings;
+
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let mock = MockAiProvider::with_augment(&two_augmented_findings_response());
+    let _result = augment_findings(&obs, &findings, &inventory, &mock);
+    // The above call panics on todo!() — which is the expected Red Gate failure.
+    // Once implemented, the assertions below validate the contract.
+
+    let sent = mock
+        .last_augment_input()
+        .expect("BC-6.05.001: mock augment must have been called");
+
+    // Verify the sent bytes do not contain any real identifiers from the fixture.
+    otsniff::ai::leak_detector::ensure_clean(&sent)
+        .expect("BC-6.05.001: bytes sent to augment provider must pass regex leak check");
+
+    let map = build_map_at(&obs, fixed_ts());
+    otsniff::ai::leak_detector::ensure_no_map_values(&sent, &map)
+        .expect("BC-6.05.001: bytes sent to augment provider must pass map-value leak check");
+}
+
+// ── AC-002 (BC-6.05.002) — mock provider returns known response; assert shape ──
+
+// BC-6.05.002 — when the mock provider returns a well-formed JSON array,
+// `augment_findings` must return a Vec<AugmentedFinding> of length 2 with
+// the expected id/severity/confidence.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn augment_mock_returns_known_response_assert_shape() {
+    use otsniff::findings::augmented::{augment_findings, Confidence};
+    use otsniff::findings::Severity;
+
+    // BC-6.05.002 — response shape contract.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let mock = MockAiProvider::with_augment(&two_augmented_findings_response());
+    let (augmented, _summary) = augment_findings(&obs, &findings, &inventory, &mock)
+        .expect("BC-6.05.002: augment_findings must succeed with valid mock response");
+
+    // The fixture has no overlapping rule findings for host_001/host_002 in the
+    // augmented sense, so both survive dedup.
+    assert!(
+        !augmented.is_empty(),
+        "BC-6.05.002: augment_findings must return at least one finding from a 2-element response"
+    );
+
+    let gateway = augmented
+        .iter()
+        .find(|f| f.id == "ai.gateway_inference")
+        .expect("BC-6.05.002: ai.gateway_inference must be present in output");
+    assert_eq!(gateway.severity, Severity::High);
+    assert_eq!(gateway.confidence, Confidence::High);
+}
+
+// ── AC-003 (BC-6.05.003) — dedup: rule finding takes precedence ──────────────
+
+// BC-6.05.003 — when an augmented finding's evidence overlaps with an existing
+// rule finding, `augment_findings` must drop the augmented finding (rule wins).
+//
+// Setup: build a fixture where a rule finding fires on host_A.  The mock
+// provider returns an augmented finding on the same host.  After augment_findings,
+// only the rule finding shape for that host must be present.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn augment_dedup_rule_finding_takes_precedence() {
+    use otsniff::findings::augmented::augment_findings;
+
+    // The fixture already fires ics.engineering_commands for host 10.10.0.5.
+    // Build a mock response that returns an augmented finding citing the same host
+    // pseudonym that the scrub layer will assign to 10.10.0.5.
+    //
+    // Because we can't know the exact pseudonym at test construction time (the
+    // scrub layer picks it at runtime), we use a response that references a
+    // pseudonym the implementer's scrub layer must substitute. The test asserts
+    // structural dedup (count, not specific pseudonym text).
+    //
+    // We set up the mock response to return an augmented finding on `host_001`
+    // (which the scrub layer will assign to one of the fixture hosts). After
+    // dedup, if the fixture's rule findings cover that pseudonym, the augmented
+    // finding must be dropped.
+
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let rule_findings = run_all(&obs, &ot_subnets());
+    assert!(
+        !rule_findings.is_empty(),
+        "fixture must produce rule findings for dedup test"
+    );
+
+    // Build the scrub map so we can produce a mock response in pseudonym form.
+    // The AI always returns pseudonyms (host_NNN), never real IPs — so the
+    // mock response must also use pseudonyms for the dedup to fire correctly.
+    let map = build_map_at(&obs, fixed_ts());
+
+    // The mock returns one augmented finding whose evidence contains
+    // a host pseudonym that overlaps with the first rule finding's evidence.
+    // We scrub the first rule evidence token to get its pseudonym form, then
+    // build the mock response using that pseudonym.
+    let first_rule_evidence = rule_findings[0]
+        .evidence
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    // Scrub the entire evidence string to get pseudonym form.  The first
+    // whitespace-delimited token in the scrubbed form is a host_NNN pseudonym.
+    let scrubbed_evidence = scrub_text(&first_rule_evidence, &map);
+    let overlap_pseudonym = scrubbed_evidence
+        .split_whitespace()
+        .next()
+        .unwrap_or("host_001");
+    let overlapping_response = format!(
+        r#"[{{"id":"ai.overlap_test","severity":"High","title":"Overlap",
+            "evidence":["{overlap_pseudonym} did something suspicious"],
+            "confidence":"High","reasoning":"evidence from rule overlap"}}]"#
+    );
+
+    let mock = MockAiProvider::with_augment(&overlapping_response);
+    let (augmented, _summary) = augment_findings(&obs, &rule_findings, &inventory, &mock)
+        .expect("BC-6.05.003: augment_findings must not error on dedup");
+
+    let overlap_finding = augmented.iter().find(|f| f.id == "ai.overlap_test");
+    assert!(
+        overlap_finding.is_none(),
+        "BC-6.05.003: augmented finding with overlapping rule-finding evidence must be dropped; \
+         found it in output: {:?}",
+        overlap_finding
+    );
+}
+
+// BC-6.05.003 — a disjoint augmented finding must survive dedup.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn augment_dedup_disjoint_finding_survives() {
+    use otsniff::findings::augmented::augment_findings;
+    use otsniff::observe::HostObs;
+
+    // Build a minimal two-host observation so the scrub map mints host_001
+    // and host_002 (assigned in sorted IP order: 10.10.0.5 → host_001,
+    // 10.10.0.20 → host_002).  No events, no flows, no credentials — so
+    // run_all produces no rule findings.  The EC-003 filter inside
+    // augment_findings requires that every host_NNN pseudonym in an
+    // augmented finding's evidence appears in the scrub map; without these
+    // hosts in obs.hosts the map is empty and both findings are dropped.
+    let mut hosts = std::collections::HashMap::new();
+    hosts.insert(
+        ip("10.10.0.5"),
+        HostObs {
+            ip: ip("10.10.0.5"),
+            macs: vec![[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01]],
+            protocols: std::collections::HashSet::new(),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 1,
+            bytes: 64,
+            in_ot_zone: true,
+        },
+    );
+    hosts.insert(
+        ip("10.10.0.20"),
+        HostObs {
+            ip: ip("10.10.0.20"),
+            macs: vec![[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x02]],
+            protocols: std::collections::HashSet::new(),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 1,
+            bytes: 64,
+            in_ot_zone: true,
+        },
+    );
+    let obs = otsniff::observe::Observations {
+        hosts,
+        ..Default::default()
+    };
+
+    let inventory = build_inventory(&obs);
+    let rule_findings = run_all(&obs, &ot_subnets());
+    assert!(
+        rule_findings.is_empty(),
+        "two bare hosts with no events must produce no rule findings"
+    );
+
+    let mock = MockAiProvider::with_augment(&two_augmented_findings_response());
+    let (augmented, _summary) = augment_findings(&obs, &rule_findings, &inventory, &mock)
+        .expect("BC-6.05.003: augment_findings must succeed when no rule findings exist");
+
+    // With no rule findings to overlap, and host_001/host_002 registered in
+    // the scrub map, both augmented findings must survive.
+    assert_eq!(
+        augmented.len(),
+        2,
+        "BC-6.05.003: both augmented findings must survive when there are no overlapping rule findings"
+    );
+}
+
+// ── AC-004 (BC-3.07.001) — HTML rendering ─────────────────────────────────────
+
+// BC-3.07.001 — when augmented findings are present, the HTML report must
+// contain an "AI-augmented findings" heading and the finding's reasoning.
+//
+// Red Gate: panics on `todo!()` in `render_augmented_section`.
+#[test]
+fn html_report_contains_augmented_section_when_present() {
+    use otsniff::findings::augmented::{AugmentedFinding, Confidence};
+    use otsniff::findings::Severity;
+    use otsniff::report::render_augmented_section;
+
+    // BC-3.07.001 — HTML render section contract.
+    let augmented = vec![AugmentedFinding {
+        id: "ai.gateway_inference".to_string(),
+        severity: Severity::High,
+        title: "Inferred gateway role mismatch".to_string(),
+        evidence: vec!["ENG-WS-01 (10.10.0.5) acted as default gateway".to_string()],
+        confidence: Confidence::High,
+        reasoning: "ENG-WS-01 appears as the L3 hop for all OT egress.".to_string(),
+    }];
+
+    let html_section = render_augmented_section(&augmented);
+
+    assert!(
+        html_section.to_lowercase().contains("ai-augmented")
+            || html_section.to_lowercase().contains("augmented findings"),
+        "BC-3.07.001: HTML augmented section must contain an 'AI-augmented findings' heading; got:\n{}",
+        &html_section[..html_section.len().min(500)]
+    );
+    assert!(
+        html_section.contains("Inferred gateway role mismatch"),
+        "BC-3.07.001: HTML section must contain the finding title"
+    );
+}
+
+// BC-3.07.001 — when no augmented findings are present, the HTML report must
+// NOT contain an "AI-augmented findings" heading.
+//
+// Red Gate: panics on `todo!()` in `render_augmented_section`.
+#[test]
+fn html_report_omits_augmented_section_when_empty() {
+    use otsniff::report::render_augmented_section;
+
+    // BC-3.07.001 — empty augmented findings must produce empty or minimal output.
+    let html_section = render_augmented_section(&[]);
+
+    assert!(
+        !html_section
+            .to_lowercase()
+            .contains("ai-augmented findings"),
+        "BC-3.07.001: empty augmented findings must not emit an 'AI-augmented findings' heading"
+    );
+}
+
+// BC-3.07.001 — markdown report must also have an "AI-augmented findings"
+// section when augmented findings are present.
+//
+// Red Gate: panics on `todo!()` in `render_augmented_section_md`.
+#[test]
+fn markdown_report_contains_augmented_section_when_present() {
+    use otsniff::findings::augmented::{AugmentedFinding, Confidence};
+    use otsniff::findings::Severity;
+    use otsniff::report_md::render_augmented_section_md;
+
+    // BC-3.07.001 — markdown render section contract.
+    let augmented = vec![AugmentedFinding {
+        id: "ai.role_misclass".to_string(),
+        severity: Severity::Medium,
+        title: "Possible role misclassification".to_string(),
+        evidence: vec![
+            "ENG-WS-01 sends engineering commands but is inventoried as workstation".to_string(),
+        ],
+        confidence: Confidence::Medium,
+        reasoning: "The asset generates Write-Single-Coil commands.".to_string(),
+    }];
+
+    let md_section = render_augmented_section_md(&augmented);
+
+    assert!(
+        md_section.to_lowercase().contains("ai-augmented")
+            || md_section.to_lowercase().contains("augmented findings"),
+        "BC-3.07.001: markdown augmented section must contain 'AI-augmented findings' heading; got:\n{}",
+        &md_section[..md_section.len().min(500)]
+    );
+    assert!(
+        md_section.contains("Possible role misclassification"),
+        "BC-3.07.001: markdown section must contain the finding title"
+    );
+    assert!(
+        md_section.contains("The asset generates Write-Single-Coil commands."),
+        "BC-3.07.001: markdown section must contain the finding reasoning"
+    );
+}
+
+// ── AC-004 snapshot test ────────────────────────────────────────────────────
+
+// BC-3.07.001 — insta snapshot of the rendered augmented-findings HTML section.
+//
+// Red Gate: panics on `todo!()` in `render_augmented_section`.
+// On first green run, `cargo insta review` must be used to accept.
+#[test]
+fn augmented_findings_html_section_snapshot() {
+    use otsniff::findings::augmented::{AugmentedFinding, Confidence};
+    use otsniff::findings::Severity;
+    use otsniff::report::render_augmented_section;
+
+    // BC-3.07.001 — snapshot pins the rendered shape.
+    let augmented = vec![
+        AugmentedFinding {
+            id: "ai.gateway_inference".to_string(),
+            severity: Severity::High,
+            title: "Inferred gateway role mismatch".to_string(),
+            evidence: vec![
+                "host_001 acted as default gateway but not inventoried as a router".to_string(),
+            ],
+            confidence: Confidence::High,
+            reasoning: "host_001 appears as the L3 hop for all OT egress.".to_string(),
+        },
+        AugmentedFinding {
+            id: "ai.role_misclass".to_string(),
+            severity: Severity::Medium,
+            title: "Possible role misclassification".to_string(),
+            evidence: vec![
+                "host_002 sends engineering-class commands but is inventoried as workstation"
+                    .to_string(),
+            ],
+            confidence: Confidence::Medium,
+            reasoning: "host_002 generates Write-Single-Coil and Direct-Operate commands."
+                .to_string(),
+        },
+    ];
+
+    let html = render_augmented_section(&augmented);
+    insta::assert_snapshot!("augmented_section_html", html);
+}
+
+// BC-3.07.001 — insta snapshot of the rendered augmented-findings markdown section.
+//
+// Red Gate: panics on `todo!()` in `render_augmented_section_md`.
+#[test]
+fn augmented_findings_markdown_section_snapshot() {
+    use otsniff::findings::augmented::{AugmentedFinding, Confidence};
+    use otsniff::findings::Severity;
+    use otsniff::report_md::render_augmented_section_md;
+
+    // BC-3.07.001 — snapshot pins the markdown shape.
+    let augmented = vec![AugmentedFinding {
+        id: "ai.gateway_inference".to_string(),
+        severity: Severity::High,
+        title: "Inferred gateway role mismatch".to_string(),
+        evidence: vec!["host_001 acted as default gateway".to_string()],
+        confidence: Confidence::High,
+        reasoning: "host_001 appears as the L3 hop for all OT egress.".to_string(),
+    }];
+
+    let md = render_augmented_section_md(&augmented);
+    insta::assert_snapshot!("augmented_section_md", md);
+}
+
+// ── AC-005 — Privacy invariant extended to augment path ───────────────────────
+
+// AC-005 — the augment pass must enforce the same scrub-before-call privacy
+// invariant as the analyze pass.
+//
+// Injects canary IPs, MACs, and a hostname into fixture observations, then
+// drives augment_findings with a mock provider that records its input.
+// Asserts NONE of the canaries appear in the bytes the mock received.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn invariant_no_real_values_reach_ai_provider_augment() {
+    use otsniff::ai::leak_detector;
+    use otsniff::findings::augmented::augment_findings;
+
+    // AC-005 — privacy invariant for the augment path.
+    let mut obs = build_fixture();
+
+    // Inject canaries that must NOT reach the provider.
+    let canary_ip = ip("172.31.200.99");
+    let canary_mac = [0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD];
+    let canary_hostname = "CANARY-HOST-AUGMENT-DO-NOT-LEAK";
+
+    obs.hosts.insert(
+        canary_ip,
+        otsniff::observe::HostObs {
+            ip: canary_ip,
+            macs: vec![canary_mac],
+            protocols: std::collections::HashSet::from(["modbus".to_string()]),
+            first_seen: fixed_ts(),
+            last_seen: fixed_ts(),
+            packets: 1,
+            bytes: 64,
+            in_ot_zone: true,
+        },
+    );
+    obs.hostnames.insert(canary_ip, canary_hostname.to_string());
+
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let mock = MockAiProvider::with_augment(&two_augmented_findings_response());
+    // Drive augment_findings — will panic at todo!() until implemented.
+    let _result = augment_findings(&obs, &findings, &inventory, &mock);
+
+    let sent = mock
+        .last_augment_input()
+        .expect("AC-005: mock augment must have been called");
+
+    // Canary IP must be scrubbed.
+    assert!(
+        !sent.contains("172.31.200.99"),
+        "AC-005: canary IP 172.31.200.99 must not appear in augment provider input"
+    );
+    // Canary MAC must be scrubbed.
+    assert!(
+        !sent.contains("CA:FE:BA:BE:DE:AD") && !sent.contains("ca:fe:ba:be:de:ad"),
+        "AC-005: canary MAC must not appear in augment provider input"
+    );
+    // Canary hostname must be scrubbed.
+    assert!(
+        !sent.contains(canary_hostname),
+        "AC-005: canary hostname {canary_hostname} must not appear in augment provider input"
+    );
+
+    // Run the production leak detector on the sent bytes for belt-and-suspenders coverage.
+    let map = build_map_at(&obs, fixed_ts());
+    leak_detector::ensure_clean(&sent)
+        .expect("AC-005: augment provider input must pass regex leak check");
+    leak_detector::ensure_no_map_values(&sent, &map)
+        .expect("AC-005: augment provider input must pass map-value leak check");
+}
+
+// ── AC-006 — Audit log records augment-pass hashes separately ─────────────────
+
+// AC-006 — after augment_findings runs, the AuditLog.augment_pass field must
+// be Some(...) with SHA-256 hashes matching the prompt and response bytes, and
+// those hashes must differ from the analyze-pass hashes when the content differs.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn audit_log_records_augment_pass_hashes_separately() {
+    use otsniff::audit::{self, AugmentInvocationSummary};
+    use otsniff::findings::augmented::augment_findings;
+
+    // AC-006 — audit log contract.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let mock = MockAiProvider::with_augment(&two_augmented_findings_response());
+    // augment_findings must populate AuditLog.augment_pass.
+    // The function signature may need to accept &mut AuditLog or return
+    // (Vec<AugmentedFinding>, AugmentInvocationSummary). The test drives through
+    // augment_findings and checks the returned summary separately.
+    //
+    // Interpretation call: augment_findings returns (results, summary) or the
+    // caller builds the summary from returned metadata. Since the stub returns
+    // Result<Vec<AugmentedFinding>> only, the implementer must extend the
+    // return type or accept an &mut AuditLog. Either is fine — the test below
+    // constructs the summary manually to verify the SHA-256 shape is correct.
+    //
+    // The assertions below WILL PASS once the function doesn't todo!(), so they
+    // serve as the forward-going contract regardless of the exact return type.
+
+    // For now, assert the AugmentInvocationSummary structure is well-formed
+    // by building a synthetic one and checking SHA-256 properties.
+    let system_prompt = otsniff::ai::prompts::AUGMENT_PROMPT;
+    let response_text = two_augmented_findings_response();
+
+    let summary = AugmentInvocationSummary {
+        system_prompt_bytes: system_prompt.len(),
+        system_prompt_sha256: audit::sha256_hex(system_prompt),
+        user_message_bytes: 512, // placeholder; real value from augment_findings
+        user_message_sha256: audit::sha256_hex("synthetic-user-message"),
+        response_bytes: response_text.len(),
+        response_sha256: audit::sha256_hex(&response_text),
+        elapsed_seconds: 0.1,
+        raw_finding_count: 2,
+        surviving_finding_count: 2,
+    };
+
+    // SHA-256 hashes are 64 hex chars.
+    assert_eq!(
+        summary.system_prompt_sha256.len(),
+        64,
+        "AC-006: system_prompt_sha256 must be a 64-char SHA-256 hex string"
+    );
+    assert_eq!(
+        summary.response_sha256.len(),
+        64,
+        "AC-006: response_sha256 must be a 64-char SHA-256 hex string"
+    );
+
+    // Augment-pass hashes must differ from analyze-pass hashes when content differs.
+    let analyze_system_sha = audit::sha256_hex(otsniff::ai::prompts::SYSTEM_PROMPT);
+    assert_ne!(
+        summary.system_prompt_sha256, analyze_system_sha,
+        "AC-006: augment-pass system_prompt_sha256 must differ from analyze-pass \
+         sha when prompts differ (AUGMENT_PROMPT vs SYSTEM_PROMPT)"
+    );
+
+    // The AuditLog must accept augment_pass: Some(summary).
+    let _log = otsniff::audit::AuditLog {
+        schema_version: audit::SCHEMA_VERSION,
+        otsniff_version: "test".to_string(),
+        timestamp: fixed_ts(),
+        input_pcap: otsniff::audit::InputDescriptor {
+            path: "test.pcap".to_string(),
+            size_bytes: 0,
+            sha256: audit::sha256_hex(""),
+        },
+        scrub: otsniff::audit::ScrubSummary::default(),
+        leak_check: otsniff::audit::LeakCheckSummary {
+            regex: otsniff::audit::LeakCheckResult {
+                passed: true,
+                items_checked: 0,
+            },
+            map_value: otsniff::audit::LeakCheckResult {
+                passed: true,
+                items_checked: 0,
+            },
+        },
+        ai_provider: otsniff::audit::AiInvocationSummary {
+            command: "mock".to_string(),
+            model: "mock".to_string(),
+            system_prompt_bytes: 0,
+            system_prompt_sha256: audit::sha256_hex(""),
+            user_message_bytes: 0,
+            user_message_sha256: audit::sha256_hex(""),
+            response_bytes: 0,
+            response_sha256: audit::sha256_hex(""),
+            elapsed_seconds: 0.0,
+        },
+        unscrub: otsniff::audit::UnscrubSummary::default(),
+        augment_pass: Some(summary),
+    };
+
+    // If we got here without panic, the AuditLog structure accepted augment_pass.
+    // The full pipeline test (augment_findings populates augment_pass) is in the
+    // TODO block below — the todo!() in augment_findings is the Red Gate signal.
+
+    // Now drive the actual augment_findings to prove it returns a valid summary.
+    let (_augmented, returned_summary) = augment_findings(&obs, &findings, &inventory, &mock)
+        .expect("AC-006: augment_findings must succeed");
+    // AC-006: verify the returned summary carries 64-char SHA-256 hashes.
+    assert_eq!(
+        returned_summary.system_prompt_sha256.len(),
+        64,
+        "AC-006: returned system_prompt_sha256 must be a 64-char SHA-256 hex string"
+    );
+    assert_eq!(
+        returned_summary.response_sha256.len(),
+        64,
+        "AC-006: returned response_sha256 must be a 64-char SHA-256 hex string"
+    );
+    assert_eq!(
+        returned_summary.user_message_sha256.len(),
+        64,
+        "AC-006: returned user_message_sha256 must be a 64-char SHA-256 hex string"
+    );
+    // The augment-pass system prompt hash must differ from the analyze-pass hash.
+    let analyze_sha = audit::sha256_hex(otsniff::ai::prompts::SYSTEM_PROMPT);
+    assert_ne!(
+        returned_summary.system_prompt_sha256, analyze_sha,
+        "AC-006: augment system_prompt_sha256 must differ from analyze-pass sha"
+    );
+}
+
+// ── Edge cases ────────────────────────────────────────────────────────────────
+
+// EC-001 — when the provider returns malformed JSON, augment_findings returns
+// Ok(vec![]) (no error) so the report can render without the augment section.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn augment_returns_empty_vec_on_malformed_json_from_provider() {
+    use otsniff::findings::augmented::augment_findings;
+
+    // EC-001 — malformed JSON falls back gracefully.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let mock = MockAiProvider::with_augment("not json at all, sorry");
+    let result = augment_findings(&obs, &findings, &inventory, &mock);
+
+    let (augmented, _summary) =
+        result.expect("EC-001: malformed JSON from provider must return Ok(vec![]), not an error");
+    assert!(
+        augmented.is_empty(),
+        "EC-001: malformed JSON must produce empty augmented findings; got: {augmented:?}"
+    );
+}
+
+// EC-002 — when the provider returns more than 25 findings, augment_findings
+// caps the output at the top 25 by confidence.
+//
+// Interpretation call: cap = 25. If the implementer picks a different value,
+// update the assertion and document the choice.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn augment_caps_findings_at_top_25_by_confidence() {
+    use otsniff::findings::augmented::{augment_findings, Confidence};
+
+    // EC-002 — cap at top-N by confidence.
+    let obs = otsniff::observe::Observations::default();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    // Build a 30-finding response: 10 Low, 10 Medium, 10 High.
+    let mut items: Vec<String> = Vec::new();
+    for i in 0..10u32 {
+        items.push(format!(
+            r#"{{"id":"ai.low_{i}","severity":"Info","title":"Low {i}","evidence":[],"confidence":"Low","reasoning":""}}"#
+        ));
+    }
+    for i in 0..10u32 {
+        items.push(format!(
+            r#"{{"id":"ai.medium_{i}","severity":"Medium","title":"Med {i}","evidence":[],"confidence":"Medium","reasoning":""}}"#
+        ));
+    }
+    for i in 0..10u32 {
+        items.push(format!(
+            r#"{{"id":"ai.high_{i}","severity":"High","title":"High {i}","evidence":[],"confidence":"High","reasoning":""}}"#
+        ));
+    }
+    let response = format!("[{}]", items.join(","));
+
+    let mock = MockAiProvider::with_augment(&response);
+    let (augmented, _summary) = augment_findings(&obs, &findings, &inventory, &mock)
+        .expect("EC-002: augment_findings must not error on 30-finding response");
+
+    assert!(
+        augmented.len() <= 25,
+        "EC-002: augment_findings must cap at 25 findings; got {}",
+        augmented.len()
+    );
+
+    // With 10H + 10M + 10L = 30 findings and cap=25, the surviving set must
+    // be exactly the top-25 by confidence rank: 10H + 10M + 5L.
+    // ALL 10 High and ALL 10 Medium findings must be present.
+    let high_count = augmented
+        .iter()
+        .filter(|f| f.confidence == Confidence::High)
+        .count();
+    let med_count = augmented
+        .iter()
+        .filter(|f| f.confidence == Confidence::Medium)
+        .count();
+    assert_eq!(
+        high_count, 10,
+        "EC-002: all 10 High-confidence findings must survive the cap; got {high_count}"
+    );
+    assert_eq!(
+        med_count, 10,
+        "EC-002: all 10 Medium-confidence findings must survive the cap; got {med_count}"
+    );
+    // The remaining 5 slots are filled with Low findings — this is the correct
+    // "top-N" semantics (fixes HIGH finding: old logic dropped ALL Lows even
+    // when below the overall cap count).
+    let low_count = augmented
+        .iter()
+        .filter(|f| f.confidence == Confidence::Low)
+        .count();
+    assert_eq!(
+        low_count, 5,
+        "EC-002: exactly 5 Low-confidence findings should fill the remaining cap slots; got {low_count}"
+    );
+}
+
+// EC-003 — an augmented finding whose evidence references a host not present in
+// the inventory must be dropped by augment_findings.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn augment_drops_finding_referencing_unknown_host() {
+    use otsniff::findings::augmented::augment_findings;
+
+    // EC-003 — unknown host reference must be dropped.
+    // Build observations with exactly one known host (host_001 in scrubbed terms).
+    // The mock returns a finding referencing an unknown pseudonym.
+    let obs = otsniff::observe::Observations::default();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    // The inventory is empty (default observations). Any host reference in an
+    // augmented finding is "unknown" and must be dropped.
+    let response = r#"[{
+        "id": "ai.unknown_ref",
+        "severity": "High",
+        "title": "References unknown host",
+        "evidence": ["host_999 did suspicious things"],
+        "confidence": "High",
+        "reasoning": "host_999 was not in the inventory."
+    }]"#;
+
+    let mock = MockAiProvider::with_augment(response);
+    let (augmented, _summary) = augment_findings(&obs, &findings, &inventory, &mock)
+        .expect("EC-003: augment_findings must not error when dropping unknown-host findings");
+
+    let unknown_ref = augmented.iter().find(|f| f.id == "ai.unknown_ref");
+    assert!(
+        unknown_ref.is_none(),
+        "EC-003: finding referencing unknown inventory host must be dropped; found: {:?}",
+        unknown_ref
+    );
+}
+
+// EC-004 — when the augment pass fails (provider returns Err), the report must
+// still render with the rule findings intact.  The augment section must be absent.
+// The error propagates as OtError::Parse — the same variant the analyze path uses.
+//
+// Red Gate: panics on `todo!()` in `augment_findings`.
+#[test]
+fn augment_failure_after_analyze_success_renders_without_augment() {
+    use otsniff::findings::augmented::augment_findings;
+    use otsniff::report::render_html;
+    use otsniff::report_md::render_augmented_section_md;
+
+    // EC-004 — augment failure must not crash the rendering path.
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    let rule_findings = run_all(&obs, &ot_subnets());
+    assert!(
+        !rule_findings.is_empty(),
+        "fixture must produce rule findings"
+    );
+
+    let mock = MockAiProvider::augment_fails("simulated augment provider failure");
+    let result = augment_findings(&obs, &rule_findings, &inventory, &mock);
+
+    // The error must propagate (not panic) and be OtError::Parse-shaped.
+    let err = result.expect_err("EC-004: augment_findings must return Err when provider fails");
+    let err_msg = err.to_string();
+    // Exit code must be 70 (EX_SOFTWARE = OtError::Parse exit code).
+    assert_eq!(
+        err.exit_code(),
+        70,
+        "EC-004: augment failure must use OtError::Parse (exit code 70), not a new variant; \
+         got exit code {} from error: {err_msg}",
+        err.exit_code()
+    );
+
+    // The HTML rendering path itself must succeed without augmented findings.
+    let html = render_html(
+        &inventory,
+        &rule_findings,
+        &obs,
+        "test.pcap",
+        fixed_ts(),
+        None,
+        None, // no AI section — augment failed
+        None,
+    )
+    .expect("EC-004: HTML render must succeed even when augment pass failed");
+
+    assert!(
+        !html.to_lowercase().contains("ai-augmented findings"),
+        "EC-004: HTML report must NOT contain 'AI-augmented findings' when augment failed"
+    );
+    // Rule findings must still be present.
+    assert!(
+        html.contains("finding"),
+        "EC-004: HTML report must still contain rule findings when augment failed"
+    );
+
+    // Markdown augment section is empty when augmented findings are empty.
+    let md_section = render_augmented_section_md(&[]);
+    assert!(
+        !md_section.to_lowercase().contains("ai-augmented findings"),
+        "EC-004: markdown augmented section must be absent when augmented findings are empty"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// S-6.03 / BC-8.04.001 — diff renderer tests
+//
+// AC-001: HTML renderer produces a summary banner and labelled sections.
+// AC-002: Markdown renderer produces the same data in LLM-friendly form.
+// AC-003: Both renderers are deterministic (two calls on the same Diff are equal).
+// EC-001: Empty Diff produces a "No deltas detected" banner in both renderers.
+// ---------------------------------------------------------------------------
+
+use otsniff::diff::{Diff, FlowDelta, FlowSummary, HostRef, RoleShift};
+use otsniff::report::render_diff_html;
+use otsniff::report_md::render_diff_markdown;
+
+/// Build a deterministic non-empty Diff fixture covering every section:
+/// - `findings_new` (1 finding)
+/// - `findings_recurring` (1 finding)
+/// - `findings_resolved` (1 finding)
+/// - `hosts_new` (1 host)
+/// - `hosts_gone` (1 host)
+/// - `role_shifts` (1 shift — host_003 changed plc → hmi)
+/// - `flow_shifts` (1 shift — ratio 4.0x, above the default 2.0 threshold)
+/// - `flows_new` (1 flow — host_004 → host_002:102)
+/// - `flows_gone` (1 flow — host_005 → host_001:44818)
+fn build_diff_fixture() -> Diff {
+    use otsniff::findings::Severity;
+
+    let finding_new = otsniff::findings::Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "NEW: Modbus write commands observed".to_string(),
+        summary: "Engineering writes seen in current capture that were absent in baseline."
+            .to_string(),
+        evidence: vec!["host_001 -> host_002:502".to_string()],
+        recommendation: "Verify write commands are expected for this capture window.",
+        playbook: vec![
+            "Review Modbus write targets against change management records.".to_string(),
+        ],
+    };
+
+    let finding_recurring = otsniff::findings::Finding {
+        id: "egress.ot_to_internet",
+        severity: Severity::Medium,
+        title: "RECURRING: OT-to-internet egress still present".to_string(),
+        summary: "Outbound internet traffic from OT subnet observed in both captures.".to_string(),
+        evidence: vec!["host_001 -> 8.8.8.8:80".to_string()],
+        recommendation: "Block outbound internet traffic from OT zone at the perimeter firewall.",
+        playbook: vec![
+            "Identify source and destination of each egress flow.".to_string(),
+            "Confirm with network owner whether this connection is expected.".to_string(),
+        ],
+    };
+
+    let finding_resolved = otsniff::findings::Finding {
+        id: "creds.telnet",
+        severity: Severity::High,
+        title: "RESOLVED: Plaintext Telnet session no longer present".to_string(),
+        summary: "Telnet session observed in baseline is absent from current capture.".to_string(),
+        evidence: vec!["host_003:23".to_string()],
+        recommendation: "Confirm Telnet is permanently disabled and not re-enabled.",
+        playbook: vec!["Verify Telnet service is disabled on all OT devices.".to_string()],
+    };
+
+    let host_new = HostRef {
+        pseudonym: "host_004".to_string(),
+        role: "engineering".to_string(),
+        protocols: vec!["modbus".to_string(), "smb".to_string()],
+        packets: 300,
+        bytes: 28_800,
+        in_ot_zone: true,
+    };
+
+    let host_gone = HostRef {
+        pseudonym: "host_005".to_string(),
+        role: "plc".to_string(),
+        protocols: vec!["modbus".to_string()],
+        packets: 150,
+        bytes: 14_400,
+        in_ot_zone: true,
+    };
+
+    let role_shift = RoleShift {
+        pseudonym: "host_003".to_string(),
+        old_role: "plc".to_string(),
+        new_role: "hmi".to_string(),
+    };
+
+    let flow_shift = FlowDelta {
+        src: "host_001".to_string(),
+        dst: "host_002".to_string(),
+        dst_port: 502,
+        proto: "tcp".to_string(),
+        baseline_bytes: 10_000,
+        current_bytes: 40_000,
+        ratio: 4.0,
+    };
+
+    let flow_new = FlowSummary {
+        src: "host_004".to_string(),
+        dst: "host_002".to_string(),
+        dst_port: 102,
+        proto: "tcp".to_string(),
+        bytes: 5_000,
+    };
+
+    let flow_gone = FlowSummary {
+        src: "host_005".to_string(),
+        dst: "host_001".to_string(),
+        dst_port: 44818,
+        proto: "tcp".to_string(),
+        bytes: 3_200,
+    };
+
+    Diff {
+        hosts_new: vec![host_new],
+        hosts_gone: vec![host_gone],
+        findings_new: vec![finding_new],
+        findings_recurring: vec![finding_recurring],
+        findings_resolved: vec![finding_resolved],
+        role_shifts: vec![role_shift],
+        flow_shifts: vec![flow_shift],
+        flows_new: vec![flow_new],
+        flows_gone: vec![flow_gone],
+        flow_shift_multiplier: 2.0,
+    }
+}
+
+// ── AC-001 (BC-8.04.001) — HTML diff renderer snapshot + structural assertions ──
+
+/// AC-001 / BC-8.04.001: `render_diff_html` must produce an HTML report with:
+/// - a summary banner showing counts for new / recurring / resolved findings,
+///   new / gone hosts, and flow shifts,
+/// - a "NEW since baseline" section,
+/// - a "RESOLVED" section,
+/// - a recurring badge or label on the recurring finding,
+/// - a host-changes section covering hosts_new and hosts_gone,
+/// - a role-shifts section,
+/// - a flow-shifts section.
+///
+/// Red Gate: panics on `todo!("S-6.03: implement render_diff_html")` until
+/// the implementer writes real rendering logic.
+#[test]
+fn test_bc_8_04_001_diff_html_snapshot_and_sections() {
+    let diff = build_diff_fixture();
+    let html = render_diff_html(&diff)
+        .expect("BC-8.04.001 AC-001: render_diff_html must return Ok for a well-formed Diff");
+
+    // Snapshot: captures full output for regression detection.
+    // Leave un-accepted so the implementer accepts after writing real output.
+    insta::assert_snapshot!("diff_html_report", html);
+
+    // --- Summary banner ---
+    // Must contain counts for the three finding buckets.
+    let lower = html.to_lowercase();
+    assert!(
+        lower.contains("new") && lower.contains("1"),
+        "BC-8.04.001 AC-001: summary banner must include new-finding count (1)"
+    );
+    assert!(
+        lower.contains("resolved") || lower.contains("resolve"),
+        "BC-8.04.001 AC-001: summary banner must reference resolved findings"
+    );
+    assert!(
+        lower.contains("recurring"),
+        "BC-8.04.001 AC-001: summary banner or section must contain the word 'recurring'"
+    );
+
+    // --- Section: NEW since baseline ---
+    assert!(
+        lower.contains("new since baseline")
+            || lower.contains("new since")
+            || lower.contains("new findings"),
+        "BC-8.04.001 AC-001: HTML must contain a 'NEW since baseline' section header"
+    );
+    // The new finding's rule id must appear somewhere in the output.
+    assert!(
+        html.contains("ics.modbus_writes"),
+        "BC-8.04.001 AC-001: HTML must include the new finding id ics.modbus_writes"
+    );
+
+    // --- Section: RESOLVED ---
+    assert!(
+        html.contains("creds.telnet"),
+        "BC-8.04.001 AC-001: HTML must include the resolved finding id creds.telnet"
+    );
+
+    // --- Recurring badge ---
+    assert!(
+        html.contains("egress.ot_to_internet"),
+        "BC-8.04.001 AC-001: HTML must include the recurring finding id egress.ot_to_internet"
+    );
+
+    // --- Host changes section ---
+    // The new host pseudonym and gone host pseudonym must appear.
+    assert!(
+        html.contains("host_004"),
+        "BC-8.04.001 AC-001: HTML must mention the new host pseudonym (host_004)"
+    );
+    assert!(
+        html.contains("host_005"),
+        "BC-8.04.001 AC-001: HTML must mention the gone host pseudonym (host_005)"
+    );
+
+    // --- Role shifts section ---
+    assert!(
+        html.contains("host_003"),
+        "BC-8.04.001 AC-001: HTML must mention the role-shifted host (host_003)"
+    );
+    assert!(
+        html.contains("plc") && html.contains("hmi"),
+        "BC-8.04.001 AC-001: HTML must show old role (plc) and new role (hmi) for the shift"
+    );
+
+    // --- Flow shifts section ---
+    // The flow shift (ratio 4.0, host_001 -> host_002:502) must be represented.
+    assert!(
+        html.contains("host_001") && html.contains("host_002"),
+        "BC-8.04.001 AC-001: HTML must include the flow-shift endpoints (host_001, host_002)"
+    );
+    assert!(
+        html.contains("4") || html.contains("4.0"),
+        "BC-8.04.001 AC-001: HTML must show the flow-shift ratio (4.0x)"
+    );
+}
+
+// ── AC-002 (BC-8.04.001) — markdown diff renderer snapshot ───────────────────
+
+/// AC-002 / BC-8.04.001: `render_diff_markdown` must produce an LLM-friendly
+/// markdown report covering the same sections as the HTML renderer.
+///
+/// Red Gate: panics on `todo!("S-6.03: implement render_diff_markdown")`.
+#[test]
+fn test_bc_8_04_001_diff_markdown_snapshot() {
+    let diff = build_diff_fixture();
+    let md = render_diff_markdown(&diff);
+
+    // Snapshot: captures full output for regression detection.
+    insta::assert_snapshot!("diff_markdown_report", md);
+
+    // --- Structural content assertions ---
+    let lower = md.to_lowercase();
+    assert!(
+        lower.contains("new") || lower.contains("finding"),
+        "BC-8.04.001 AC-002: markdown report must contain findings section"
+    );
+    assert!(
+        md.contains("ics.modbus_writes"),
+        "BC-8.04.001 AC-002: markdown must include new finding id ics.modbus_writes"
+    );
+    assert!(
+        md.contains("creds.telnet"),
+        "BC-8.04.001 AC-002: markdown must include resolved finding id creds.telnet"
+    );
+    assert!(
+        md.contains("egress.ot_to_internet"),
+        "BC-8.04.001 AC-002: markdown must include recurring finding id egress.ot_to_internet"
+    );
+    assert!(
+        md.contains("host_003") && md.contains("plc") && md.contains("hmi"),
+        "BC-8.04.001 AC-002: markdown must show role shift host_003 plc -> hmi"
+    );
+    assert!(
+        md.contains("host_004") && md.contains("host_005"),
+        "BC-8.04.001 AC-002: markdown must mention host_004 (new) and host_005 (gone)"
+    );
+}
+
+// ── AC-003 (BC-8.04.001) — determinism: same Diff → identical output ─────────
+
+/// AC-003 / BC-8.04.001: `render_diff_html` called twice on the same `Diff`
+/// must produce byte-for-byte identical output.
+///
+/// Red Gate: panics on `todo!()` before producing any output at all.
+#[test]
+fn test_bc_8_04_001_diff_html_is_deterministic() {
+    let diff = build_diff_fixture();
+    let first = render_diff_html(&diff)
+        .expect("BC-8.04.001 AC-003: first render_diff_html call must succeed");
+    let second = render_diff_html(&diff)
+        .expect("BC-8.04.001 AC-003: second render_diff_html call must succeed");
+    assert_eq!(
+        first, second,
+        "BC-8.04.001 AC-003: render_diff_html must be deterministic — \
+         two calls on the same Diff produced different output"
+    );
+}
+
+/// AC-003 / BC-8.04.001: `render_diff_markdown` called twice on the same `Diff`
+/// must produce byte-for-byte identical output.
+///
+/// Red Gate: panics on `todo!()` before producing any output at all.
+#[test]
+fn test_bc_8_04_001_diff_markdown_is_deterministic() {
+    let diff = build_diff_fixture();
+    let first = render_diff_markdown(&diff);
+    let second = render_diff_markdown(&diff);
+    assert_eq!(
+        first, second,
+        "BC-8.04.001 AC-003: render_diff_markdown must be deterministic — \
+         two calls on the same Diff produced different output"
+    );
+}
+
+// ── EC-001 — empty Diff emits "No deltas detected" banner in both renderers ──
+
+/// EC-001: when `Diff` is fully empty (all vecs empty), both renderers must
+/// emit a "No deltas detected" banner rather than an empty or malformed document.
+///
+/// Red Gate: panics on `todo!()` before producing any output at all.
+#[test]
+fn test_bc_8_04_001_empty_diff_html_no_deltas_banner() {
+    let diff = Diff::default();
+    let html =
+        render_diff_html(&diff).expect("EC-001: render_diff_html must return Ok for an empty Diff");
+    let lower = html.to_lowercase();
+    assert!(
+        lower.contains("no deltas detected")
+            || lower.contains("no changes")
+            || lower.contains("no delta"),
+        "EC-001: empty Diff HTML output must contain a 'No deltas detected' banner; got:\n{}",
+        &html[..html.len().min(800)]
+    );
+}
+
+/// EC-001: same "No deltas detected" invariant for the markdown renderer.
+///
+/// Red Gate: panics on `todo!()` before producing any output at all.
+#[test]
+fn test_bc_8_04_001_empty_diff_markdown_no_deltas_banner() {
+    let diff = Diff::default();
+    let md = render_diff_markdown(&diff);
+    let lower = md.to_lowercase();
+    assert!(
+        lower.contains("no deltas detected")
+            || lower.contains("no changes")
+            || lower.contains("no delta"),
+        "EC-001: empty Diff markdown output must contain a 'No deltas detected' banner; got:\n{}",
+        &md[..md.len().min(800)]
+    );
+}
+
+// ── C-1 (AC-003) — determinism with findings sharing the same rule id ────────
+
+/// C-1 / AC-003: when two findings share the same rule `id` but differ by
+/// endpoint (simulating two Modbus write flows to distinct destinations),
+/// calling `diff::compute` twice on the same inputs and rendering both
+/// results must produce byte-identical HTML and markdown.
+///
+/// This exercises the real `compute -> render` pipeline — not just rendering
+/// a pre-built `Diff` — so any non-determinism in HashSet iteration order
+/// in `compute` is caught.
+#[test]
+fn test_bc_8_04_001_determinism_with_shared_rule_id() {
+    use otsniff::diff::{compute, DiffInput};
+    use otsniff::findings::{Finding, Severity};
+    use otsniff::observe::Observations;
+    use otsniff::scrub::ScrubMap;
+    use std::collections::BTreeMap;
+
+    // Build two findings sharing rule id "ics.modbus_writes" but with
+    // distinct src/dst/port tuples encoded in evidence (test-helper format
+    // recognised by finding_diff_key).
+    let f1 = Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "Modbus write commands".to_string(),
+        summary: "Modbus write from host A".to_string(),
+        evidence: vec!["src=10.0.0.1 dst=10.0.0.10 port=502".to_string()],
+        recommendation: "Review writes.",
+        playbook: vec![],
+    };
+    let f2 = Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "Modbus write commands".to_string(),
+        summary: "Modbus write from host B".to_string(),
+        evidence: vec!["src=10.0.0.2 dst=10.0.0.10 port=502".to_string()],
+        recommendation: "Review writes.",
+        playbook: vec![],
+    };
+
+    let empty_obs = Observations::default();
+    let empty_map = ScrubMap {
+        version: 1,
+        created_at: chrono::Utc::now(),
+        ips: BTreeMap::from([
+            ("host_001".to_string(), "10.0.0.1".to_string()),
+            ("host_002".to_string(), "10.0.0.2".to_string()),
+            ("host_010".to_string(), "10.0.0.10".to_string()),
+        ]),
+        macs: BTreeMap::new(),
+        names: BTreeMap::new(),
+    };
+
+    // Both sides see f1; current also adds f2 (so f2 is "new").
+    let baseline_findings = vec![f1.clone()];
+    let current_findings = vec![f1.clone(), f2.clone()];
+
+    let baseline = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &baseline_findings,
+    };
+    let current = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &current_findings,
+    };
+
+    // Compute twice — HashSet iteration order may differ between runs.
+    let diff_a = compute(baseline, current);
+    let baseline2 = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &baseline_findings,
+    };
+    let current2 = DiffInput {
+        observations: &empty_obs,
+        map: &empty_map,
+        findings: &current_findings,
+    };
+    let diff_b = compute(baseline2, current2);
+
+    let html_a = render_diff_html(&diff_a).expect("C-1: first render_diff_html call must succeed");
+    let html_b = render_diff_html(&diff_b).expect("C-1: second render_diff_html call must succeed");
+    assert_eq!(
+        html_a, html_b,
+        "C-1 / AC-003: render_diff_html must be deterministic even when \
+         findings share the same rule id — two compute→render runs differed"
+    );
+
+    let md_a = render_diff_markdown(&diff_a);
+    let md_b = render_diff_markdown(&diff_b);
+    assert_eq!(
+        md_a, md_b,
+        "C-1 / AC-003: render_diff_markdown must be deterministic even when \
+         findings share the same rule id — two compute→render runs differed"
+    );
+}
+
+// ── I-3 / EC-002 — evidence-cap label shows "showing X of N" ─────────────────
+
+/// I-3 / EC-002: when a finding carries more than 5 evidence rows, both
+/// renderers must show exactly 5 rows AND display "showing 5 of N" rather
+/// than "5 sample(s)".
+#[test]
+fn test_ec_002_evidence_cap_label_shows_showing_x_of_n() {
+    use otsniff::findings::{Finding, Severity};
+
+    // Build a finding with 8 evidence rows (> MAX_EVIDENCE = 5).
+    let evidence: Vec<String> = (1..=8).map(|i| format!("evidence row {i}")).collect();
+    let finding = Finding {
+        id: "ics.modbus_writes",
+        severity: Severity::High,
+        title: "Test finding".to_string(),
+        summary: "Summary".to_string(),
+        evidence,
+        recommendation: "Rec.",
+        playbook: vec![],
+    };
+
+    let diff = Diff {
+        findings_new: vec![finding],
+        ..Diff::default()
+    };
+
+    // HTML: must show "showing 5 of 8" and exactly 5 evidence rows.
+    let html = render_diff_html(&diff).expect("EC-002: render_diff_html must succeed");
+    assert!(
+        html.contains("showing 5 of 8"),
+        "EC-002: HTML must show 'showing 5 of 8' when evidence is capped; got evidence section: {}",
+        &html[html.find("Evidence").unwrap_or(0)
+            ..html.len().min(html.find("Evidence").unwrap_or(0) + 200)]
+    );
+    // Exactly 5 evidence rows must appear in the rendered <pre> block.
+    let row_count = (1..=8)
+        .filter(|i| html.contains(&format!("evidence row {i}")))
+        .count();
+    assert_eq!(
+        row_count, 5,
+        "EC-002: HTML must render exactly 5 evidence rows (got {row_count})"
+    );
+    assert!(
+        !html.contains("evidence row 6"),
+        "EC-002: HTML must not render evidence row 6 (beyond cap)"
+    );
+
+    // Markdown: must also show "showing 5 of 8".
+    let md = render_diff_markdown(&diff);
+    assert!(
+        md.contains("showing 5 of 8"),
+        "EC-002: markdown must show 'showing 5 of 8' when evidence is capped; got:\n{}",
+        &md[..md.len().min(600)]
+    );
+    let md_row_count = (1..=8)
+        .filter(|i| md.contains(&format!("evidence row {i}")))
+        .count();
+    assert_eq!(
+        md_row_count, 5,
+        "EC-002: markdown must render exactly 5 evidence rows (got {md_row_count})"
+    );
+    assert!(
+        !md.contains("evidence row 6"),
+        "EC-002: markdown must not render evidence row 6 (beyond cap)"
+    );
+}
+
+// ── F-1 (adv pass 4): flow-shift label reflects actual threshold ──────────────
+
+/// F-1 (adv pass 4): when `--flow-shift-multiplier` is set to a non-default
+/// value, both renderers must label the section with the actual threshold, not
+/// the hardcoded default "2×".
+///
+/// Two sub-cases:
+///   (a) multiplier 3.0 → labels must say "≥3×" and must NOT say "≥2×".
+///   (b) default multiplier 2.0 → labels must still say "≥2×" (regression guard).
+#[test]
+fn test_flow_shift_label_reflects_actual_multiplier() {
+    use otsniff::diff::{Diff, FlowDelta};
+
+    let flow_shift = FlowDelta {
+        src: "host_001".to_string(),
+        dst: "host_002".to_string(),
+        dst_port: 502,
+        proto: "tcp".to_string(),
+        baseline_bytes: 1_000,
+        current_bytes: 4_000,
+        ratio: 4.0,
+    };
+
+    // ── (a) non-default multiplier 3.0 ──────────────────────────────────────
+    let diff_3x = Diff {
+        flow_shifts: vec![flow_shift.clone()],
+        flow_shift_multiplier: 3.0,
+        ..Diff::default()
+    };
+
+    let html_3x =
+        render_diff_html(&diff_3x).expect("render_diff_html must succeed for multiplier=3.0 diff");
+    assert!(
+        html_3x.contains("≥3×"),
+        "HTML with multiplier=3.0 must contain '≥3×'; got a snippet:\n{}",
+        &html_3x[html_3x.find("Flow shifts").unwrap_or(0)
+            ..html_3x
+                .len()
+                .min(html_3x.find("Flow shifts").unwrap_or(0) + 200)]
+    );
+    assert!(
+        !html_3x.contains("≥2×"),
+        "HTML with multiplier=3.0 must NOT contain '≥2×'"
+    );
+
+    let md_3x = render_diff_markdown(&diff_3x);
+    assert!(
+        md_3x.contains("≥3×"),
+        "Markdown with multiplier=3.0 must contain '≥3×'; got:\n{}",
+        &md_3x[..md_3x.len().min(600)]
+    );
+    assert!(
+        !md_3x.contains("≥2×"),
+        "Markdown with multiplier=3.0 must NOT contain '≥2×'"
+    );
+
+    // ── (b) default multiplier 2.0 — regression guard ───────────────────────
+    let diff_2x = Diff {
+        flow_shifts: vec![flow_shift],
+        flow_shift_multiplier: 2.0,
+        ..Diff::default()
+    };
+
+    let html_2x =
+        render_diff_html(&diff_2x).expect("render_diff_html must succeed for multiplier=2.0 diff");
+    assert!(
+        html_2x.contains("≥2×"),
+        "HTML with default multiplier=2.0 must still contain '≥2×' (regression guard)"
+    );
+
+    let md_2x = render_diff_markdown(&diff_2x);
+    assert!(
+        md_2x.contains("≥2×"),
+        "Markdown with default multiplier=2.0 must still contain '≥2×' (regression guard)"
     );
 }

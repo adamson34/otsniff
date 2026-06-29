@@ -4,6 +4,7 @@
 //! zero or more `Finding`s. The CLI runs them all and renders the union into
 //! the report, sorted by severity.
 
+pub mod augmented;
 pub mod dnp3_engineering;
 mod dns_resolver;
 mod engineering_commands;
@@ -19,11 +20,12 @@ mod smbv1;
 mod stale_tls;
 mod unexpected_protocols;
 pub mod weak_tls_cipher;
+pub mod zonewarden;
 
 use std::net::IpAddr;
 
 use ipnet::IpNet;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::observe::Observations;
 
@@ -43,7 +45,7 @@ pub fn host_label(ip: IpAddr, obs: &Observations) -> String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Severity {
     Info,
     Medium,
@@ -164,6 +166,11 @@ pub fn catalog() -> Vec<RuleMetadata> {
         ntp_external::METADATA,
         recon_scan::METADATA,
         unexpected_protocols::METADATA,
+        // Zonewarden segmentation-conformance rules (ADR-0013). These fire only
+        // when a `--policy` is supplied; they are not part of `run_all`.
+        zonewarden::IDMZ_BYPASS_METADATA,
+        zonewarden::WRONG_DIRECTION_METADATA,
+        zonewarden::DENY_BY_DEFAULT_METADATA,
     ]
 }
 
@@ -173,6 +180,25 @@ pub fn catalog() -> Vec<RuleMetadata> {
 /// under each fired finding.
 pub fn metadata_for(id: &str) -> Option<RuleMetadata> {
     catalog().into_iter().find(|m| m.id == id)
+}
+
+/// Findings for a policy-aware run (ADR-0013). Runs the zero-config rules but
+/// **drops** the subnet-based `egress.ot_to_internet` — when a segmentation
+/// policy is present, OT→EXTERNAL flows are owned, more precisely, by the
+/// Zonewarden engine (as `zonewarden.deny_by_default` / `zonewarden.idmz_bypass`)
+/// — then adds the conformance findings. Never double-reports egress.
+pub fn run_with_conformance(
+    obs: &Observations,
+    ot_subnets: &[IpNet],
+    // `::zonewarden` (the crate) — `zonewarden` alone resolves to the local
+    // `findings::zonewarden` submodule below.
+    conformance: &::zonewarden::types::ConformanceResult,
+) -> Vec<Finding> {
+    let mut out = run_all(obs, ot_subnets);
+    out.retain(|f| f.id != internet_egress::METADATA.id); // dedup vs the engine
+    out.extend(zonewarden::detect(conformance, obs));
+    out.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(b.id)));
+    out
 }
 
 pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {

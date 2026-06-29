@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use otsniff::parse::modbus;
+use std::hint::black_box;
 
 fn bench_parse_modbus(c: &mut Criterion) {
     // MBAP-framed Modbus Write Single Coil request (fc=0x05).

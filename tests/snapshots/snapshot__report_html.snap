@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 234
 expression: html
 ---
 <!doctype html>
@@ -317,7 +318,7 @@ expression: html
   </svg>
   <div>
     <div class="brand-wordmark">otsniff <span class="brand-sep">·</span> triage report</div>
-    <div class="brand-meta">tests/fixtures/synthetic.pcap <span class="brand-sep">·</span> v0.4.0 <span class="brand-sep">·</span> 2026-05-07 12:00:00 UTC</div>
+    <div class="brand-meta">tests/fixtures/synthetic.pcap <span class="brand-sep">·</span> v0.5.0 <span class="brand-sep">·</span> 2026-05-07 12:00:00 UTC</div>
   </div>
 </header>
 
@@ -653,6 +654,9 @@ expression: html
 </table>
 </div>
 </details>
+
+
+
 
 
 

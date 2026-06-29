@@ -3,15 +3,21 @@
 Cargo.lock.bak
 
 # Test fixtures (large PCAPs not committed — except the synthetic benchmark fixture)
-tests/fixtures/*.pcap
-tests/fixtures/*.pcapng
-tests/fixtures/*.json
-tests/fixtures/*.html
+# `**` is recursive so captures in subdirectories (e.g. captures1_v2/clean/*.pcap)
+# are ignored too — a plain `*` only matches files directly under tests/fixtures/.
+tests/fixtures/**/*.pcap
+tests/fixtures/**/*.pcapng
+tests/fixtures/**/*.json
+tests/fixtures/**/*.html
 !tests/fixtures/synthetic-1mb.pcap
 
 # Pending insta snapshots (must be reviewed, not committed)
 *.snap.new
 .snap-rejects/
+
+# cargo-mutants output (mutation-testing run artifacts, regenerated each run)
+mutants.out/
+mutants.out.old/
 
 # Reports / scratch
 *.report.html
@@ -38,3 +44,8 @@ media/*.pcap
 .factory/
 .factory-project/
 .worktrees/
+
+# libFuzzer corpus and build artifacts
+fuzz/target/
+fuzz/corpus/
+# Note: fuzz/artifacts/ is NOT ignored — those are regression seeds (AC-004)

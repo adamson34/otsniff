@@ -9,13 +9,14 @@
 
 <p align="center">
   <strong>One-shot OT-aware PCAP triage.</strong><br>
-  Single binary. Self-contained HTML report. Privacy-preserving AI flow.
+  Single binary. Self-contained HTML report. Privacy-preserving AI flow.<br>
+  Optional IEC 62443 zone/conduit segmentation conformance (Zonewarden).
 </p>
 
 <p align="center">
   <a href="https://github.com/adamson34/otsniff/actions/workflows/ci.yml"><img src="https://github.com/adamson34/otsniff/actions/workflows/ci.yml/badge.svg?branch=develop" alt="CI"></a>
-  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?label=release&color=2e7d4a" alt="Release"></a>
-  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?include_prereleases&label=pre-release&color=b87325" alt="Pre-release"></a>
+  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?label=release&color=2e7d4a&cacheSeconds=86400" alt="Release"></a>
+  <a href="https://github.com/adamson34/otsniff/releases"><img src="https://img.shields.io/github/v/release/adamson34/otsniff?include_prereleases&label=pre-release&color=b87325&cacheSeconds=86400" alt="Pre-release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/MSRV-1.85-blue" alt="MSRV 1.85">
   <a href="https://codecov.io/gh/adamson34/otsniff"><img src="https://codecov.io/gh/adamson34/otsniff/graph/badge.svg" alt="codecov"></a>
@@ -67,6 +68,14 @@ You have a PCAP from a plant network — pulled from a site-visit `tcpdump`, an 
 | Medium   | `ics.modbus_unit_id_sweep` | Modbus client iterating across many unit IDs — PLC discovery / fuzzing pattern |
 | Medium   | `recon.port_scan` | Single source contacting many distinct destinations on the same `(port, proto)` |
 | Medium   | `ot.unexpected_protocols` | AnyDesk, BitTorrent, IRC, OpenVPN, RTMP, SIP, SMTP on OT VLANs |
+
+When you supply a segmentation policy (`--policy zones.yaml`), three more findings come from the **Zonewarden** conformance engine (see [below](#segmentation-conformance-zonewarden)):
+
+| Severity | Rule ID | What it catches |
+|----------|---------|-----------------|
+| Critical | `zonewarden.idmz_bypass` | Direct OT↔IT flow with no IDMZ hop (Purdue-3.5 no-bypass violation) |
+| High     | `zonewarden.wrong_direction` | Conduit matched but used in the disallowed direction |
+| High     | `zonewarden.deny_by_default` | Cross-zone flow not permitted by any declared conduit |
 
 Plus an **asset inventory** (IP, hostname when DHCP names it, MAC, OUI vendor inferred from a ~9,000-entry industrial + IT vendor table, inferred role: PLC / HMI / EWS / historian / IT) and a **comms-matrix** of top flows. The report also surfaces a **capture-source classification** (SPAN / host-side / TAP / ambiguous) — declarable explicitly via `--source-type` and guarded by the heuristic.
 
@@ -139,6 +148,12 @@ otsniff analyze input.pcap --source-type tap -o report.html
 # Treat extra subnets as OT (in addition to the default RFC1918):
 otsniff analyze input.pcap --ot-subnet 100.64.0.0/16
 
+# Add an IEC 62443 segmentation-conformance section (see "Segmentation conformance" below):
+otsniff analyze input.pcap --policy zones.yaml -o report.html
+
+# Draft a starter segmentation policy from the asset inventory:
+otsniff zonewarden suggest input.pcap > zones.yaml
+
 # Also emit findings + inventory as JSON sidecar:
 otsniff analyze input.pcap --json findings.json
 
@@ -203,13 +218,33 @@ The map file is the only thing tying pseudonyms to real values — keep it where
 
 > The `scrub` / `unscrub` subcommands exist for the "bring your own AI" use case — Claude.ai web UI, ChatGPT, a local Ollama model, anything that isn't the `claude` CLI. If you're using the `claude` CLI, `analyze --ai` is the one-command path and you don't need to touch these.
 
+## Segmentation conformance (Zonewarden)
+
+The zero-config rules above find insecure protocols and risky behavior. **Zonewarden** answers a different question: *does the observed traffic match your documented network segmentation?* You hand it a declarative **IEC 62443 zone/conduit policy** and it classifies every observed flow as conformant, intra-zone, or violating — including the headline **Purdue-3.5 IDMZ no-bypass check** (no direct OT↔IT flow may skip the DMZ).
+
+The engine is a pure, **formally-verified** Rust crate (`crates/zonewarden`): 7 Kani proofs over the resolver, classifier, IDMZ truth table, multicast exemption, and tally arithmetic, plus a deterministic canonical-JSON SHA-256 `policy_digest` that anchors the conformance section as a diffable audit artifact. See [ADR-0013](docs/adr/0013-zonewarden-segmentation-module.md).
+
+```sh
+# Draft a starter policy from the asset inventory (infers zones + Purdue levels),
+# then review it and add your conduits:
+otsniff zonewarden suggest plant.pcap --ot-subnet 10.10.10.0/24 > zones.yaml
+
+# Run the triage report with the segmentation-conformance section folded in:
+otsniff analyze plant.pcap --policy zones.yaml -o report.html
+```
+
+With `--policy`, the report gains a **"Zonewarden — Segmentation Conformance"** section (Purdue-tiered topology, the allowed / intra-zone / violation / bypass tally, the echoed policy, and the `policy_digest`), and the three `zonewarden.*` findings above join the rule-based findings with the same severity, detection-criteria, and investigation-playbook treatment.
+
+> **Egress dedup.** When `--policy` is supplied, OT→internet flows are owned by the Zonewarden engine (which knows the declared zones precisely), so the subnet-based `egress.ot_to_internet` rule steps aside for those flows — you never get both findings for the same flow. Without a policy, the subnet rule fires unchanged.
+
 ## Scope
 
 **In scope:**
 
 - Offline PCAP / PCAPNG analysis on Ethernet captures
 - Modbus/TCP, EtherNet/IP, S7Comm, and DNP3 protocol awareness (function-code level)
-- 20 rule-based findings (see table above and [`docs/RULES.md`](docs/RULES.md))
+- 23 rule-based findings — 20 zero-config + 3 policy-gated `zonewarden.*` segmentation findings (see table above and [`docs/RULES.md`](docs/RULES.md))
+- IEC 62443 zone/conduit segmentation conformance (Zonewarden) — formally-verified pure engine, Purdue-3.5 IDMZ no-bypass check, deterministic policy digest, policy auto-drafting from the asset inventory
 - Asset inventory with DHCP hostname extraction and ~9,000-entry OUI vendor inference (IEEE MA-L registry, industrial + IT focus)
 - Capture-source heuristic classification + explicit `--source-type` flag
 - Scrub/unscrub pipeline + closed-loop AI triage via local `claude` CLI, with three-airlock privacy contract (scrub bytes, leak detector, runtime tool sandbox)
@@ -226,10 +261,9 @@ The map file is the only thing tying pseudonyms to real values — keep it where
 
 ## What's next
 
-A taste of the in-flight and proposed work — the full prioritized backlog with rationale lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+A taste of the proposed work — the full prioritized backlog with rationale lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Recently shipped: AI-augmented findings (`P0-8`), cross-capture diff (`P1-3`), and the Zonewarden segmentation module ([ADR-0013](docs/adr/0013-zonewarden-segmentation-module.md)).
 
-- **AI-augmented findings** (`P0-8`, in flight) — second LLM pass anchored on the rules + inventory, surfacing patterns the deterministic rules don't encode.
-- **Cross-capture diff** (`P1-3`, in flight) — `otsniff diff baseline.pcap current.pcap` for "what changed since last quarter's scan?"
+- **Segmentation drift** — `otsniff diff` over two runs' `policy_digest` + conformance tallies: "did our segmentation posture regress since last quarter?" Pairs the cross-capture diff with the Zonewarden engine.
 - **mDNS / NetBIOS / LLMNR hostnames** (`P0-9`) — extend the asset inventory beyond DHCP-named hosts.
 - **Multi-PCAP analyze** (`P0-10`) — `otsniff analyze rotated-*.pcap` without needing `mergecap`.
 - **MITRE ATT&CK for ICS mapping** (`P1-6`) — every finding tagged with technique IDs blue teams already use.

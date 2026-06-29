@@ -1,0 +1,144 @@
+name: Mutants (weekly)
+
+# Runs mutation tests on the develop tip once per week.
+# Does NOT trigger on pull_request — mutation testing is slow (~30 min) and
+# must not block PR merges per AC-002.  Results are surfaced as a GitHub
+# Actions step summary and as a downloadable artifact.
+
+on:
+  schedule:
+    # Monday 06:00 UTC — runs on develop tip once per week.
+    # Weekly cadence is appropriate: mutation suites are slow and the codebase
+    # does not change faster than once a week for the security-critical modules.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    # Allow manual trigger for ad-hoc baseline runs or after a large refactor.
+
+jobs:
+  mutants:
+    name: Mutation testing
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-mutants (pinned to 27.0.0)
+        # ADV-W2-005: exact-version pin (not a "^27" range) so the kill-rate
+        # threshold and JSON schema are reproducible. Bump manually when a new
+        # release is validated against this config.
+        run: cargo install --locked cargo-mutants --version "=27.0.0"
+
+      - name: Run mutation testing
+        run: |
+          cargo mutants \
+            --no-shuffle \
+            --timeout-multiplier 5 \
+            --output mutants-out \
+            --config .cargo-mutants.toml
+        env:
+          RUST_BACKTRACE: 1
+
+      - name: Upload mutation results artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutants-results
+          path: mutants-out/**
+          retention-days: 30
+
+      - name: Post kill-rate summary to Actions step summary
+        if: always()
+        run: |
+          # Parse the outcomes.json produced by cargo-mutants and compute kill rate.
+          #
+          # F-ADV-P4-002: the previous parser searched for schema values
+          # `'MissedMutations'` (plural — wrong), `'killed'`, and `'caught'`,
+          # none of which match cargo-mutants v27's actual schema:
+          # `CaughtMutant`, `MissedMutation` (singular), `Timeout`, `Unviable`,
+          # `Success`. killed=0 always, the F-ADV-P3-007 gate exited 1 on
+          # every successful run AND no schema-mismatch sanity check fired.
+          OUTCOMES="mutants-out/outcomes.json"
+          if [ -f "$OUTCOMES" ]; then
+            PARSED=$(python3 -c "
+          import json, sys
+          data = json.load(open('$OUTCOMES'))
+          outcomes = data.get('outcomes', [])
+          # cargo-mutants v27 schema (verify against \`cargo mutants --json\` output):
+          #   CaughtMutant   — test suite detected the mutation (KILLED)
+          #   MissedMutation — mutation passed tests (SURVIVED — bug!)
+          #   Timeout        — test timed out (counted as killed for kill-rate purposes)
+          #   Unviable       — mutation didn't compile (skipped; not in denominator)
+          #   Success        — baseline run (the unmutated build); excluded from rate
+          killed   = sum(1 for o in outcomes if o.get('summary') == 'CaughtMutant')
+          survived = sum(1 for o in outcomes if o.get('summary') == 'MissedMutation')
+          timeout  = sum(1 for o in outcomes if o.get('summary') == 'Timeout')
+          unviable = sum(1 for o in outcomes if o.get('summary') == 'Unviable')
+          # 'total' excludes Unviable (those didn't get a real test result)
+          # and Success (the baseline run, not a mutant).
+          total = killed + survived + timeout
+          print(f'{killed} {total} {survived} {timeout} {unviable}')
+          " 2>/dev/null || echo "0 0 0 0 0")
+            read -r KILLED TOTAL SURVIVED TIMEOUT UNVIABLE <<< "$PARSED"
+            if [ "$TOTAL" -gt 0 ]; then
+              # Killed + Timeout count as kills (timeout means test exceeded
+              # budget — still a detected mutation). Survived is the failure
+              # mode the kill rate is measuring.
+              KILL_PCT=$(python3 -c "print(f'{($KILLED + $TIMEOUT) / $TOTAL * 100:.1f}')")
+            else
+              KILL_PCT="n/a"
+            fi
+          else
+            KILLED=0; TOTAL=0; SURVIVED=0; TIMEOUT=0; UNVIABLE=0; KILL_PCT="n/a"
+          fi
+
+          {
+            echo "## Mutation testing results"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Kill rate | ${KILL_PCT}% |"
+            echo "| Killed (caught + timeout) / Total | $((KILLED + TIMEOUT)) / ${TOTAL} |"
+            echo "| Survived (MissedMutation) | ${SURVIVED} |"
+            echo "| Timeout | ${TIMEOUT} |"
+            echo "| Unviable (excluded) | ${UNVIABLE} |"
+            echo ""
+            echo "See the \`mutants-results\` artifact for the full report."
+            echo ""
+            echo "> Baseline: 84.1% (wave-1, effective kill rate after disposition)."
+            echo "> Threshold: 79.1% (5pp below baseline). Below threshold fails CI."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # F-ADV-P4-002: schema-mismatch sanity check. If the parser produced
+          # zero killed AND zero survived AND zero timeout despite total > 0
+          # being possible (outcomes.json existed with entries), the
+          # cargo-mutants schema has likely shifted and the parser needs
+          # updating. Fail loudly with a clear actionable error rather than
+          # silently reporting bogus counts.
+          if [ -f "$OUTCOMES" ] && [ "$KILLED" = "0" ] && [ "$SURVIVED" = "0" ] && [ "$TIMEOUT" = "0" ] && [ "$UNVIABLE" = "0" ]; then
+            ENTRY_COUNT=$(python3 -c "import json; print(len(json.load(open('$OUTCOMES')).get('outcomes', [])))" 2>/dev/null || echo "0")
+            if [ "$ENTRY_COUNT" != "0" ]; then
+              echo "::error::F-ADV-P4-002: outcomes.json has ${ENTRY_COUNT} entries but parser found zero of any kind — cargo-mutants schema has likely changed. Update .github/workflows/mutants.yml summary-field strings."
+              exit 1
+            fi
+          fi
+
+          # F-ADV-P3-007: POL-11 — fail CI on kill-rate regression instead of
+          # writing a "soft signal" to the step summary that nobody reads.
+          # Threshold is 5pp below the 84.1% baseline = 79.1%.
+          if [ "$KILL_PCT" = "n/a" ]; then
+            echo "::warning::mutation testing produced no outcomes.json (cargo-mutants may have failed early); not gating"
+            exit 0
+          fi
+          THRESHOLD_OK=$(python3 -c "print(1 if $KILL_PCT >= 79.1 else 0)")
+          if [ "$THRESHOLD_OK" = "1" ]; then
+            echo "Check passed: parsed ${TOTAL} outcomes, kill rate ${KILL_PCT}% (>= 79.1% threshold), $((KILLED + TIMEOUT))/${TOTAL} mutants killed (incl. ${TIMEOUT} timeout), ${UNVIABLE} unviable excluded"
+          else
+            echo "::error::F-ADV-P3-007: kill rate ${KILL_PCT}% is below threshold 79.1% (5pp below 84.1% baseline). See mutants-results artifact for surviving mutants."
+            exit 1
+          fi

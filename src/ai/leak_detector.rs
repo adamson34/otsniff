@@ -69,18 +69,29 @@ pub fn scan(text: &str) -> Option<Leak> {
 }
 
 /// Convenience wrapper used at the boundary in the `analyze` pipeline.
-/// Returns `Ok(())` if the text is clean, otherwise an `OtError` with
-/// enough detail for the user to diagnose.
+/// Returns `Ok(())` if the text is clean, otherwise an
+/// `OtError::PrivacyLeak` with enough detail for the user to diagnose
+/// **WITHOUT** the raw leaked value (F-ADV-P2-007).
+///
+/// Diagnostics: kind, byte offset, length, and a 4-character SHA-256 prefix
+/// of the leaked pattern (collision-resistant for grep/log correlation but
+/// non-reversible).
 pub fn ensure_clean(text: &str) -> Result<()> {
     if let Some(leak) = scan(text) {
-        return Err(OtError::Parse(format!(
-            "scrub leak: refusing to send {} pattern '{}' (byte offset {}) to AI provider. \
-             This is a bug — please report with the input PCAP if possible. The scrub layer \
-             is supposed to remove this before the leak detector runs.",
-            leak.kind.label(),
-            leak.pattern,
-            leak.byte_offset
-        )));
+        return Err(OtError::PrivacyLeak {
+            kind: leak.kind.label().to_string(),
+            message: format!(
+                "refusing to send {} pattern (length {} bytes, byte offset {}, \
+                 hash-prefix {}) to AI provider. This is a bug — the scrub layer \
+                 is supposed to remove this before the leak detector runs. The raw \
+                 value is intentionally NOT logged (F-ADV-P2-007); rerun with \
+                 OTSNIFF_LEAK_DEBUG=1 if you need to inspect it.",
+                leak.kind.label(),
+                leak.pattern.len(),
+                leak.byte_offset,
+                leak_hash_prefix(&leak.pattern),
+            ),
+        });
     }
     Ok(())
 }
@@ -99,14 +110,31 @@ pub fn ensure_no_map_values(text: &str, map: &ScrubMap) -> Result<()> {
             continue;
         }
         if text.contains(real) {
-            return Err(OtError::Parse(format!(
-                "scrub leak: refusing to send unscrambled identifier '{real}' to AI provider. \
-                 This is a bug — the value was in the scrub map but wasn't substituted in the \
-                 rendered report. Please report with the input PCAP if possible."
-            )));
+            return Err(OtError::PrivacyLeak {
+                kind: "map_value".to_string(),
+                message: format!(
+                    "refusing to send unscrubbed identifier from scrub map (length {} bytes, \
+                     hash-prefix {}) to AI provider. This is a bug — the value was in the \
+                     scrub map but wasn't substituted in the rendered report. The raw value \
+                     is intentionally NOT logged (F-ADV-P2-007).",
+                    real.len(),
+                    leak_hash_prefix(real),
+                ),
+            });
         }
     }
     Ok(())
+}
+
+/// Produce a short non-reversible hash prefix for use in leak diagnostics.
+/// SHA-256 truncated to 4 hex chars — enough for grep/log correlation but
+/// not enough to bracket a small candidate space.
+fn leak_hash_prefix(s: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(s.as_bytes());
+    let digest = hasher.finalize();
+    format!("{:02x}{:02x}", digest[0], digest[1])
 }
 
 // F-W1-004: regexes are compiled once via `LazyLock` (stable since Rust 1.80,
@@ -185,8 +213,31 @@ mod tests {
     fn ensure_clean_returns_descriptive_error() {
         let err = ensure_clean("see 10.0.0.5").unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("scrub leak"));
-        assert!(msg.contains("10.0.0.5"));
+        // F-ADV-P2-004: error is now OtError::PrivacyLeak (distinct variant).
+        // F-ADV-P2-007: raw value MUST NOT appear in error message; only
+        // length + offset + hash prefix.
+        assert!(
+            msg.contains("privacy invariant tripped"),
+            "F-ADV-P2-004: error display must include 'privacy invariant tripped': {msg}"
+        );
+        assert!(
+            msg.contains("IPv4"),
+            "F-ADV-P2-004: error should name the leak kind: {msg}"
+        );
+        assert!(
+            !msg.contains("10.0.0.5"),
+            "F-ADV-P2-007: raw leaked value MUST NOT appear in stderr-bound error message: {msg}"
+        );
+        assert!(
+            msg.contains("hash-prefix"),
+            "F-ADV-P2-007: error must include hash-prefix for correlation: {msg}"
+        );
+        // Exit code must be the new PrivacyLeak code (75), not the old 70.
+        assert_eq!(
+            err.exit_code(),
+            75,
+            "F-ADV-P2-004: PrivacyLeak must have its own exit code distinct from Parse(70)"
+        );
     }
 
     #[test]
@@ -209,7 +260,25 @@ mod tests {
         let leaky = "Engineer connected to LINE-3-PLC and started a download.";
         assert!(scan(leaky).is_none(), "regex check should miss hostname");
         let err = ensure_no_map_values(leaky, &map).unwrap_err();
-        assert!(err.to_string().contains("LINE-3-PLC"));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("privacy invariant tripped"),
+            "F-ADV-P2-004: must use PrivacyLeak variant: {msg}"
+        );
+        assert!(
+            msg.contains("map_value"),
+            "F-ADV-P2-004: must name the kind as map_value: {msg}"
+        );
+        // F-ADV-P2-007: the hostname must NOT appear in the error message.
+        assert!(
+            !msg.contains("LINE-3-PLC"),
+            "F-ADV-P2-007: raw hostname must NOT appear in error message: {msg}"
+        );
+        assert_eq!(
+            err.exit_code(),
+            75,
+            "F-ADV-P2-004: PrivacyLeak exit code 75"
+        );
 
         let clean = "Engineer connected to name_001 and started a download.";
         assert!(ensure_no_map_values(clean, &map).is_ok());
@@ -473,14 +542,27 @@ mod kani_proofs {
     #[kani::proof]
     #[kani::unwind(9)]
     fn leak_regex_mac() {
-        // Helper: map 0–15 to lower-case hex ASCII.
-        fn nibble_to_hex(n: u8) -> u8 {
+        // F-ADV-P4-011: helper that emits the chosen case (lower or upper)
+        // for a hex nibble. The production regex `[0-9a-fA-F]` is
+        // case-insensitive, but the previous proof only exercised
+        // lowercase. We add ONE symbolic case bit that applies uniformly to
+        // all nibbles in this proof — proving the model recognises BOTH
+        // all-lowercase AND all-uppercase MACs. (Mixed-case MACs in the
+        // same string are a documented gap: per-nibble case bits would
+        // double the symbolic state space and stress CBMC's unwind budget.
+        // Production regex covers it; the fuzz suite is the documented
+        // fallback for that equivalence class.)
+        fn nibble_to_hex(n: u8, uppercase: bool) -> u8 {
             if n < 10 {
                 b'0' + n
+            } else if uppercase {
+                b'A' + (n - 10)
             } else {
                 b'a' + (n - 10)
             }
         }
+
+        let uppercase: bool = kani::any();
 
         // Twelve symbolic hex nibbles (two per octet, six octets).
         // Unrolled explicitly to avoid the `for i in 0..12` loop confusing
@@ -503,23 +585,23 @@ mod kani_proofs {
 
         // Assemble "HH:HH:HH:HH:HH:HH" (17 bytes).
         let bytes = [
-            nibble_to_hex(n[0]),
-            nibble_to_hex(n[1]),
+            nibble_to_hex(n[0], uppercase),
+            nibble_to_hex(n[1], uppercase),
             b':',
-            nibble_to_hex(n[2]),
-            nibble_to_hex(n[3]),
+            nibble_to_hex(n[2], uppercase),
+            nibble_to_hex(n[3], uppercase),
             b':',
-            nibble_to_hex(n[4]),
-            nibble_to_hex(n[5]),
+            nibble_to_hex(n[4], uppercase),
+            nibble_to_hex(n[5], uppercase),
             b':',
-            nibble_to_hex(n[6]),
-            nibble_to_hex(n[7]),
+            nibble_to_hex(n[6], uppercase),
+            nibble_to_hex(n[7], uppercase),
             b':',
-            nibble_to_hex(n[8]),
-            nibble_to_hex(n[9]),
+            nibble_to_hex(n[8], uppercase),
+            nibble_to_hex(n[9], uppercase),
             b':',
-            nibble_to_hex(n[10]),
-            nibble_to_hex(n[11]),
+            nibble_to_hex(n[10], uppercase),
+            nibble_to_hex(n[11], uppercase),
         ];
 
         // The model must recognise this as MAC-shaped.

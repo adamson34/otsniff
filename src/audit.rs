@@ -41,6 +41,30 @@ pub struct AuditLog {
     pub leak_check: LeakCheckSummary,
     pub ai_provider: AiInvocationSummary,
     pub unscrub: UnscrubSummary,
+    /// SHA-256 hashes and metadata for the augment pass (S-5.03 AC-006).
+    /// `None` when `--ai` is not set or when the augment pass was not
+    /// requested for this run.
+    pub augment_pass: Option<AugmentInvocationSummary>,
+}
+
+/// SHA-256 hashes and metadata for the AI augment pass (S-5.03).
+///
+/// Recorded separately from `AiInvocationSummary` (the analyze pass) so
+/// auditors can independently verify both steps. Mirrors the field layout
+/// of [`AiInvocationSummary`] for consistency.
+#[derive(Debug, Clone, Serialize)]
+pub struct AugmentInvocationSummary {
+    pub system_prompt_bytes: usize,
+    pub system_prompt_sha256: String,
+    pub user_message_bytes: usize,
+    pub user_message_sha256: String,
+    pub response_bytes: usize,
+    pub response_sha256: String,
+    pub elapsed_seconds: f64,
+    /// Number of `AugmentedFinding`s returned by the provider before dedup.
+    pub raw_finding_count: usize,
+    /// Number of `AugmentedFinding`s surviving dedup against rule findings.
+    pub surviving_finding_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -193,6 +217,7 @@ mod tests {
                 pseudonyms_replaced: 14,
                 pseudonyms_unmapped: 0,
             },
+            augment_pass: None,
         };
         let json = serde_json::to_string_pretty(&log).unwrap();
         // The leak detector — the same one the analyze pipeline uses —

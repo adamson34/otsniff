@@ -15,6 +15,24 @@ use crate::audit::{
 };
 use crate::capture_source::DeclaredSource;
 use crate::error::{OtError, Result};
+use crate::findings::augmented::augment_findings;
+
+/// Source-label sentinel used in the markdown payload sent to the AI
+/// provider.
+///
+/// **F-ADV-P5-001:** the PCAP basename is operator BCSI (NERC CIP-011
+/// protected info) — names like `acme-plant-alpha-line3-2026-05-22.pcap`
+/// embed plant / line / facility identifiers that the scrub layer
+/// cannot pseudonymize because they sit outside the parsed PCAP bytes.
+/// The leak detector's regex matches IP/MAC shape only, and the
+/// map-value check only knows DHCP-derived hostnames. So we substitute
+/// a constant sentinel before the scrub-and-send step. The HTML report
+/// and local sidecar still display the real basename — the sentinel
+/// applies only to bytes destined for the external AI provider.
+///
+/// Mirrors the existing pattern in `run_scrub` (cli.rs:525) where the
+/// markdown bound for the user's external AI also uses `"<scrubbed>"`.
+pub const AI_INPUT_LABEL: &str = "<scrubbed>";
 
 /// CLI form of `DeclaredSource`. Separate enum so we own the clap
 /// `ValueEnum` derive without polluting the core type.
@@ -82,6 +100,57 @@ pub enum Command {
     /// references. Use this to review what the tool flags without
     /// reading Rust source.
     Rules(RulesArgs),
+    /// Compare two captures and emit a delta report: new and gone hosts,
+    /// finding deltas, role inference shifts, and flow-volume shifts.
+    /// Identification is by pseudonym from the merged scrub maps, so the
+    /// comparison is stable across captures of the same network.
+    //
+    // Internal traceability: BC-9.05.001 (subcommand surface),
+    // BC-3.08.001..003 (delta shape). See docs/ROADMAP.md P1-3.
+    Diff {
+        /// Baseline capture (the "before" PCAP).
+        baseline_pcap: PathBuf,
+        /// Current capture (the "after" PCAP).
+        current_pcap: PathBuf,
+        /// Merged scrub map for the baseline capture.
+        #[arg(long)]
+        baseline_map: PathBuf,
+        /// Merged scrub map for the current capture.
+        #[arg(long)]
+        current_map: PathBuf,
+        /// Output report path (.html, .md, or .json).
+        #[arg(short, long)]
+        output: PathBuf,
+        /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
+        /// MUST match the value passed to `analyze` for the same captures, or
+        /// the findings layer will classify hosts differently and produce
+        /// spurious findings_new/findings_resolved entries (F-ADV-P1-001).
+        #[arg(long = "ot-subnet", value_name = "CIDR")]
+        ot_subnets: Vec<IpNet>,
+        /// Ratio threshold for flow-volume shift detection (default 2.0).
+        /// A flow appearing in both captures is reported as a shift when
+        /// the larger byte count is at least this multiple of the smaller.
+        /// Values < 1.0 are rejected at parse time.
+        #[arg(long, default_value_t = crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER)]
+        flow_shift_multiplier: f64,
+    },
+    /// Zonewarden segmentation-conformance tools (ADR-0013).
+    #[command(subcommand)]
+    Zonewarden(ZonewardenCmd),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ZonewardenCmd {
+    /// Draft a segmentation policy (zones + inferred Purdue levels) from a
+    /// capture's asset inventory. Prints YAML to stdout — review it, add
+    /// conduits, then pass it to `analyze --policy`.
+    Suggest {
+        /// Path to input PCAP/PCAPNG.
+        input: PathBuf,
+        /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
+        #[arg(long = "ot-subnet", value_name = "CIDR")]
+        ot_subnets: Vec<IpNet>,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -169,6 +238,13 @@ pub struct AnalyzeArgs {
     /// detector still runs; this adds a human eyeball.
     #[arg(long = "review-scrub")]
     pub review_scrub: bool,
+    /// Path to a Zonewarden segmentation policy (YAML). When set, otsniff
+    /// classifies observed flows against the declared IEC 62443 zones/conduits
+    /// (ADR-0013): the report gains a "Zonewarden — Segmentation Conformance"
+    /// section and `zonewarden.*` findings, and the subnet-based
+    /// `egress.ot_to_internet` rule is superseded by the engine.
+    #[arg(long = "policy", value_name = "PATH")]
+    pub policy: Option<PathBuf>,
     /// Print parse summary + (with `--ai`) privacy ledger lines to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
@@ -204,7 +280,176 @@ pub fn run() -> Result<()> {
         Command::Scrub(a) => run_scrub(a),
         Command::Unscrub(a) => run_unscrub(a),
         Command::Rules(a) => run_rules(a),
+        Command::Diff {
+            baseline_pcap,
+            current_pcap,
+            baseline_map,
+            current_map,
+            output,
+            ot_subnets,
+            flow_shift_multiplier,
+        } => run_diff(
+            baseline_pcap,
+            current_pcap,
+            baseline_map,
+            current_map,
+            output,
+            ot_subnets,
+            flow_shift_multiplier,
+        ),
+        Command::Zonewarden(ZonewardenCmd::Suggest { input, ot_subnets }) => {
+            run_zonewarden_suggest(input, ot_subnets)
+        }
     }
+}
+
+/// `otsniff zonewarden suggest` — draft a policy from the asset inventory.
+fn run_zonewarden_suggest(input: PathBuf, ot_subnets: Vec<IpNet>) -> Result<()> {
+    let ot_subnets = ot_or_default(&ot_subnets);
+    let obs = analyze(&input, &ot_subnets, false, None)?;
+    let inventory = crate::inventory::build(&obs);
+    print!("{}", crate::segmentation::suggest::draft_policy(&inventory));
+    Ok(())
+}
+
+/// Run the `diff` subcommand (AC-001 / BC-9.05.001).
+///
+/// Loads both PCAPs and their scrub maps, builds observations + findings for
+/// each side, calls `crate::diff::compute`, and writes the result. For `.json`
+/// outputs the `Diff` is serialized as pretty JSON. For `.html` and `.md`
+/// outputs a placeholder is written — full rendering arrives in S-6.03.
+fn run_diff(
+    baseline_pcap: PathBuf,
+    current_pcap: PathBuf,
+    baseline_map_path: PathBuf,
+    current_map_path: PathBuf,
+    output: PathBuf,
+    user_ot_subnets: Vec<IpNet>,
+    flow_shift_multiplier: f64,
+) -> Result<()> {
+    // F-ADV-P1-002: validate the user-supplied multiplier at parse time so a
+    // bogus value (e.g. 0 or negative) fails early instead of silently
+    // producing zero shifts.
+    if !flow_shift_multiplier.is_finite() || flow_shift_multiplier < 1.0 {
+        return Err(OtError::Parse(format!(
+            "--flow-shift-multiplier must be a finite value ≥ 1.0; got {flow_shift_multiplier}"
+        )));
+    }
+
+    // F-ADV-P1-001: use the user-supplied OT subnets (or RFC1918 defaults).
+    // Without this, the findings layer always treated non-RFC1918 plants as
+    // non-OT, producing spurious findings_new/findings_resolved entries.
+    let ot_subnets = ot_or_default(&user_ot_subnets);
+
+    // Load and validate both scrub maps.
+    let base_map_bytes =
+        std::fs::read(&baseline_map_path).map_err(|source| OtError::InputOpen {
+            path: baseline_map_path.clone(),
+            source,
+        })?;
+    let base_map: ScrubMap = serde_json::from_slice(&base_map_bytes)?;
+    base_map.validate()?;
+
+    let curr_map_bytes = std::fs::read(&current_map_path).map_err(|source| OtError::InputOpen {
+        path: current_map_path.clone(),
+        source,
+    })?;
+    let curr_map: ScrubMap = serde_json::from_slice(&curr_map_bytes)?;
+    curr_map.validate()?;
+
+    // Parse both PCAPs.
+    let base_obs = analyze(&baseline_pcap, &ot_subnets, false, None)?;
+    let curr_obs = analyze(&current_pcap, &ot_subnets, false, None)?;
+
+    // F-ADV-P4-010: validate map coverage of observed hosts. If the operator
+    // swapped --baseline-map and --current-map, or supplied a stale map from
+    // a different capture, `ip_to_pseudo` would fall back to
+    // `unmapped_<hash>` for every host. The privacy invariant is preserved
+    // (no real IPs leak via diff.rs) but utility is destroyed silently.
+    // Warn loudly when coverage falls below 50%.
+    {
+        let report_coverage = |side: &str, obs: &crate::observe::Observations, map: &ScrubMap| {
+            let observed: std::collections::HashSet<String> =
+                obs.hosts.keys().map(|ip| ip.to_string()).collect();
+            if observed.is_empty() {
+                return; // nothing to check
+            }
+            let mapped_count = observed
+                .iter()
+                .filter(|ip| map.ips.values().any(|v| v == *ip))
+                .count();
+            let pct = (mapped_count as f64 / observed.len() as f64) * 100.0;
+            if pct < 50.0 {
+                eprintln!(
+                    "WARNING (F-ADV-P4-010): only {pct:.1}% of {side} hosts are covered by \
+                     --{side}-map ({mapped_count}/{} mapped). Did you swap --baseline-map and \
+                     --current-map, or supply a stale map? The diff output's privacy is \
+                     preserved but coverage is degraded — most hosts will appear as \
+                     `unmapped_*` opaque labels.",
+                    observed.len()
+                );
+            }
+        };
+        report_coverage("baseline", &base_obs, &base_map);
+        report_coverage("current", &curr_obs, &curr_map);
+    }
+
+    // Run findings for each side.
+    let base_findings = crate::findings::run_all(&base_obs, &ot_subnets);
+    let curr_findings = crate::findings::run_all(&curr_obs, &ot_subnets);
+
+    // Compute the diff using the user-supplied multiplier directly
+    // (F-ADV-P1-002: post-filter was silently a no-op for values < 2.0).
+    let diff = crate::diff::compute_with_multiplier(
+        crate::diff::DiffInput {
+            observations: &base_obs,
+            map: &base_map,
+            findings: &base_findings,
+        },
+        crate::diff::DiffInput {
+            observations: &curr_obs,
+            map: &curr_map,
+            findings: &curr_findings,
+        },
+        flow_shift_multiplier,
+    );
+
+    // Render output based on file extension.
+    let ext = output
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let content = match ext.as_str() {
+        "json" => serde_json::to_string_pretty(&diff)?,
+        "md" => crate::report_md::render_diff_markdown(&diff),
+        _ => crate::report::render_diff_html(&diff)?,
+    };
+
+    // F-ADV-P2-002: fail-closed leak detection on the rendered diff content
+    // before write. The diff pipeline previously had NO ensure_clean gate
+    // (asymmetric to the analyze --ai pipeline), so a mismatched / stale
+    // scrub map would emit raw IPs straight into the JSON output via the
+    // `unwrap_or(ip_str)` fallback in `ip_to_pseudo` (diff.rs). This pass
+    // catches the residue before any write happens.
+    crate::ai::leak_detector::ensure_clean(&content)?;
+    crate::ai::leak_detector::ensure_no_map_values(&content, &base_map)?;
+    crate::ai::leak_detector::ensure_no_map_values(&content, &curr_map)?;
+
+    std::fs::write(&output, content).map_err(|source| OtError::WriteOutput {
+        path: output.clone(),
+        source,
+    })?;
+    eprintln!(
+        "wrote {} ({} new hosts, {} gone, {} new findings, {} resolved)",
+        output.display(),
+        diff.hosts_new.len(),
+        diff.hosts_gone.len(),
+        diff.findings_new.len(),
+        diff.findings_resolved.len(),
+    );
+    Ok(())
 }
 
 fn ot_or_default(supplied: &[IpNet]) -> Vec<IpNet> {
@@ -307,7 +552,7 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
         })?;
         let baseline: ScrubMap = serde_json::from_slice(&bytes)?;
         baseline.validate()?;
-        merge_map(baseline, &obs)
+        merge_map(baseline, &obs)?
     } else {
         build_map(&obs)
     };
@@ -320,6 +565,16 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
         Some(&classification),
     )?;
     let md = scrub_text(&raw_md, &map);
+
+    // F-ADV-P3-001: fail-closed leak detection on the scrubbed output
+    // before write. The `scrub` subcommand is the manual "AI-safe" path
+    // (users paste into Claude.ai / ChatGPT / Ollama); both `analyze --ai`
+    // and `diff` apply the same gates. Without this check, a bug in
+    // `scrub_text` would silently produce output containing real IPs/
+    // MACs/hostnames — exactly the bytes the user is about to paste into
+    // an external AI provider.
+    crate::ai::leak_detector::ensure_clean(&md)?;
+    crate::ai::leak_detector::ensure_no_map_values(&md, &map)?;
 
     std::fs::write(&args.output, md).map_err(|source| OtError::WriteOutput {
         path: args.output.clone(),
@@ -382,19 +637,56 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     reporter.finish();
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
-    let findings = crate::findings::run_all(&obs, &ot_subnets);
+
+    // Zonewarden segmentation conformance (ADR-0013): only when --policy is set.
+    // With a policy, findings come from the policy-aware path (which supersedes
+    // the subnet-based egress rule) and the report gains the conformance section.
+    let conformance = match &args.policy {
+        Some(path) => {
+            let flows: Vec<crate::observe::FlowObs> = obs.flows.values().cloned().collect();
+            Some(crate::segmentation::run_conformance_path(path, &flows)?)
+        }
+        None => None,
+    };
+    let findings = match &conformance {
+        Some(result) => crate::findings::run_with_conformance(&obs, &ot_subnets, result),
+        None => crate::findings::run_all(&obs, &ot_subnets),
+    };
+    let conformance_html = conformance
+        .as_ref()
+        .map(crate::report::render_conformance_section);
+    let conformance_md = conformance
+        .as_ref()
+        .map(crate::report_md::render_conformance_section_md);
     let generated_at = Utc::now();
 
     // Always build the rules-based markdown — used both as the AI's
     // input (when --ai is on) and as the --md sidecar.
+    //
+    // F-ADV-P2-009: use the PCAP basename only, not the full path. The
+    // full path can leak the operator's username, the plant name, embedded
+    // IPs, and other privacy-sensitive identifiers — none of which the
+    // scrub layer knows about because they're outside the parsed PCAP
+    // bytes. The audit log (cli.rs:730-735) carries the SHA-256 for
+    // chain-of-custody; the markdown only needs an identifier the
+    // analyst recognises.
+    let source_label = args
+        .input
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "<unknown>".to_string());
     let raw_md = render_markdown(
         &inventory,
         &findings,
         &obs,
-        &args.input.display().to_string(),
+        &source_label,
         generated_at,
         Some(&classification),
     )?;
+    let raw_md = match &conformance_md {
+        Some(section) => format!("{raw_md}\n{section}"),
+        None => raw_md,
+    };
 
     // Without --ai, the only outputs are the HTML report + optional
     // --md / --json sidecars. Short-circuit.
@@ -407,6 +699,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             generated_at,
             Some(&classification),
             None,
+            conformance_html.clone(),
         )?;
         std::fs::write(&args.output, html).map_err(|source| OtError::WriteOutput {
             path: args.output.clone(),
@@ -424,10 +717,27 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
 
     // ---- --ai path: scrub → leak-check → invoke claude → unscrub → embed
 
+    // F-ADV-P5-001: re-render the markdown with the AI sentinel as the
+    // source label. The basename version of `raw_md` is retained for the
+    // local sidecar (line ~763) and HTML report, where the operator
+    // wants to see which capture this report came from. But the bytes
+    // sent to the external AI provider must not carry the basename —
+    // names like `acme-plant-alpha-line3-secret.pcap` embed plant /
+    // line / facility identifiers that the scrub layer cannot detect
+    // because they sit outside the parsed PCAP bytes.
+    let raw_md_for_ai = render_markdown(
+        &inventory,
+        &findings,
+        &obs,
+        AI_INPUT_LABEL,
+        generated_at,
+        Some(&classification),
+    )?;
+
     // 2. Mint pseudonyms and produce the scrubbed payload that will go
     //    to the AI.
     let map = build_map(&obs);
-    let scrubbed_md = scrub_text(&raw_md, &map);
+    let scrubbed_md = scrub_text(&raw_md_for_ai, &map);
     let scrub_summary = ScrubSummary {
         ip_pseudonyms: map.ips.len(),
         mac_pseudonyms: map.macs.len(),
@@ -508,11 +818,46 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         );
     }
 
-    // 6. Render the AI's markdown response to safe HTML and embed in
-    //    the report. pulldown-cmark with raw-HTML events filtered, so
-    //    a Claude response containing `<script>` doesn't XSS whoever
-    //    opens the report.
-    let ai_html = crate::ai::html_render::render_safe(&unscrubbed_response);
+    // 6. Run the AI augment pass (S-5.03 CRITICAL #1 — wire augment_findings).
+    //
+    // The augment pass runs a second LLM call with a different system prompt
+    // (AUGMENT_PROMPT) to surface patterns the rule layer missed. It operates
+    // on the same scrub map as the analyze pass, so pseudonyms are consistent
+    // across both AI responses. Errors are soft-failures: the report renders
+    // with rule findings and the analyze-pass AI section intact; the augmented
+    // section is simply absent.
+    let (augmented_findings, augment_summary_opt) =
+        match augment_findings(&obs, &findings, &inventory, &provider) {
+            Ok((af, summary)) => {
+                if args.verbose {
+                    eprintln!(
+                        "  augment pass: {} findings ({} surviving dedup)",
+                        summary.raw_finding_count, summary.surviving_finding_count
+                    );
+                }
+                (af, Some(summary))
+            }
+            Err(e) => {
+                // Soft-failure: log to stderr and continue without augmented findings.
+                eprintln!("WARNING: augment pass failed (report will render without it): {e}");
+                (vec![], None)
+            }
+        };
+
+    // 7. Render the AI analysis section (analyze pass + augmented findings).
+    //    pulldown-cmark with raw-HTML events filtered, so a Claude response
+    //    containing `<script>` doesn't XSS whoever opens the report.
+    //    The augmented section uses render_augmented_section which pipes
+    //    AI-controlled text through render_safe internally.
+    let ai_html = {
+        let mut html_parts = crate::ai::html_render::render_safe(&unscrubbed_response);
+        let augmented_section = crate::report::render_augmented_section(&augmented_findings);
+        if !augmented_section.is_empty() {
+            html_parts.push('\n');
+            html_parts.push_str(&augmented_section);
+        }
+        html_parts
+    };
     let html = render_html(
         &inventory,
         &findings,
@@ -521,19 +866,27 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         generated_at,
         Some(&classification),
         Some(ai_html),
+        conformance_html,
     )?;
     std::fs::write(&args.output, html).map_err(|source| OtError::WriteOutput {
         path: args.output.clone(),
         source,
     })?;
 
-    // 7. Optional sidecars: markdown (combined: rules + AI), JSON,
+    // 8. Optional sidecars: markdown (combined: rules + AI + augmented), JSON,
     //    pseudonym map.
     if let Some(md_path) = &args.md {
         let mut combined = raw_md.clone();
         combined.push('\n');
         combined.push_str(&unscrubbed_response);
         combined.push('\n');
+        // Append the augmented-findings markdown section when present.
+        let augmented_md_section =
+            crate::report_md::render_augmented_section_md(&augmented_findings);
+        if !augmented_md_section.is_empty() {
+            combined.push('\n');
+            combined.push_str(&augmented_md_section);
+        }
         std::fs::write(md_path, combined).map_err(|source| OtError::WriteOutput {
             path: md_path.clone(),
             source,
@@ -561,7 +914,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         })?;
     }
 
-    // 8. Audit log. Always written when --ai is on; the audit log is
+    // 9. Audit log. Always written when --ai is on; the audit log is
     //    the privacy contract receipt. Path defaults to a `.audit.json`
     //    alongside the report output unless `--audit-log` overrides.
     //    The log itself passes through both leak checks before write
@@ -605,6 +958,8 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             pseudonyms_replaced: replaced,
             pseudonyms_unmapped: unmapped.len(),
         },
+        // S-5.03 AC-006: populate the augment_pass field from the returned summary.
+        augment_pass: augment_summary_opt,
     };
     let log_json = serde_json::to_string_pretty(&log)?;
     leak_detector::ensure_clean(&log_json)?;
@@ -694,6 +1049,25 @@ fn run_unscrub(args: UnscrubArgs) -> Result<()> {
             buf
         }
     };
+
+    // F-ADV-P4-008: a common operator footgun is loading the wrong map
+    // file. An empty map silently makes unscrub a no-op. Warn loudly to
+    // stderr; promote to Err under --strict.
+    if map.is_empty() {
+        if args.strict {
+            return Err(OtError::Parse(
+                "F-ADV-P4-008: scrub map has zero entries (ips/macs/names all \
+                 empty); unscrub would be a silent no-op. In strict mode this \
+                 is an error — verify the --map path points to a populated map."
+                    .to_string(),
+            ));
+        }
+        eprintln!(
+            "WARNING (F-ADV-P4-008): scrub map has zero entries; unscrub is a no-op. \
+             Verify --map points to a populated map file. Re-run with --strict to \
+             treat this as an error."
+        );
+    }
 
     let (output, replaced, unmapped) = unscrub_text(&input_text, &map);
 
@@ -794,6 +1168,71 @@ mod tests {
             result.iter().filter(|n| matches!(n, IpNet::V6(_))).count(),
             0,
             "one or more default OT subnets are IPv6; AC-005 requires IPv4-only RFC1918 defaults"
+        );
+    }
+
+    /// F-ADV-P5-001: the AI-bound markdown source label must be a constant
+    /// sentinel that carries no operator-identifying tokens. The PCAP
+    /// basename is BCSI under NERC CIP-011 — a name like
+    /// `acme-plant-alpha-line3-2026-05-22.pcap` ships plant / line /
+    /// facility identifiers into the AI provider's prompt that the
+    /// scrub layer cannot detect or pseudonymize.
+    #[test]
+    fn f_adv_p5_001_ai_input_label_is_sentinel_not_basename() {
+        // Contract: the constant exists and equals "<scrubbed>".
+        assert_eq!(AI_INPUT_LABEL, "<scrubbed>");
+
+        // Contract: the sentinel has no path-shape and no alphabetic
+        // tokens an operator might use in plant / line / facility names.
+        // Any sensitive basename token slipping into the constant would
+        // immediately leak via the markdown header to the AI.
+        for forbidden in [
+            "acme", "plant", "line", "site", "facility", "secret", ".pcap",
+        ] {
+            assert!(
+                !AI_INPUT_LABEL.contains(forbidden),
+                "AI_INPUT_LABEL contains forbidden token '{forbidden}' — \
+                 sentinel must be a constant, not a derived value"
+            );
+        }
+    }
+
+    /// F-ADV-P5-001 (cont.): rendering markdown with the AI sentinel as
+    /// `input_label` must not embed any operator-identifying basename
+    /// token in the output bytes. Test verifies the contract by rendering
+    /// against an empty observation set and grepping for sensitive
+    /// tokens. If the renderer ever starts embedding the input path
+    /// elsewhere (e.g. a footer), this test catches it.
+    #[test]
+    fn f_adv_p5_001_render_with_ai_label_carries_no_basename_token() {
+        use crate::report_md::render_markdown;
+        use chrono::TimeZone;
+
+        let obs = crate::observe::Observations::default();
+        let inventory = crate::inventory::build(&obs);
+        let findings: Vec<crate::findings::Finding> = Vec::new();
+        let ts = chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+
+        let rendered = render_markdown(&inventory, &findings, &obs, AI_INPUT_LABEL, ts, None)
+            .expect("render_markdown should succeed on empty fixture");
+
+        for forbidden in [
+            "acme-plant",
+            "line3",
+            "secret",
+            "/Users/",
+            "/home/",
+            ".pcap",
+        ] {
+            assert!(
+                !rendered.contains(forbidden),
+                "AI-bound markdown contains forbidden token '{forbidden}' — \
+                 something other than input_label is leaking the path"
+            );
+        }
+        assert!(
+            rendered.contains(AI_INPUT_LABEL),
+            "expected sentinel '{AI_INPUT_LABEL}' to appear in rendered markdown header"
         );
     }
 }

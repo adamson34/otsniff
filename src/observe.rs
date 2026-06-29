@@ -751,41 +751,59 @@ impl Observer {
         // heuristic — it does not reconstruct full LDAP message framing —
         // but it is sufficient for the AC-003 suppression test because the
         // observer test directly sets `used_starttls: true` on the fixture.
-        if pkt.dst_port == ldap::PORT || pkt.dst_port == 3268 {
-            // Check for STARTTLS ExtendedResponse success before processing
-            // the BindRequest. Tag 0x78 = [APPLICATION 24] (ExtendedResponse).
-            // resultCode success encodes as 0x0a 0x01 0x00 inside the PDU.
-            if !payload.is_empty() && payload[0] == 0x30 {
-                // Outer SEQUENCE: could be an ExtendedResponse containing a
-                // successful STARTTLS result. Detect the success resultCode.
-                if find_subseq(payload, &[0x78]) // APPLICATION 24 ExtendedResponse tag
-                    .is_some()
-                    && find_subseq(payload, &[0x0a, 0x01, 0x00]).is_some()
-                // resultCode success
-                {
-                    let flow_key = (pkt.src_ip, pkt.dst_ip, pkt.src_port, pkt.dst_port);
-                    self.ldap_starttls_flows.insert(flow_key, true);
-                }
+        // F-ADV-P4-001: STARTTLS detection must run on BOTH directions.
+        // The ExtendedResponse (server → client) carries the success bytes;
+        // the BindRequest (client → server) is what we want to flag as
+        // STARTTLS-protected. We need to observe both packets and key them
+        // by a direction-agnostic flow tuple so the response's success
+        // signal is associated with the request's bind event.
+        //
+        // Direction-agnostic flow key: (canonical_low_ip, canonical_high_ip,
+        // server_port, client_port). Both 389 and 3268 ports collapse to a
+        // single "ldap server port" slot on whichever side carries it; the
+        // client port is whichever side isn't 389/3268.
+        let is_ldap_dst = pkt.dst_port == ldap::PORT || pkt.dst_port == 3268;
+        let is_ldap_src = pkt.src_port == ldap::PORT || pkt.src_port == 3268;
+
+        if is_ldap_src || is_ldap_dst {
+            // Server-side detection of STARTTLS success. The ExtendedResponse
+            // payload starts with `0x30` (outer SEQUENCE), contains tag 0x78
+            // (APPLICATION 24, ExtendedResponse), and contains the success
+            // resultCode `0x0a 0x01 0x00`.
+            if is_ldap_src
+                && !payload.is_empty()
+                && payload[0] == 0x30
+                && find_subseq(payload, &[0x78]).is_some()
+                && find_subseq(payload, &[0x0a, 0x01, 0x00]).is_some()
+            {
+                // F-ADV-P4-001: key by the (client, server, client_port,
+                // server_port) tuple — the BindRequest direction's view.
+                // Since this packet is server→client, the BindRequest's
+                // pkt.src_ip = our pkt.dst_ip; pkt.dst_ip = our pkt.src_ip.
+                let server_port = pkt.src_port;
+                let client_port = pkt.dst_port;
+                let flow_key = (pkt.dst_ip, pkt.src_ip, client_port, server_port);
+                self.ldap_starttls_flows.insert(flow_key, true);
             }
 
-            // Now attempt BindRequest recognition. The STARTTLS flag is read
-            // from the map using the same flow tuple (with reversed src/dst
-            // because the BindRequest comes from the client to the server).
-            if let Some(recognized) = ldap::recognize_bind_request(payload) {
-                // used_starttls: look up whether this client→server flow had a
-                // prior successful STARTTLS exchange. The flow key is
-                // (client_src, server_dst, client_src_port, server_dst_port).
-                let flow_key = (pkt.src_ip, pkt.dst_ip, pkt.src_port, pkt.dst_port);
-                let used_starttls = *self.ldap_starttls_flows.get(&flow_key).unwrap_or(&false);
-                self.obs.ldap_bind_events.push(LdapBindEvent {
-                    ts: pkt.ts,
-                    src: pkt.src_ip,
-                    dst: pkt.dst_ip,
-                    dst_port: pkt.dst_port,
-                    version: recognized.version,
-                    used_starttls,
-                    anonymous: recognized.anonymous,
-                });
+            // Client-side: BindRequest recognition.
+            if is_ldap_dst {
+                if let Some(recognized) = ldap::recognize_bind_request(payload) {
+                    // F-ADV-P4-001: look up the STARTTLS flag using the
+                    // (client_src, server_dst, client_src_port, server_dst_port)
+                    // tuple — same shape the response branch above stored under.
+                    let flow_key = (pkt.src_ip, pkt.dst_ip, pkt.src_port, pkt.dst_port);
+                    let used_starttls = *self.ldap_starttls_flows.get(&flow_key).unwrap_or(&false);
+                    self.obs.ldap_bind_events.push(LdapBindEvent {
+                        ts: pkt.ts,
+                        src: pkt.src_ip,
+                        dst: pkt.dst_ip,
+                        dst_port: pkt.dst_port,
+                        version: recognized.version,
+                        used_starttls,
+                        anonymous: recognized.anonymous,
+                    });
+                }
             }
         }
     }

@@ -13,7 +13,26 @@ picked up.
 
 ## Released
 
-- **v0.4.0-dev.1** (unreleased — HEAD of `develop`). VSDD wave-1 batch:
+- **v0.5.0-dev** (in progress — HEAD of `develop`). VSDD wave-2/3 batch:
+  - **Zonewarden segmentation module** ([ADR-0013](adr/0013-zonewarden-segmentation-module.md))
+    — the standalone zonewarden tool folded in as a workspace sub-crate
+    (`crates/zonewarden`, history-preserved, pure + Kani-verified). Adds
+    IEC 62443 zone/conduit conformance with the Purdue-3.5 IDMZ
+    no-bypass check, three `zonewarden.*` findings (egress deduped
+    against the policy), a "Segmentation Conformance" report section
+    with a deterministic `policy_digest`, `analyze --policy zones.yaml`,
+    and `otsniff zonewarden suggest` to draft a policy from the asset
+    inventory. The 7 segmentation Kani proofs run in `kani.yml`. Rule
+    catalog now lists **23** rules.
+  - **AI-augmented findings** (P0-8) — a second LLM pass anchored on
+    the rules + inventory surfaces patterns the deterministic rules
+    don't encode, each with a confidence + reasoning field, rendered in
+    a separate section.
+  - **Cross-capture diff** (P1-3) — `otsniff diff baseline.pcap
+    current.pcap` reports host/finding/role/comms-matrix deltas across
+    two runs, with HTML + markdown rendering and stable pseudonyms via
+    merged maps.
+- **v0.4.0** — VSDD wave-1 batch:
   - **Seven new detection rules** — every item from "Near-term rule
     additions" below now shipped at once (`creds.ldap_simple_bind`,
     `compat.ntlmv1`, `compat.weak_tls_cipher`, `creds.rdp_no_nla`,
@@ -62,10 +81,12 @@ against. The 4SICS runs are the benchmark — a P0 item should change those
 outputs in a way an OT defender would notice.
 
 **Track 1 emphasis (next priority).** P0-7 (investigation playbooks)
-shipped in v0.3. P0-8 (AI-augmented detection) is in flight as VSDD
-story **S-5.03** scheduled for wave-3 of the v0.4 cycle — it's the
-biggest remaining "make it indispensable" move. The other P0 items
-remain valuable but sequence behind the wave-2/3 plan.
+shipped in v0.3; P0-8 (AI-augmented detection) shipped in the v0.5 dev
+cycle (S-5.03). The remaining open P0 items are P0-6 (OUI refresh),
+P0-9 (mDNS/NetBIOS hostnames), and P0-10 (multi-PCAP) — all sized **S**.
+The biggest *new* opportunity is **segmentation drift** (P1-13 below),
+which pairs the now-shipped cross-capture diff with the Zonewarden
+engine.
 
 ### P0-1: Finding dedup / rollup (S) — ✅ shipped (v0.2)
 
@@ -262,7 +283,7 @@ extend.
 specific evidence to reference. Order: land P0-7 first, then add
 playbook content to new findings as they ship.
 
-### P0-8: AI-augmented detection (M) — 🚧 in flight (VSDD wave-3 / S-5.03)
+### P0-8: AI-augmented detection (M) — ✅ shipped (#114, S-5.03)
 
 Second AI pass anchored on the rules-based findings. After
 `run_all_findings()` produces the deterministic findings, an additional
@@ -395,7 +416,7 @@ Two related UX gaps in `-v` mode:
 **Touches:** `cli.rs`,
 `pcap.rs`. **Deps:** none.
 
-### P1-3: Cross-capture diff (M) — 🚧 in flight (VSDD wave-2/3 / S-6.02 + S-6.03)
+### P1-3: Cross-capture diff (M) — ✅ shipped (#107, #108, #119; S-6.02 + S-6.03)
 
 `otsniff diff baseline.pcap suspect.pcap --baseline-map baseline.map.json
 --current-map current.map.json -o diff.html`
@@ -497,6 +518,140 @@ subcommand, packet-index threading through the observer (which packet
 contributed to which event), `pcap.rs` write-half. **Deps:** small
 refactor to retain `pcap_offset: u64` on `CredEvent` / `ModbusEvent`
 etc. so we know which bytes to write out.
+
+### P1-9: Capture-window sanity warning (S)
+
+Surface explicit warnings when the input PCAP has degenerate timestamps —
+all-zero (epoch 1970), entire capture window <1s, or non-monotonic
+ordering. Discovered while triaging real captures (May 2026): both
+`iFix_Server119.pcap` and `MicroLogix56.pcap` ship with all-zero
+timestamps; the tool happily processes them but any time-based
+analysis (capture-source heuristic, flow rate, port-scan window) is
+meaningless on those inputs. Currently silent.
+
+**Why:** users see "Capture window: 1970-01-01 00:00:00 UTC →
+1970-01-01 00:00:00 UTC" in the summary section but get no signal
+that downstream findings may be unreliable as a result. A one-line
+WARNING in the report header + verbose stderr message would close
+the gap.
+
+**Touches:** `observe.rs` (already tracks min/max timestamp),
+`report.rs` + `report_md.rs` (add a banner), `cli.rs` (stderr warn).
+**Deps:** none.
+
+### P1-10: Spoofed-source detection / inventory cap (M)
+
+DoS captures (ping flood, SYN flood) produce inventories with 10k+
+"hosts" because attacker tooling spoofs source IPs. Discovered while
+triaging the Lemay/Fernandez dataset: `eth2dump-pingFloodDDoS` and
+`eth2dump-tcpSYNFloodDDoS` show 12,005 / 12,017 hosts each — the
+report inventory becomes unreadable.
+
+Two-part fix:
+
+1. **Detector** — new `attack.spoofed_sources` finding that fires
+   when K hosts (K > 500) appear with: exactly 1 packet sent, no
+   responses received, no MAC observation, no protocol enrichment.
+   That's the spoofed-source fingerprint.
+
+2. **Inventory render cap** — when inventory > 100 hosts, paginate
+   or summarize. Top-N by traffic + "+ K low-volume hosts (likely
+   spoofed) summarized" footer.
+
+**Why:** correctness (the 12k entries are technically real distinct
+src IPs, but reporting them as "hosts" misleads the analyst) and UX
+(the HTML report becomes unusably large).
+
+**Touches:** new `findings/spoofed_sources.rs`, `report.rs` +
+`report_md.rs` inventory section, snapshot tests.
+**Deps:** none.
+
+### P1-11: Diff capture-window normalization (S)
+
+`otsniff diff` flow-shift detection currently compares raw byte
+counts. When the two captures cover different durations (e.g. 1h
+baseline vs 30min current), every steady-state flow gets reported
+as a "shift" with ratio ≈ duration_ratio (2.0 for the 30m/1h pair).
+These are duration artifacts, not behavioral changes.
+
+Two options:
+
+1. **Compute and surface bytes/sec ratio** alongside bytes ratio.
+   Threshold on rate-normalized values rather than raw.
+
+2. **Warn loudly** when the two capture windows differ by >2x,
+   citing which results are likely duration-artifact rather than
+   real shifts.
+
+**Why:** discovered while running the wave-2 diff demo on real
+captures. Without this, every diff between recordings of unequal
+duration produces noise that dilutes real signals. Pre-empts a
+common operator footgun.
+
+**Touches:** `diff.rs::compute` (rate normalization), `cli.rs`
+(window-mismatch warning), snapshot tests.
+**Deps:** P1-3 base diff (shipped).
+
+### P1-12: Trusted-writer / engineering-allowlist suppression (M)
+
+Today the `ics.modbus_writes` (and analogous `ics.s7_engineering`,
+`ics.cip_engineering`) rules fire on every engineering-class call,
+forcing the analyst to read the playbook step "ask the on-shift
+control engineer whether X is the authorized Modbus master." On
+captures where the same trusted EWS → PLC pair makes thousands of
+writes, the rule fires once but the noise floor is high.
+
+Add a `--trusted-writer SRC=DST:PROTO` repeatable flag (or YAML
+config) that suppresses or downgrades findings for pre-declared
+authorized pairs:
+
+```
+otsniff analyze plant.pcap \
+  --trusted-writer 10.20.0.5=10.20.0.10:modbus \
+  --trusted-writer 10.20.0.5=10.20.0.11:modbus
+```
+
+Findings still appear (visibility preserved) but with severity
+INFO instead of HIGH, and a "matched trusted-writer rule" badge.
+
+**Why:** real plants have well-known authorized writer hosts.
+Without an allowlist, the engineering-commands rule is technically
+correct but reduces the signal-to-noise ratio of repeat scans.
+This is the highest-impact "false positive in production
+deployments" gap discovered in May 2026 triage.
+
+**Touches:** new config layer in `cli.rs`, `findings/engineering_commands.rs`
+(per-finding suppression hook), snapshot tests.
+**Deps:** none.
+
+### P1-13: Segmentation drift (M) — proposed
+
+`otsniff diff baseline.pcap current.pcap --policy zones.yaml` (or a
+dedicated `--segmentation-drift` mode) compares the *Zonewarden
+conformance verdict* across two captures of the same network rather
+than just the raw flow set:
+
+- Conformance-tally deltas (allowed / intra-zone / violations /
+  bypasses up or down vs. baseline).
+- Newly-violating flows (conformant last quarter, violating now) and
+  newly-resolved ones — the segmentation analog of P1-3's
+  new/recurring/resolved finding classification.
+- `policy_digest` equality check — if the digests match, the *policy*
+  is unchanged and every delta is a behavioral change; if they differ,
+  flag that the comparison crosses a policy revision.
+
+**Why:** "did our segmentation posture regress since last quarter's
+scan?" is the highest-value longitudinal question for a 62443 program,
+and it falls straight out of pairing two features that just landed
+(cross-capture diff, P1-3 ✅; Zonewarden conformance, ADR-0013 ✅).
+Neither feature answers it alone. The deterministic `policy_digest`
+makes the "is this a real drift or just a re-authored policy?"
+distinction rigorous rather than guessed.
+
+**Touches:** `diff.rs` (segmentation-aware comparison), the diff
+renderers, `cli.rs` (`--policy` on `diff`), snapshot tests. Likely
+warrants its own ADR or spec. **Deps:** P1-3 (shipped), ADR-0013
+(shipped).
 
 ### P1-8: IOC matching against curated OT threat-intel feeds (M)
 
@@ -781,9 +936,9 @@ in docs and to users, not pretend will be fixed by the next feature.
   service detection is a payload-window sweep, capture-source classifier is
   a MAC-distribution heuristic. False positives possible. Documented per-rule
   where it matters. A clean otsniff report is *not* an audit.
-- **Limited protocol coverage.** Modbus + EtherNet/IP + S7Comm. ~70% of US
-  industrial plants by install base, but not utilities (DNP3) or building
-  automation (BACnet) or modern OPC-UA-only deployments.
+- **Limited protocol coverage.** Modbus + EtherNet/IP + S7Comm + DNP3.
+  Covers most US industrial plants and utilities by install base, but
+  not building automation (BACnet) or modern OPC-UA-only deployments.
 - **Capture-source classification can be inconclusive.** Pre-filtered
   captures often classify as "ambiguous" — we report this honestly rather
   than guess. The override flag (P0-5) is the workaround.

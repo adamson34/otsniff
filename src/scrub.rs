@@ -66,38 +66,54 @@ impl ScrubMap {
         // three families. Two pseudonyms mapping to the same real value would
         // cause `forward()` to silently keep only one — the round-trip would
         // then be lossy for whichever pseudonym got overwritten.
+        // Third pass (F-ADV-P3-005): every pseudonym key must match the
+        // canonical `(host|mac|name)_NNN` shape for its family. A malformed
+        // baseline map (e.g. `"FOOBAR": "10.0.0.1"` in `ips`) would otherwise
+        // pass validation, get used by `scrub_text` to substitute, and break
+        // `unscrub_text`'s regex extraction silently.
         let mut seen_reals: std::collections::BTreeMap<&str, &str> =
             std::collections::BTreeMap::new();
-        for (pseudo, real) in self
-            .ips
-            .iter()
-            .chain(self.macs.iter())
-            .chain(self.names.iter())
-        {
-            if pseudo.is_empty() {
-                return Err(crate::error::OtError::Parse(format!(
-                    "scrub map has empty pseudonym key for real value '{}'; \
-                     the map is corrupted (EC-001). \
-                     Regenerate the map with `otsniff scrub`.",
-                    real
-                )));
-            }
-            if real.is_empty() {
-                return Err(crate::error::OtError::Parse(format!(
-                    "scrub map has empty real value for pseudonym '{}'; \
-                     the map is corrupted (EC-001). \
-                     Regenerate the map with `otsniff scrub`.",
-                    pseudo
-                )));
-            }
-            // F-W1-003: duplicate real-value detection.
-            if let Some(first_pseudo) = seen_reals.insert(real.as_str(), pseudo.as_str()) {
-                return Err(crate::error::OtError::Parse(format!(
-                    "scrub map maps two pseudonyms ('{}' and '{}') to the same \
-                     real value '{}'; the map is corrupted (F-W1-003 / duplicate \
-                     real value). Regenerate the map with `otsniff scrub`.",
-                    first_pseudo, pseudo, real
-                )));
+        for (family, prefix, entries) in [
+            ("ips", "host_", &self.ips),
+            ("macs", "mac_", &self.macs),
+            ("names", "name_", &self.names),
+        ] {
+            for (pseudo, real) in entries {
+                if pseudo.is_empty() {
+                    return Err(crate::error::OtError::Parse(format!(
+                        "scrub map has empty pseudonym key for real value '{}'; \
+                         the map is corrupted (EC-001). \
+                         Regenerate the map with `otsniff scrub`.",
+                        real
+                    )));
+                }
+                if real.is_empty() {
+                    return Err(crate::error::OtError::Parse(format!(
+                        "scrub map has empty real value for pseudonym '{}'; \
+                         the map is corrupted (EC-001). \
+                         Regenerate the map with `otsniff scrub`.",
+                        pseudo
+                    )));
+                }
+                // F-ADV-P3-005: pseudonym shape must be `<prefix>NNN` where
+                // NNN is one or more decimal digits.
+                if !is_canonical_pseudonym(pseudo, prefix) {
+                    return Err(crate::error::OtError::Parse(format!(
+                        "scrub map has non-canonical pseudonym '{pseudo}' in \
+                         family '{family}'; expected '{prefix}NNN' where NNN \
+                         is one or more decimal digits. Regenerate the map \
+                         with `otsniff scrub` (F-ADV-P3-005)."
+                    )));
+                }
+                // F-W1-003: duplicate real-value detection.
+                if let Some(first_pseudo) = seen_reals.insert(real.as_str(), pseudo.as_str()) {
+                    return Err(crate::error::OtError::Parse(format!(
+                        "scrub map maps two pseudonyms ('{}' and '{}') to the same \
+                         real value '{}'; the map is corrupted (F-W1-003 / duplicate \
+                         real value). Regenerate the map with `otsniff scrub`.",
+                        first_pseudo, pseudo, real
+                    )));
+                }
             }
         }
         Ok(())
@@ -149,6 +165,19 @@ impl ScrubMap {
 /// Parse the numeric suffix from a pseudonym such as `host_003` → `3`.
 /// Returns `None` if the pseudonym doesn't start with `prefix` or the
 /// suffix isn't a valid decimal integer.
+/// F-ADV-P3-005: a pseudonym matches the canonical shape `<prefix>NNN`
+/// where NNN is one or more decimal digits AND `prefix` ends in `_`.
+/// Examples: `is_canonical_pseudonym("host_001", "host_")` → true;
+/// `is_canonical_pseudonym("FOOBAR", "host_")` → false;
+/// `is_canonical_pseudonym("host_abc", "host_")` → false;
+/// `is_canonical_pseudonym("host_", "host_")` → false (empty suffix).
+fn is_canonical_pseudonym(pseudo: &str, prefix: &str) -> bool {
+    let Some(suffix) = pseudo.strip_prefix(prefix) else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit())
+}
+
 fn parse_pseudonym_index(p: &str, prefix: &str) -> Option<u32> {
     p.strip_prefix(prefix).and_then(|n| n.parse().ok())
 }
@@ -175,7 +204,7 @@ fn merge_family(
     baseline: &mut BTreeMap<String, String>,
     current_entries: impl Iterator<Item = (String, String)>,
     prefix: &str,
-) {
+) -> crate::error::Result<()> {
     // Build the set of real values already covered by the baseline.
     let existing_reals: std::collections::BTreeSet<&str> =
         baseline.values().map(|s| s.as_str()).collect();
@@ -194,7 +223,7 @@ fn merge_family(
         .collect();
 
     if new_reals.is_empty() {
-        return;
+        return Ok(());
     }
 
     let start = max_index(baseline, prefix) + 1;
@@ -202,33 +231,40 @@ fn merge_family(
         let pseudo = format!("{prefix}{idx:03}");
         // EC-002: if this pseudonym already maps to a *different* real value
         // that's a bug — the invariant has been violated.
+        //
+        // F-ADV-P4-009: previously this was a `panic!` which is unreachable
+        // in correct code (max_index + 1 is always greater than all
+        // existing keys with the prefix). However, a corrupted on-disk
+        // baseline map could trigger it. Per the project convention "no
+        // panic on user input," we return a typed error instead. The
+        // signature ripple is contained — merge_map and its callers now
+        // return Result.
         if let Some(existing_real) = baseline.get(&pseudo) {
             if existing_real != &real {
-                panic!(
-                    "EC-002: pseudonym collision — '{pseudo}' maps to both \
-                     '{existing_real}' (baseline) and '{real}' (current). \
-                     This is a bug; please report it."
-                );
+                return Err(crate::error::OtError::Parse(format!(
+                    "EC-002: pseudonym collision in baseline map — '{pseudo}' \
+                     maps to both '{existing_real}' (baseline) and '{real}' \
+                     (current). The baseline map may have been hand-edited or \
+                     corrupted. Regenerate the map with `otsniff scrub` \
+                     (F-ADV-P4-009)."
+                )));
             }
         }
         baseline.insert(pseudo, real);
     }
+    Ok(())
 }
 
-pub fn merge_map(mut baseline: ScrubMap, current: &Observations) -> ScrubMap {
+pub fn merge_map(mut baseline: ScrubMap, current: &Observations) -> crate::error::Result<ScrubMap> {
     let current_map = build_map(current);
 
     // Merge each family independently so their suffix counters don't interfere.
-    // Pass `.into_iter()` (pseudonym-key order, which is the canonical
-    // assignment order from `build_map`) so new assignments continue in the
-    // same sorted order as a fresh `build_map` call would produce.
-    merge_family(&mut baseline.ips, current_map.ips.into_iter(), "host_");
-    merge_family(&mut baseline.macs, current_map.macs.into_iter(), "mac_");
-    merge_family(&mut baseline.names, current_map.names.into_iter(), "name_");
+    merge_family(&mut baseline.ips, current_map.ips.into_iter(), "host_")?;
+    merge_family(&mut baseline.macs, current_map.macs.into_iter(), "mac_")?;
+    merge_family(&mut baseline.names, current_map.names.into_iter(), "name_")?;
 
-    // Stamp the merge time so the on-disk map reflects when it was last updated.
     baseline.created_at = Utc::now();
-    baseline
+    Ok(baseline)
 }
 
 /// Walk observations and mint stable pseudonyms for every observed IP and MAC.
@@ -251,10 +287,23 @@ pub fn build_map_at(obs: &Observations, now: DateTime<Utc>) -> ScrubMap {
         ips.insert(pseudo, ip.to_string());
     }
 
-    // Walk MACs in the order their owning host was assigned. Skips the
-    // all-zero placeholder MAC which is used by the observer when it
-    // doesn't see a real Ethernet header.
+    // Walk MACs in the order their owning host was assigned, THEN sweep up
+    // every other MAC the observer saw on the wire (F-ADV-P2-008). The
+    // capture-source detector (`report_line()`) uses
+    // `obs.mac_frame_counts` which can include MACs that are NOT in any
+    // host's `host.macs` list — for example, a passive observer running
+    // tcpdump on a SPAN port (its MAC appears as the dominant source MAC
+    // but its IP was never seen on the wire), or SVI / VRRP virtual MACs.
+    // If such a MAC ended up in the report's capture-source line without
+    // a pseudonym, `scrub_text` would leave it as-is and the leak-detector
+    // regex would fire defensively (returning `OtError::PrivacyLeak`),
+    // which is a confusing failure mode for a real capture.
+    //
+    // Skips the all-zero placeholder MAC which the observer uses when it
+    // can't read a real Ethernet header.
     let mut mac_seen: BTreeMap<[u8; 6], usize> = BTreeMap::new();
+    // Phase 1: host-associated MACs (preserves the existing pseudonym
+    // numbering for round-trip stability with prior maps).
     for ip in &sorted_ips {
         if let Some(host) = obs.hosts.get(ip) {
             for mac in &host.macs {
@@ -265,6 +314,18 @@ pub fn build_map_at(obs: &Observations, now: DateTime<Utc>) -> ScrubMap {
                 mac_seen.entry(*mac).or_insert(next);
             }
         }
+    }
+    // Phase 2 (F-ADV-P2-008): sweep observer-side MACs that didn't end up
+    // attached to a host. `mac_frame_counts` keys are every MAC the
+    // observer saw, regardless of whether the parser could associate the
+    // MAC with an IP. New entries get pseudonyms appended after the
+    // host-associated ones.
+    for mac in obs.mac_frame_counts.keys() {
+        if *mac == [0u8; 6] {
+            continue;
+        }
+        let next = mac_seen.len() + 1;
+        mac_seen.entry(*mac).or_insert(next);
     }
     let mut macs: BTreeMap<String, String> = BTreeMap::new();
     for (mac, idx) in &mac_seen {
@@ -289,6 +350,26 @@ pub fn build_map_at(obs: &Observations, now: DateTime<Utc>) -> ScrubMap {
         names.insert(pseudo, name.clone());
     }
 
+    // F-ADV-P3-002: invariant — every IP that appears in `obs.flows` (used
+    // by the rendered top-flows table) must be in the scrub map. The
+    // `top_flows_emit_pseudonyms_only` test in tests/snapshot.rs covers
+    // the happy path; this debug-assert catches a regression where a
+    // future refactor populates `obs.flows` with IPs not in `obs.hosts`.
+    // Run only in debug builds — production builds rely on the
+    // leak-detector kill switch as the fail-closed backstop.
+    debug_assert!(
+        obs.flows.values().all(|flow| {
+            ips.values().any(|real| real == &flow.key.src.to_string())
+                && ips.values().any(|real| real == &flow.key.dst.to_string())
+        }),
+        "F-ADV-P3-002: a flow's src or dst IP is not in the scrub map. \
+         This means scrub_text would render the IP unscrubbed in the \
+         top-flows table. Either the observer populated flows with an \
+         IP that wasn't observed as a host, or build_map missed an IP. \
+         The fail-closed leak detector should catch this at write time, \
+         but it's a bug worth surfacing in debug builds."
+    );
+
     ScrubMap {
         version: 1,
         created_at: now,
@@ -298,26 +379,72 @@ pub fn build_map_at(obs: &Observations, now: DateTime<Utc>) -> ScrubMap {
     }
 }
 
-/// Replace every real IP/MAC in `text` with its pseudonym.
+/// Replace every real IP/MAC/hostname in `text` with its pseudonym.
+///
+/// Single-pass replacement using a regex alternation, ordered by descending
+/// length. The regex crate's leftmost-first matching means at each position
+/// the longest matching real value is chosen, and the cursor advances past
+/// the entire match (not past a single character). This avoids the
+/// substring-shadowing bug from the sequential-replace implementation.
+///
+/// **F-ADV-P3-004:** the previous sequential `String::replace` loop was
+/// vulnerable to shadowing when a real value was a prefix substring of a
+/// pseudonym. E.g. map `{"host_001" → "10.0.0.1", "name_001" → "host"}`:
+/// sequential replace of `10.0.0.1` produced `host_001`, then sequential
+/// replace of `host` (a real value) corrupted the just-inserted pseudonym
+/// to `name_001_001`. Single-pass replacement avoids this because the
+/// regex alternation matches one real at each position, and the cursor
+/// advances past the entire matched span.
 ///
 /// Safe by construction: only values present in the map (i.e., things we
-/// actually observed during parse) are eligible for replacement, so an
-/// IP-shaped substring inside an unrelated identifier won't get rewritten
-/// by accident.
+/// actually observed during parse, or carried in via `--baseline-map`) are
+/// eligible for replacement.
 pub fn scrub_text(text: &str, map: &ScrubMap) -> String {
     let forward = map.forward();
-    // Sort by descending length so longer values are replaced before
-    // shorter ones (e.g., `192.168.1.10` before `192.168.1.1`).
+    if forward.is_empty() {
+        return text.to_string();
+    }
+    // Sort by descending length so the regex alternation tries longer
+    // values first. Combined with regex-crate's leftmost-first matching,
+    // this gives us longest-match-at-each-position semantics — the same
+    // outcome the sequential-replace tried to achieve via length sort,
+    // but in a single pass that's robust to substring shadowing.
     let mut entries: Vec<(&String, &String)> = forward.iter().collect();
     entries.sort_by_key(|e| std::cmp::Reverse(e.0.len()));
 
-    let mut out = text.to_string();
-    for (real, pseudo) in entries {
-        if out.contains(real.as_str()) {
-            out = out.replace(real.as_str(), pseudo);
+    let pattern = entries
+        .iter()
+        .map(|(real, _)| regex::escape(real))
+        .collect::<Vec<_>>()
+        .join("|");
+    let re = match regex::Regex::new(&pattern) {
+        Ok(re) => re,
+        Err(_) => {
+            // Pattern construction can in theory fail (e.g. if `forward()`
+            // ever produces a real value that escapes to invalid regex —
+            // not possible today since `regex::escape` is total). Fall
+            // back to the conservative sequential implementation rather
+            // than silently leaving the text unscrubbed.
+            let mut out = text.to_string();
+            for (real, pseudo) in &entries {
+                if out.contains(real.as_str()) {
+                    out = out.replace(real.as_str(), pseudo);
+                }
+            }
+            return out;
         }
-    }
-    out
+    };
+
+    re.replace_all(text, |caps: &regex::Captures| {
+        // Look up the pseudonym for the matched real value. This must
+        // succeed because the regex is built from forward.keys().
+        let matched = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+        forward
+            .get(matched)
+            .cloned()
+            .unwrap_or_else(|| matched.to_string())
+    })
+    .into_owned()
 }
 
 /// Replace pseudonyms in `text` with their real values.
@@ -360,6 +487,15 @@ fn pseudonym_regex() -> Regex {
     // The earlier `[0-9a-f]+` was overly permissive and could spuriously
     // match real values that happened to look pseudonym-shaped (e.g. a
     // legitimate hostname `host_abc01`). F-W1-002 (wave-1 adversarial review).
+    //
+    // F-ADV-P4-012: trailing `\b` retained for safety. The Rust `regex`
+    // crate doesn't support lookahead, so we can't express "end at word
+    // boundary OR start of next pseudonym". The pathological case
+    // `host_001host_002` (zero-separator concatenation) only resolves the
+    // first pseudonym; the trailing `host_002` remains as text. Documented
+    // in `tests/s_6_02_diff_subcommand.rs::test_f_adv_p4_012_*`. AIs in
+    // practice emit separated tokens (space/comma/newline), all of which
+    // do produce word boundaries and resolve correctly.
     Regex::new(r"\b(?:host|mac|name)_[0-9]+\b").expect("valid regex")
 }
 
@@ -861,7 +997,7 @@ mod tests {
         let obs = fixture(); // 10.10.0.5 (mac AA:BB:CC:DD:EE:01) and 10.10.0.20
 
         let baseline = empty_scrub_map();
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
         let fresh = build_map(&obs);
 
         // Same IP entries (pseudonym → real).
@@ -897,7 +1033,7 @@ mod tests {
         // 10.0.0.2 is NOT in current — EC-003 scenario.
         let obs = obs_with_ips(&["10.0.0.1", "10.0.0.99"]);
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // Baseline pseudonym for 10.0.0.1 must be preserved.
         assert_eq!(
@@ -959,7 +1095,7 @@ mod tests {
         // Three brand-new IPs not in baseline.
         let obs = obs_with_ips(&["10.2.0.1", "10.2.0.2", "10.2.0.3"]);
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // Collect pseudonym suffixes for the three new IPs.
         let mut new_suffixes: Vec<u32> = ["10.2.0.1", "10.2.0.2", "10.2.0.3"]
@@ -995,7 +1131,7 @@ mod tests {
 
         // Step 2: merge b1 with obs containing IP_A and IP_B.
         let obs_step2 = obs_with_ips(&["10.0.0.1", "10.0.0.2"]);
-        let b2 = merge_map(b1, &obs_step2);
+        let b2 = merge_map(b1, &obs_step2).expect("merge_map should succeed on test fixture");
 
         // After step 2: host_001 → 10.0.0.1 preserved; 10.0.0.2 gets host_002.
         assert_eq!(b2.ips.get("host_001").map(String::as_str), Some("10.0.0.1"));
@@ -1009,7 +1145,7 @@ mod tests {
 
         // Step 3: merge b2 with obs containing IP_B and IP_C.
         let obs_step3 = obs_with_ips(&["10.0.0.2", "10.0.0.3"]);
-        let b3 = merge_map(b2, &obs_step3);
+        let b3 = merge_map(b2, &obs_step3).expect("merge_map should succeed on test fixture");
 
         // All three identities must be stable and non-colliding.
         assert_eq!(b3.ips.get("host_001").map(String::as_str), Some("10.0.0.1"));
@@ -1054,7 +1190,7 @@ mod tests {
         obs.hosts.get_mut(&new_ip).unwrap().macs = vec![[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x99]];
         obs.hostnames.insert(new_ip, "HMI-WEST".to_string());
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // New IP must get host_006.
         assert_eq!(
@@ -1089,7 +1225,7 @@ mod tests {
         );
         let obs = obs_with_ips(&["10.0.0.1", "10.0.0.99"]);
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // Build a text that contains both the baseline real IP and the new one.
         let text = "Baseline host 10.0.0.1 communicated with new host 10.0.0.99 on port 502.";
@@ -1181,7 +1317,7 @@ mod tests {
         );
         let obs = obs_with_ips(&["10.0.0.1", "10.0.0.99"]);
 
-        let merged = merge_map(baseline, &obs);
+        let merged = merge_map(baseline, &obs).expect("merge_map should succeed on test fixture");
 
         // Text that references both a baseline IP and the new IP.
         let text = "PLC-NORTH at 10.0.0.1 (AA:BB:CC:DD:EE:01) reached 10.0.0.99.";
