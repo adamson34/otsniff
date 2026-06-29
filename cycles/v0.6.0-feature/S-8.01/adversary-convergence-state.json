@@ -6,6 +6,17 @@
   "last_classification": "SUBSTANTIVE",
   "passes": [
     {
+      "pass": 2,
+      "classification": "SUBSTANTIVE",
+      "part_a_pass1_findings_verified_resolved": ["F-001", "F-002", "F-003", "F-004", "F-006"],
+      "findings": {
+        "blocking": 0,
+        "substantive": ["F-101 sanitization runs after normalization; reorder to sanitize-first so control bytes adjacent to suffix/padding can't defeat .local/dot/space stripping"],
+        "nitpick": []
+      },
+      "resolution": "implementer dispatched to reorder sanitize-before-normalize in all three parsers + 3 regression tests"
+    },
+    {
       "pass": 1,
       "classification": "SUBSTANTIVE",
       "findings": {
