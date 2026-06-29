@@ -1,0 +1,20 @@
+{
+  "story_id": "S-8.01",
+  "cycle": "v0.6.0-feature",
+  "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
+  "clean_streak": 0,
+  "last_classification": "SUBSTANTIVE",
+  "passes": [
+    {
+      "pass": 1,
+      "classification": "SUBSTANTIVE",
+      "findings": {
+        "blocking": 0,
+        "substantive": ["F-001 hostname printable-ASCII sanitization missing (vs DHCP precedent)", "F-002 mDNS cache-flush bit masking untested", "F-003 DNS question-section skip path untested"],
+        "nitpick": ["F-004 misleading timestamp test comments + BC wording", "F-005 BC-1.02.011 OPCODE description loose", "F-006 .local strip case-sensitive"]
+      },
+      "resolution": "implementer dispatched to fix F-001/002/003/006 + test-comment F-004 in worktree; BC-INDEX wording (F-004/F-005) fixed on factory-artifacts; .local case-insensitivity (F-006) folded in",
+      "verified_clean": ["panic-safety", "compression-pointer rejection", "privacy path -> name_NNN", "determinism (BTreeMap)"]
+    }
+  ]
+}
