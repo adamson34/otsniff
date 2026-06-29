@@ -366,6 +366,29 @@ mod tests {
         let _ = parse(&[0xFFu8; 1500]);
     }
 
+    // ── F-006: case-insensitive .local strip ─────────────────────────────────
+
+    /// F-006 / BC-1.02.010: `.local` suffix stripping must be case-insensitive.
+    ///
+    /// A name "FOO.LOCAL" must be normalized to "FOO", not returned verbatim.
+    #[test]
+    fn test_f006_case_insensitive_local_strip() {
+        // Build dns_name with uppercase "LOCAL" label.
+        let name = dns_name(&[b"FOO", b"LOCAL"]);
+        let ans = a_record(&name, [10, 0, 0, 30]);
+        let msg = build_mdns(&[ans]);
+        let results = parse(&msg);
+        assert_eq!(
+            results.len(),
+            1,
+            "F-006: 'FOO.LOCAL' must yield one record after case-insensitive .local strip"
+        );
+        assert_eq!(
+            results[0].name, "FOO",
+            "F-006: '.LOCAL' suffix must be stripped case-insensitively; expected 'FOO'"
+        );
+    }
+
     // ── F-001: hostname sanitization (printable ASCII filter) ─────────────────
 
     /// F-001 / BC-1.02.010: a label containing an embedded NUL byte (0x00)
