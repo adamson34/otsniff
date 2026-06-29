@@ -2,9 +2,19 @@
   "story_id": "S-8.01",
   "cycle": "v0.6.0-feature",
   "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
-  "clean_streak": 2,
-  "last_classification": "NITPICK_ONLY (pass 5 reported SUBSTANTIVE; F-201 overturned by orchestrator verification)",
+  "clean_streak": 3,
+  "converged": true,
+  "converged_at_pass": 6,
+  "last_classification": "NITPICK_ONLY",
+  "convergence_rationale": "Passes 3 & 4 NITPICK_ONLY; pass 5 reported SUBSTANTIVE but its sole substantive finding (F-201) was a verified false positive (observer tests demonstrably exist) and its real residual (F-202 whitespace + coverage) was fixed; pass 6 NITPICK_ONLY with deep grounded re-verification after the last code change. No BLOCKING/SUBSTANTIVE defects remain.",
+  "accepted_cosmetic_nitpicks": ["OBS-1 story summary-table wording paraphrase vs BC-INDEX (anchors correct)", "OBS-2 'foo ' trailing interior space retained — spec-compliant per BC-1.02.010/012, not a defect"],
   "passes": [
+    {
+      "pass": 6,
+      "classification": "NITPICK_ONLY",
+      "findings": {"blocking": 0, "substantive": [], "nitpick": ["OBS-1 cosmetic wording", "OBS-2 spec-compliant trailing-space note"]},
+      "verification": "Grounded re-derivation: bounds/panic safety, 255-cap termination, compression discard-all, sanitize->normalize, whitespace discard, NetBIOS decode/suffix/opcode, cache-flush mask (and correct LLMNR non-mask), privacy name_NNN, BTreeMap determinism, observer wiring + last-write-wins + 5-step sequence, classify_flow labels, BC<->code anchoring — all confirmed against actual line ranges. F-201 re-checked and re-confirmed false (tests at observe.rs:2033/2052/2070/2090/2111)."
+    },
     {
       "pass": 5,
       "classification_reported": "SUBSTANTIVE",
