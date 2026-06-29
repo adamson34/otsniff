@@ -8,20 +8,40 @@ findings. Binary name: `otsniff`.
 
 **Currently shipped:**
 
-- Modbus/TCP, EtherNet/IP, and S7Comm protocol decoding (function-code level)
-- Six rule-based findings: plaintext credentials (rolled up by kind),
-  internet egress from OT subnets, Modbus engineering commands,
-  EtherNet/IP CIP engineering services, S7Comm engineering commands,
-  unexpected protocols on OT VLANs
-- Asset inventory with role inference + OUI vendor lookup
-- Capture-source heuristic (SPAN / host-side / TAP / ambiguous)
+- Modbus/TCP, EtherNet/IP, S7Comm, and DNP3 protocol decoding
+  (function-code level), plus DHCP / LDAP / RDP recognizers for inventory
+  and credential findings
+- **23 rule-based findings** (full catalog in `docs/RULES.md`): plaintext
+  credentials (rolled up by kind), LDAP simple-bind, RDP-without-NLA,
+  internet egress from OT subnets, ICS engineering commands
+  (Modbus / EtherNet-IP CIP / S7Comm / DNP3), SMBv1, stale TLS, weak TLS
+  ciphers, NTLMv1, DNS/NTP to non-OT destinations, port-scan + Modbus
+  unit-ID-sweep recon, unexpected protocols on OT VLANs, and three
+  policy-gated `zonewarden.*` segmentation verdicts
+- **Zonewarden segmentation conformance** (ADR-0013) — declarative
+  IEC 62443 zone/conduit policy checking with the Purdue-3.5 IDMZ
+  no-bypass control. Pure, Kani-verified engine in `crates/zonewarden`;
+  surfaced via `analyze --policy`, `zonewarden suggest` (policy drafting),
+  and `diff --policy` (segmentation drift, P1-13)
+- **AI-augmented findings** — a second LLM pass over the rules + inventory
+  surfaces patterns the deterministic rules miss, with per-item confidence
+  + reasoning, in a separate report section
+- **Cross-capture diff** (`diff` subcommand) — host / finding / role /
+  comms-matrix deltas between two captures via merged scrub maps
+- Asset inventory with role inference, DHCP hostname extraction, and
+  OUI vendor lookup
+- Capture-source heuristic (SPAN / host-side / TAP / ambiguous) +
+  explicit `--source-type`
 - Logical flow grouping (drops ephemeral src_port; tracks unique
   connections per logical flow)
-- Scrub/unscrub for AI-assisted triage (ADR-0006) — every IP and MAC
-  replaced with stable pseudonyms before any AI sees the report
-- `analyze` subcommand (ADR-0007) — closes the scrub → AI → unscrub
-  loop via the user's local `claude` CLI. A fail-closed leak detector
-  enforces the privacy invariant even if the scrub layer has a bug.
+- Investigation playbooks + a rule catalog (`rules` subcommand)
+- Scrub/unscrub for AI-assisted triage (ADR-0006) — every IP, MAC, and
+  DHCP hostname replaced with stable pseudonyms before any AI sees the
+  report
+- `analyze --ai` (ADR-0007) — closes the scrub → AI → unscrub loop via
+  the user's local `claude` CLI. A fail-closed leak detector enforces the
+  privacy invariant even if the scrub layer has a bug; a per-run privacy
+  audit log writes alongside the report
 
 See `docs/ROADMAP.md` for the prioritized backlog of what's next.
 
@@ -32,53 +52,75 @@ list with rationale per item.
 
 ## Architecture
 
+otsniff is a two-member Cargo workspace: the `otsniff` binary crate at the
+root and the pure, Kani-verified `zonewarden` engine under `crates/`
+(ADR-0013 keeps it a crate boundary so its no-I/O guarantee and proofs stay
+isolated).
+
 ```
 src/
 ├── main.rs            # Entry, maps OtError → exit code via ExitCode
 ├── lib.rs             # Crate root (re-exports for integration tests)
-├── cli.rs             # clap subcommands: report / scrub / unscrub
+├── cli.rs             # clap subcommands: analyze / scrub / unscrub / rules / diff / zonewarden
 ├── error.rs           # OtError enum + sysexits-style exit codes
 ├── pcap.rs            # PCAP/PCAPNG iterator (pcap-parser + etherparse)
-├── parse/
-│   ├── modbus.rs      # MBAP-framed Modbus PDU recognizer (function-code level)
-│   └── enip.rs        # EtherNet/IP encapsulation header + CIP service heuristic
+├── parse/             # Minimal protocol recognizers (function-code level):
+│                      #   modbus, enip, s7comm, dnp3, dhcp, ldap, rdp
 ├── observe.rs         # Single-pass observer — accumulates hosts, flows, events
 ├── inventory.rs       # Derives Asset records with role inference
-├── findings/
-│   ├── plaintext_creds.rs
-│   ├── internet_egress.rs
-│   ├── engineering_commands.rs
-│   └── unexpected_protocols.rs
+├── capture_source.rs  # SPAN / host-side / TAP / ambiguous heuristic + guard
+├── findings/          # One free fn per detector → Vec<Finding>. mod.rs wires
+│                      #   run_all() + run_with_conformance(). Includes the
+│                      #   ICS/creds/compat/boundary/recon rules, zonewarden.rs
+│                      #   (policy verdicts), and augmented.rs (second AI pass)
+├── segmentation/      # Bridge to crates/zonewarden: policy loader, Observation→
+│                      #   Flow bridge, engine runner, `suggest` policy drafter
+├── diff.rs            # Cross-capture delta (P1-3) + segmentation drift (P1-13)
+├── rule_catalog.rs    # Backing data for `otsniff rules` / docs/RULES.md
 ├── oui.rs             # Embedded OT-vendor OUI lookup
-├── report.rs          # askama HTML rendering (templates/report.html)
+├── report.rs          # askama HTML rendering (templates/report.html, diff.html)
 ├── report_md.rs       # Markdown rendering (LLM-friendly text)
 ├── scrub.rs           # Pseudonym minting + scrub/unscrub round-trip
+├── audit.rs           # Privacy chain-of-custody audit log (ADR-0012)
+├── progress.rs        # Verbose-mode progress reporting
+├── kani_proofs.rs     # Privacy-invariant proof harnesses (CBMC-friendly models)
 └── ai/
     ├── mod.rs              # AiProvider trait
-    ├── claude_cli.rs       # Provider that shells out to `claude -p ...`
+    ├── claude_cli.rs       # Provider that shells out to `claude -p ...` (tool-sandboxed)
     ├── leak_detector.rs    # Fail-closed kill switch — enforces privacy
+    ├── html_render.rs      # render_safe — strips raw HTML from the AI response
     └── prompts.rs          # Committed system prompt + default task
+
+crates/
+└── zonewarden/        # Pure segmentation engine (resolver, classifier, idmz,
+                       #   multicast, aggregator, digest, validator) + 7 Kani proofs
 
 tests/
 ├── cli_smoke.rs       # End-to-end binary tests (assert_cmd + predicates)
-├── snapshot.rs        # insta snapshots of HTML + JSON output
+├── snapshot.rs        # insta snapshots of HTML + JSON output + privacy invariants
+├── s_*.rs             # Per-story tests (diff, fuzz, mutation, composed Kani proof)
+├── prompt_evals.rs    # Structural rubrics for the AI flow
 └── fixtures/          # Real PCAPs (gitignored — see fixtures/README.md)
 
-docs/adr/              # Architecture Decision Records, numbered
+docs/adr/              # Architecture Decision Records, numbered (0001–0013)
 ```
 
 The data flow is: PCAP → `Packet` stream → `Observer` accumulator →
-`Observations` → (`build_inventory` + `run_all_findings`) → `render_html`.
+`Observations` → (`inventory::build` + `findings::run_all`, or
+`run_with_conformance` when a `--policy` is supplied) → `render_html`.
+With `--policy`, observed flows are bridged into the `zonewarden` engine
+(`segmentation::run_conformance_path`) and its verdicts join the findings
+and the report's conformance section.
 
 ## Build & Test
 
 ```bash
 cargo build                        # debug build
 cargo build --release              # optimized (LTO, strip, single codegen unit)
-cargo test                         # all tests
+cargo test --workspace             # all tests (both crates)
 cargo test --lib                   # unit tests only
 cargo test --test '*'              # integration tests only
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --workspace -- -D warnings
 cargo fmt --all -- --check
 cargo deny check                   # license + advisory audit (CI-only by default)
 
@@ -86,6 +128,11 @@ cargo deny check                   # license + advisory audit (CI-only by defaul
 cargo insta review                 # requires `cargo install cargo-insta`
 INSTA_UPDATE=always cargo test     # accept all on first creation
 ```
+
+Formal verification + fuzzing run in CI (`kani.yml`, `fuzz.yml`,
+`mutants.yml`): 7 Zonewarden segmentation proofs + the privacy-invariant
+proofs (Kani), parser fuzz harnesses under `fuzz/`, and an 80%-kill
+`cargo-mutants` gate.
 
 ## Conventions
 
@@ -102,7 +149,9 @@ INSTA_UPDATE=always cargo test     # accept all on first creation
 ## Subcommands
 
 ```
-otsniff analyze <PCAP> -o report.html [--ai] [--audit-log X] [--md X] [--json X] [--map X] [--ot-subnet ...] [--source-type ...] [--model M]
+otsniff analyze <PCAP> -o report.html [--ai] [--policy zones.yaml] [--audit-log X] [--md X] [--json X] [--map X] [--ot-subnet ...] [--source-type ...] [--model M]
+otsniff diff <BASELINE> <CURRENT> --baseline-map A.json --current-map B.json -o diff.html [--policy zones.yaml] [--flow-shift-multiplier N] [--ot-subnet ...]
+otsniff zonewarden suggest <PCAP> [--ot-subnet ...]      # draft a policy from the inventory
 otsniff scrub   <PCAP> -o report.md --map map.json [--ot-subnet ...] [--source-type ...]
 otsniff unscrub --map map.json [INPUT_FILE] [-o OUTPUT] [--strict]
 otsniff rules   [--format md|json]
@@ -114,6 +163,17 @@ it additionally runs scrub → leak-check → invoke local `claude` CLI →
 unscrub → embed Claude's response as an "AI analysis" section in the
 rendered HTML. When `--ai` is set, the privacy audit log is written
 automatically alongside the report (default path: `report.audit.json`).
+With `--policy` it runs Zonewarden conformance and adds a segmentation
+section + `zonewarden.*` findings (and deduplicates `egress.ot_to_internet`
+against the policy).
+
+`diff` compares two captures by pseudonym (via merged scrub maps). With
+`--policy` it adds a "Segmentation drift" section — conformance-tally
+deltas + per-violation new/resolved/persisting (P1-13).
+
+`zonewarden suggest` drafts a starter `zones.yaml` from the asset
+inventory (the only `zonewarden` subcommand; the conformance run itself
+is `analyze --policy`).
 
 `scrub` / `unscrub` are advanced subcommands for users who want to
 drive their own AI (Claude.ai web UI, ChatGPT, local Ollama, etc.) —
@@ -144,6 +204,12 @@ See `docs/adr/` for rationale:
 - **ADR-0005** — Embedded OT-vendor OUI table (full IEEE registry is overkill for the current scope)
 - **ADR-0006** — Scrub/unscrub for AI-assisted triage (no embedded AI client; pseudonym round-trip via local map file)
 - **ADR-0007** — AI via the Claude Code CLI (shell-out, no HTTP/SDK, fail-closed leak detector enforces privacy)
+- **ADR-0008** — Sync throughout, no async runtime (single-shot CLI doesn't need one)
+- **ADR-0009** — Drop ephemeral src_port from the flow key (logical-flow grouping)
+- **ADR-0010** — Roll up plaintext-cred findings by kind
+- **ADR-0011** — pulldown-cmark with a raw-HTML event filter for the AI markdown
+- **ADR-0012** — Audit log auto-derives its path from `-o`
+- **ADR-0013** — Fold Zonewarden in as a segmentation module (pure engine as a workspace sub-crate)
 
 When adding a non-trivial feature or making an architectural decision, add a new ADR.
 
@@ -151,7 +217,10 @@ When adding a non-trivial feature or making an architectural decision, add a new
 
 Use the `/release` slash command (defined in `.claude/commands/release.md`).
 Two flows: **dev release** from `develop` (pre-release, optimistic next minor)
-and **stable release** through a `release/vX.Y.Z` branch into `main`.
+and **stable release** through a `release/vX.Y.Z` branch into `main`. A stable
+release **must** finish with the back-merge of `main` → `develop` (Stage 4 in
+the playbook); skipping it diverges the branches and makes the next release PR
+conflict.
 
 ## Testing against real captures
 
