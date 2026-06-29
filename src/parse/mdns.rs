@@ -366,6 +366,44 @@ mod tests {
         let _ = parse(&[0xFFu8; 1500]);
     }
 
+    // ── F-002: mDNS cache-flush bit (RRCLASS & 0x7FFF) ───────────────────────
+
+    /// F-002 / BC-1.02.010 / mdns.rs:62: the cache-flush bit (bit 15 of the
+    /// class field) must be masked off before comparing to IN (0x0001).
+    ///
+    /// A real mDNS A record announcing on the local network uses RRCLASS=0x8001
+    /// (cache-flush bit set + class IN).  Without the `& 0x7FFF` mask the class
+    /// comparison fails and the record is silently dropped.
+    ///
+    /// This test adds no code — it guards the existing mask against regression.
+    #[test]
+    fn test_f002_cache_flush_bit_masked_off() {
+        // Build a fixture whose RRCLASS bytes are 0x80, 0x01 (cache-flush set).
+        let name = dns_name(&[b"PLCSOUTH", b"local"]);
+        let mut ans = name.clone();
+        ans.extend_from_slice(&[0x00, 0x01]); // RRTYPE = A
+        ans.extend_from_slice(&[0x80, 0x01]); // RRCLASS = 0x8001 (cache-flush + IN)
+        ans.extend_from_slice(&[0x00, 0x00, 0x00, 0x78]); // TTL = 120 s
+        ans.extend_from_slice(&[0x00, 0x04]); // RDLENGTH = 4
+        ans.extend_from_slice(&[10, 0, 0, 7]); // RDATA
+        let msg = build_mdns(&[ans]);
+        let results = parse(&msg);
+        assert_eq!(
+            results.len(),
+            1,
+            "F-002: RRCLASS=0x8001 (cache-flush bit set) must still be treated as IN; record must be extracted"
+        );
+        assert_eq!(
+            results[0].name, "PLCSOUTH",
+            "F-002: owner name must be extracted when cache-flush bit is present"
+        );
+        assert_eq!(
+            results[0].ip,
+            std::net::Ipv4Addr::new(10, 0, 0, 7),
+            "F-002: RDATA IPv4 must match the record RDATA"
+        );
+    }
+
     // ── F-006: case-insensitive .local strip ─────────────────────────────────
 
     /// F-006 / BC-1.02.010: `.local` suffix stripping must be case-insensitive.
