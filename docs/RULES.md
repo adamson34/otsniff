@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**20 rules.**
+**23 rules.**
 
 ## Index
 
@@ -30,6 +30,9 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`boundary.ntp_external`](#boundaryntp_external) | medium | OT host syncing time to public NTP |
 | [`recon.port_scan`](#reconport_scan) | medium | Port scan — source host probing many destinations or ports |
 | [`ot.unexpected_protocols`](#otunexpected_protocols) | medium | Non-OT protocols observed touching OT subnets |
+| [`zonewarden.idmz_bypass`](#zonewardenidmz_bypass) | critical | IDMZ bypass — direct OT↔IT flow |
+| [`zonewarden.wrong_direction`](#zonewardenwrong_direction) | high | Conduit used in the wrong direction |
+| [`zonewarden.deny_by_default`](#zonewardendeny_by_default) | high | Cross-zone flow not permitted by any conduit |
 
 ## `creds.ftp`
 
@@ -316,4 +319,44 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **MITRE ATT&CK for ICS** — T0883 — Internet Accessible Device ([link](https://attack.mitre.org/techniques/T0883/))
 - **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Network segmentation
+
+## `zonewarden.idmz_bypass`
+
+**IDMZ bypass — direct OT↔IT flow**
+
+- **Severity:** critical
+- **Data source:** `segmentation_policy`, `flows`
+
+**Trigger.** Fires when the segmentation policy resolves a flow's endpoints to an OT zone (Purdue ≤ L3) and an IT zone (≥ L4) with no IDMZ (L3.5) hop between them — the headline IEC 62443 Restricted Data Flow control. Requires a `--policy`. Rolled up to one finding; the count and top offenders are in the evidence.
+
+**References:**
+
+- **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Network segmentation
+- **Spec** — ISA/IEC 62443-3-2 — Zones & conduits (Purdue L3.5 IDMZ)
+
+## `zonewarden.wrong_direction`
+
+**Conduit used in the wrong direction**
+
+- **Severity:** high
+- **Data source:** `segmentation_policy`, `flows`
+
+**Trigger.** Fires when a flow matches a Forward conduit's protocol and responder port but in the reverse zone orientation — traffic flowing opposite to the declared, permitted direction. Requires a `--policy`. Rolled up to one finding.
+
+**References:**
+
+- **Spec** — ISA/IEC 62443-3-2 — Conduit directionality
+
+## `zonewarden.deny_by_default`
+
+**Cross-zone flow not permitted by any conduit**
+
+- **Severity:** high
+- **Data source:** `segmentation_policy`, `flows`
+
+**Trigger.** Fires when a cross-zone flow is permitted by no conduit in the policy (deny-by-default). Requires a `--policy`. Rolled up to one finding; the Established (actually-connected) subset is called out separately from refused/no-response attempts.
+
+**References:**
+
+- **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Restricted data flow (deny-by-default)
 
