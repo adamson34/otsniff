@@ -2,9 +2,21 @@
   "story_id": "S-8.01",
   "cycle": "v0.6.0-feature",
   "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
-  "clean_streak": 1,
+  "clean_streak": 2,
   "last_classification": "NITPICK_ONLY",
   "passes": [
+    {
+      "pass": 4,
+      "classification": "NITPICK_ONLY",
+      "part_a_prior_findings_verified_resolved": ["F-001", "F-002", "F-003", "F-004", "F-006", "F-101", "NITPICK-1"],
+      "findings": {
+        "blocking": 0,
+        "substantive": [],
+        "nitpick": ["N-1 BC-1.02.010 text under-documents cache-flush mask (fixed in BC-INDEX)", "N-2 deferred/architectural: total compression-pointer rejection limits real-world mDNS coverage (spec-conformant; -> tech-debt TD-S801-001)"]
+      },
+      "resolution": "N-1 BC-INDEX text corrected; N-2 + residual metachar surface (TD-S801-002, extends F-ADV-P5-008) recorded in tech-debt-register; no code change (worktree delta unchanged -> streak preserved). Adversary self-assessed: 'story implementation has converged', novelty LOW.",
+      "verified_clean": ["all prior findings", "panic-safety", "compression-pointer rejection + discard-all lock", "privacy -> name_NNN", "determinism", "semantic anchoring BC<->code", "char-boundary safety"]
+    },
     {
       "pass": 3,
       "classification": "NITPICK_ONLY",
