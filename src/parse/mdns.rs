@@ -366,6 +366,60 @@ mod tests {
         let _ = parse(&[0xFFu8; 1500]);
     }
 
+    // ── F-003: question-section skip path ────────────────────────────────────
+
+    /// Build a 12-byte mDNS header with explicit QDCOUNT and ANCOUNT.
+    fn dns_header_qd(qdcount: u16, ancount: u16) -> Vec<u8> {
+        vec![
+            0x00, 0x00, // TxID
+            0x84, 0x00, // Flags: QR=1, AA=1
+            (qdcount >> 8) as u8, (qdcount & 0xFF) as u8, // QDCOUNT
+            (ancount >> 8) as u8, (ancount & 0xFF) as u8, // ANCOUNT
+            0x00, 0x00, // NSCOUNT = 0
+            0x00, 0x00, // ARCOUNT = 0
+        ]
+    }
+
+    /// Build a DNS question record wire encoding (QNAME + QTYPE + QCLASS).
+    fn question_record(name: &[u8]) -> Vec<u8> {
+        let mut out = name.to_vec();
+        out.extend_from_slice(&[0x00, 0x01]); // QTYPE = A
+        out.extend_from_slice(&[0x00, 0x01]); // QCLASS = IN
+        out
+    }
+
+    /// F-003 / BC-1.02.010: when QDCOUNT=1, the question record (QNAME +
+    /// QTYPE + QCLASS) must be skipped before parsing the answer section.
+    ///
+    /// The question-skip loop (skip_name + 4 bytes) in mdns.rs was untested
+    /// because all existing fixtures use QDCOUNT=0.  Real mDNS query/response
+    /// messages may echo a question section.
+    #[test]
+    fn test_f003_question_section_skipped_qdcount_1() {
+        let q_name = dns_name(&[b"HMI-LINE-3", b"local"]);
+        let a_name = dns_name(&[b"HMI-LINE-3", b"local"]);
+        let question = question_record(&q_name);
+        let answer = a_record(&a_name, [10, 0, 0, 5]);
+        let mut msg = dns_header_qd(1, 1);
+        msg.extend_from_slice(&question);
+        msg.extend_from_slice(&answer);
+        let results = parse(&msg);
+        assert_eq!(
+            results.len(),
+            1,
+            "F-003 mDNS: QDCOUNT=1 — question section must be skipped; A record must still be extracted"
+        );
+        assert_eq!(
+            results[0].name, "HMI-LINE-3",
+            "F-003 mDNS: owner name must be correctly extracted after skipping the question section"
+        );
+        assert_eq!(
+            results[0].ip,
+            std::net::Ipv4Addr::new(10, 0, 0, 5),
+            "F-003 mDNS: RDATA IPv4 must be correct after skipping question section"
+        );
+    }
+
     // ── F-002: mDNS cache-flush bit (RRCLASS & 0x7FFF) ───────────────────────
 
     /// F-002 / BC-1.02.010 / mdns.rs:62: the cache-flush bit (bit 15 of the
