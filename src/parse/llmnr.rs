@@ -349,12 +349,18 @@ mod tests {
     fn llmnr_header_qd(qr_response: bool, qdcount: u16, ancount: u16) -> Vec<u8> {
         let flags_hi = if qr_response { 0x80u8 } else { 0x00u8 };
         vec![
-            0x00, 0x00, // TxID
-            flags_hi, 0x00, // Flags
-            (qdcount >> 8) as u8, (qdcount & 0xFF) as u8, // QDCOUNT
-            (ancount >> 8) as u8, (ancount & 0xFF) as u8, // ANCOUNT
-            0x00, 0x00, // NSCOUNT = 0
-            0x00, 0x00, // ARCOUNT = 0
+            0x00,
+            0x00, // TxID
+            flags_hi,
+            0x00, // Flags
+            (qdcount >> 8) as u8,
+            (qdcount & 0xFF) as u8, // QDCOUNT
+            (ancount >> 8) as u8,
+            (ancount & 0xFF) as u8, // ANCOUNT
+            0x00,
+            0x00, // NSCOUNT = 0
+            0x00,
+            0x00, // ARCOUNT = 0
         ]
     }
 
