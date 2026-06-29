@@ -12,7 +12,7 @@ rust-version.workspace = true
 # error-derive crate (ADR-006). Serialization (serde) is kept OUT of the core —
 # the effectful shell (zonewarden binary) owns wire formats.
 [dependencies]
-thiserror = "1.0"
+thiserror = "2.0"
 ipnet = "2.9"   # IpNet for the longest-prefix index + equal-prefix tie detection (ADR-003)
 # Pure (no-I/O) deps for the policy digest (ADR-004). serde_json builds the
 # canonical JSON (default BTreeMap Map => lexicographically-sorted keys, DI-018);
