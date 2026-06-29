@@ -1,143 +1,107 @@
 ---
-pipeline: PHASE-2-COMPLETE
-phase: phase-2
+pipeline: CYCLE-OPEN
+phase: phase-3
 product: otsniff
 mode: brownfield
-timestamp: 2026-05-12T00:30:00Z
+timestamp: 2026-06-29T00:00:00Z
+current_cycle: v0.6.0-feature
+current_cycle_status: ready-for-delivery
+previous_cycle: v0.4.0-feature
+previous_cycle_status: complete
+v050_backfill_status: complete
+v050_backfill_stories: [S-7.01, S-7.02]
 phase_0_status: complete
 phase_1_status: complete-converged
 phase_2_status: complete-approved
 phase_2_approval: human-approved 2026-05-11
-phase_2_adversarial_passes: 2
-phase_2_adversarial_verdict_pass1: BLOCKING (7B/11S/4N) — fixes applied for 7B + 6S
-phase_2_adversarial_verdict_pass2: BLOCKING (4B/9S/5N) — fixes applied for 4B + 2S
-phase_2_convergence: All 11 BLOCKING resolved across two passes; 8/20 SUBSTANTIVE addressed; remaining 12 SUBSTANTIVE + 9 NITPICK logged in ADV-P1.md + ADV-P2.md for follow-up
-next_phase: phase-3-tdd-implementation (Wave 1 dispatch)
+next_phase: phase-3-tdd-implementation (v0.6.0-feature Wave 1 dispatch)
 ---
 
 # otsniff factory state
 
-Phase 0 + Phase 1 + Phase 2 complete via Option B (abbreviated). Phase 2
-ran inline (Steps A–E) plus one adversarial-review pass. The adversary
-verdict was BLOCKING on Pass 1 with 7 BLOCKING + 11 SUBSTANTIVE + 4
-NITPICK findings; the team applied fixes covering all 7 BLOCKING + 6 of
-11 SUBSTANTIVE. A Pass-2 adversary spawn was deferred at user request.
-The remaining 5 SUBSTANTIVE + 4 NITPICK items are recorded in
-ADV-P1.md and should be addressed before story-writer dispatch.
+All three waves of v0.4.0-feature are delivered and gated. Two v0.5.0
+items shipped outside the VSDD pipeline are backfilled as S-7.01 + S-7.02.
+The factory is now open on cycle v0.6.0-feature, ready for per-story
+phase-3 delivery.
 
-## Artifacts produced
+## Completed cycles
 
-### Phase 0 (brownfield ingest)
-(see prior STATE.md — unchanged)
+### v0.4.0-feature (closed 2026-06-18)
 
-### Phase 1 (spec crystallization)
-(see prior STATE.md — unchanged)
+38 stories, 125 points, 3 waves — all wave gates passed.
+Full delivery log: `STATE.md §Phase 3 delivery log` (below) and
+`cycles/v0.4.0-feature/`.
 
-### Phase 2 (story decomposition)
+| Wave | Stories | Gate passed at | Gate SHA |
+|---|---|---|---|
+| 1 | 32/32 | 2026-05-19T20:30:07Z | dd69ff8 |
+| 2 | 6/6 | 2026-05-26T21:31:54Z | c8c231a |
+| 3 | 2/2 | 2026-06-18T14:39:08Z | cb426fc (S-6.03 merge) |
 
-Located in `.factory/stories/`:
+Sprint-state archived: `cycles/v0.4.0-feature/sprint-state.yaml`
 
-- `epics.md` — 6 epics covering Phase 0 lessons + Phase 1 ASR findings + ROADMAP unshipped items
-- `STORY-INDEX.md` — 31 stories with wave / points / dependencies / subsystems
-- `dependency-graph.md` — story-level deps + acyclicity walk + Serialization Plan
-- `sprint-state.yaml` — initial pending/blocked state for orchestrator
-- `S-1.01..S-6.03` — 31 story files (one per file)
-- `adversarial-reviews/ADV-P1.md` — Pass-1 adversary findings + fix log
+### v0.5.0 backfill (closed 2026-06-29)
 
-Located in `.factory/cycles/v0.4.0-feature/`:
+Two items delivered outside the VSDD pipeline; backfilled for traceability.
+**No red-gate logs, no per-story adversarial passes, no holdout scenarios.**
 
-- `wave-schedule.md` — 3-wave plan with serialization callouts
+| Story | Item | PRs | Evidence |
+|---|---|---|---|
+| S-7.01 | Zonewarden segmentation-conformance (ADR-0013) | #123–#130 | `stories/S-7.01-*.md`, `docs/adr/0013-*.md` |
+| S-7.02 | Segmentation drift — `diff --policy` (P1-13) | #136 | `stories/S-7.02-*.md`, `docs/specs/segmentation-drift.md` |
 
-Located in `.factory/holdout-scenarios/`:
+Both stories are in `stories/sprint-state.yaml` with `semantics: backfill`.
 
-- `HS-INDEX.md` — 9 scenarios (8 must-pass, 1 should-pass)
-- `wave-scenarios/HS-001..HS-009.md` — per-scenario detail files,
-  walled off from implementers/test-writers/adversary
+## Current cycle: v0.6.0-feature
 
-## Gate criteria
+**Status: OPEN — ready for phase-3 per-story delivery.**
 
-| Criterion | Status | Notes |
-|---|---|---|
-| Every BC in PRD traces to at least one story | PASS-with-caveats | Pre-existing 60 BCs are NOT decomposed (brownfield: code IS implementation). 8 net-new BCs introduced by E-2 stories. 15 BC-AUDIT formalized by S-1.05. STORY-INDEX BC-coverage map enumerates the trace |
-| No story contains TBD / TODO / placeholder ACs | PASS | grep clean across 31 stories |
-| Dependency graph has no cycles | PASS | dependency-graph.md walk shows topological sort completes |
-| Wave assignments respect dependency ordering | PASS | sprint-state.yaml `blocked_by` lists honour Wave 1 < Wave 2 < Wave 3 |
-| STORY-INDEX matches individual story files | PASS-with-caveat | Frontmatter `wave:` values now consistent with index after ADV-P1-001 fix. Story-count and point totals reconciled (31 stories, 106 points) |
-| At least one holdout scenario per wave | PASS | Wave 1: 5, Wave 2: 2, Wave 3: 2 |
-| Input-hash drift check | DEFERRED | check-input-drift skill not run in this inline orchestration; deferred to story-writer dispatch |
-| Adversarial review converged | NOT_CONVERGED_BUT_BLOCKING_RESOLVED | 1 pass run; all BLOCKING addressed; 5 SUBSTANTIVE + 4 NITPICK remain in ADV-P1.md |
-| Human approval | PENDING | This file's pipeline state asks for it |
+| File | Purpose |
+|---|---|
+| `stories/sprint-state.yaml` | Live sprint tracking (contains S-7.01/S-7.02 backfills + placeholder for new stories) |
+| `cycles/v0.6.0-feature/wave-schedule.md` | Wave plan placeholder (to be authored at phase-2) |
+| `cycles/current-cycle` | Symlink → `v0.6.0-feature` |
 
-## Outstanding items from Pass-1 adversarial review
+First story to be added: **P0-9** (hostname extraction). Additional roadmap
+items will be scoped during phase-2 wave planning for this cycle.
 
-These were classified SUBSTANTIVE but not fixed inline (the user
-interrupted before Pass 2 could re-validate). They should be addressed
-before story-writer dispatch:
+## Permanent artifacts
 
-- **ADV-P1-009** — S-3.04 lists `scrub_text` fuzz target but the
-  subsystems list was extended to include S.5 (partial fix). Coordination
-  with S-4.01..04 still informal.
-- **ADV-P1-011** — Story bodies lack a `## Behavioral Contracts` table.
-  Frontmatter is single source of truth but bodies don't mirror it.
-- **ADV-P1-013** — S-3.02 `traces_to` / `behavioral_contracts`
-  field-semantics inconsistency.
-- **ADV-P1-017** — `tests/snapshot.rs` hot-file serialization now
-  captured in Serialization Plan, but the per-detector split alternative
-  is not promoted to a story.
-- **ADV-P1-021** — S-1.03 AC-005 IPv6 default direction now pre-declared
-  (option b, IPv4-only) after reading `src/cli.rs:195–204`. Confirmed.
+Located in `.factory/specs/`:
 
-NITPICK-class items (ADV-P1-013, 014, 018, 019, 020, 022) are deferred
-to maintenance sweep.
+- `prd.md` — living PRD (100+ BCs; updated through v0.4.0-feature)
+- `behavioral-contracts/BC-INDEX.md` — 99 BCs after Wave 1 (+14 net-new)
+- `holdout-scenarios/HS-INDEX.md` — 9 scenarios (HS-001..009)
+- `tech-debt-register.md` — open tech debt (F-ADV-P5-002..F-ADV-P5-011 + others)
 
-## Real-world action backlog (independent of whether we continue VSDD)
+## Phase 3 delivery log (v0.4.0-feature — historical)
 
-(carried forward from Phase 1 STATE.md — unchanged)
+| Story | PR | Merge SHA | Merged At |
+|---|---|---|---|
+| S-3.06 macOS CI flake fix | #66 | e425733 | 2026-05-15T17:12:47Z |
+| S-2.02 Cap cred_events dedup | #67 | 19ee8b0 | 2026-05-15T18:41:00Z |
+| S-2.05 `creds.ldap_simple_bind` | #68 | 31e827b | 2026-05-18T20:58:12Z |
+| S-2.06 `compat.ntlmv1` | #69 | 317a575 | 2026-05-18T21:31:15Z |
+| S-2.07 `compat.weak_tls_cipher` | #70 | a866578 | 2026-05-18T23:58:12Z |
+| S-2.08 `creds.rdp_no_nla` | #71 | 387b239 | 2026-05-19T15:02:50Z |
+| S-2.11 `ics.modbus_unit_id_sweep` | #72 | 238466b | 2026-05-19T15:39:57Z |
+| S-5.01 parse progress feedback | #73 | 7556939 | 2026-05-19T16:17:44Z |
+| S-5.02 Claude heartbeat | #74 | 62c937d | 2026-05-19T16:44:25Z |
+| S-5.07 per-finding card collapsibility | #75 | 84b0489 | 2026-05-19T17:42:02Z |
+| S-6.01 scrub map merge | #76 | 896c9e2 | 2026-05-19T18:12:08Z |
+| S-3.05 codecov coverage reporting | #77 | 51a3faf | 2026-05-19T18:32:29Z |
+| S-3.01 Criterion + hyperfine perf | #78 | 0c64832 | 2026-05-19T19:02:15Z |
+| S-3.02 Prompt eval harness | #79 | 18a7b62 | 2026-05-19T19:25:16Z |
+| S-4.01 Kani scrub round-trip | #80 | fde249d | 2026-05-19T19:44:05Z |
+| S-4.02 Kani leak-detector regex | #81 | 827d5b6 | 2026-05-19T20:00:57Z |
+| S-4.03 Kani map-value substring | #82 | 31619ea | 2026-05-19T20:15:02Z |
+| S-3.03 Mutation testing CI | #94 | cfd6058 | 2026-05-22T21:19:44Z |
+| S-3.04 Fuzz harnesses | #95 | b7f7bf4 | 2026-05-22T21:56:58Z |
+| S-4.04 Kani composed invariant | #96 | 5aaaff7 | 2026-05-23T02:53:00Z |
+| S-6.02 diff subcommand core | #97 | 5f9963a | 2026-05-23T03:25:00Z |
+| S-5.03 AI-augmented findings | #114 | 43fe86d | 2026-05-28T20:51:20Z |
+| S-6.03 Diff HTML + markdown renderer | #119 | cb426fc | 2026-06-18T14:39:08Z |
 
-## Next step in the methodology
-
-Human approval gate. After approval:
-
-1. Consider running a second adversarial pass to validate the BLOCKING
-   fixes and surface anything Pass 1 missed (recommended before
-   story-writer dispatch).
-2. `/vsdd-factory:phase-3-tdd-implementation` — begin Wave 1 dispatch.
-   Honour the Serialization Plan in `.factory/stories/dependency-graph.md`
-   for the 4 hot files.
-
-## Phase 3 delivery log
-
-| Story | PR | Merge SHA | Merged At | AC Status |
-|---|---|---|---|---|
-| S-3.06 macOS CI flake fix | #66 | e425733 | 2026-05-15T17:12:47Z | AC-001/003 PASS; AC-002 1/5 (deferred) |
-| S-2.02 Cap cred_events dedup (BC-1.03.007) | #67 | 19ee8b0 | 2026-05-15T18:41:00Z | 170/170 tests pass; 3 NITPICKs deferred (cosmetic) |
-| S-2.05 `creds.ldap_simple_bind` (BC-1.03.005 + BC-3.01.005) | #68 | 31e827b | 2026-05-18T20:58:12Z | 5 NITPICKs logged (non-blocking); BCs registered at 03226af |
-| S-2.06 `compat.ntlmv1` (BC-1.03.006 + BC-3.04.004) | #69 | 317a575 | 2026-05-18T21:31:15Z | APPROVE cycle 1, NITPICK_ONLY; F-002/F-003/F-005 deferred; BCs registered at 0c5bcd6; red-gate at df40937 |
-| S-2.07 `compat.weak_tls_cipher` (BC-1.04.003 + BC-3.04.005) | #70 | a866578 | 2026-05-18T23:58:12Z | APPROVE cycle 1, 1 NITPICK (trigger text wording, non-blocking); BCs registered at 4a0150c; red-gate at 8b19f57 |
-| S-2.08 `creds.rdp_no_nla` (BC-1.04.004 + BC-3.04.006) | #71 | 387b239 | 2026-05-19T15:02:50Z | APPROVE cycle 1, 2 COSMETIC (stale doc comments rdp_legacy.rs:4,:62 ref AC-002 bit-test, non-blocking); BCs registered at ad7a5a2; red-gate at 48f81e8 |
-| S-2.11 `ics.modbus_unit_id_sweep` (BC-1.02.009 + BC-3.03.006) | #72 | 238466b | 2026-05-19T15:39:57Z | APPROVE cycle 1, 1 NITPICK (stale internal doc comment on ModbusFlowSummary, non-blocking); BCs registered at 54d547d + ordering-fix c650b15; red-gate at 9f3edaa. BC renumbered BC-1.02.006→BC-1.02.009 (collision with DHCP option walk). **Wave 1 complete — 32/32 stories done. Next: `/wave-gate wave-1`.** |
-| S-5.01 parse-loop progress feedback (BC-9.04.001) | #73 | 7556939 | 2026-05-19T16:17:44Z | APPROVE cycle 1, 2 NITPICKs deferred (stale `#[allow(unused_imports)]` in src/pcap.rs; doc-comment nit on analyze() type-parameter genericity); BC registered at 053edef; red-gate at 2dbb7d5 |
-| S-5.02 Claude invocation heartbeat (BC-6.04.001) | #74 | 62c937d | 2026-05-19T16:44:25Z | APPROVE cycle 2; cycle 1 had 2 findings fixed in 7f80af0 (stale scaffold doc removal, narrowed verbose field visibility), 1 accepted, 1 F-004 retracted as false-positive; BC registered at 60b79c8; red-gate at d60beed |
-| S-5.07 per-finding card collapsibility (BC-8.01.005) | #75 | 84b0489 | 2026-05-19T17:42:02Z | APPROVE cycle 1, 0 findings; template-only HTML change (<div> → <details open>); BC registered at a74d846; red-gate at f850cc1 |
-| S-6.01 scrub map merge (BC-5.03.001) | #76 | 896c9e2 | 2026-05-19T18:12:08Z | CLEAN security verdict; converged in 1 cycle; BC registered at b4586f1; red-gate at eb050f7. One mid-PR fmt fix (f049191) — rustfmt 1.9.0 single-line collapse vs CI two-line expectation. |
-| S-3.05 codecov coverage reporting (BC-build.001 informal) | #77 | 51a3faf | 2026-05-19T18:32:29Z | APPROVE cycle 1, 0 findings, CLEAN security verdict; red-gate at 8789cd1. AC-006 (badge URL resolves) deferred to post-merge manual verification. |
-| S-3.01 Criterion + hyperfine perf regression (no BCs) | #78 | 0c64832 | 2026-05-19T19:02:15Z | APPROVE cycle 1, 0 findings, CLEAN security verdict; red-gate at a4b5c35. |
-| S-3.02 Prompt eval harness (BC-6.02.001, BC-6.02.002 pre-existing) | #79 | 18a7b62 | 2026-05-19T19:25:16Z | 4 eval dirs, parse_rubric + 7 unit tests, run_all.sh + leak detector, opt-in workflow_dispatch CI. |
-| S-4.01 Kani scrub round-trip (BC-5.01.003 pre-existing) | #80 | fde249d | 2026-05-19T19:44:05Z | Kani harness in src/scrub.rs #[cfg(kani)] block (N=8, K=1 bounds); kani.yml CI workflow (weekly cron + manual dispatch); cargo-kani not installed locally; proof verification deferred to first CI workflow_dispatch. |
-| S-4.02 Kani leak-detector regex (BC-5.02.001 pre-existing) | #81 | 827d5b6 | 2026-05-19T20:00:57Z | 3 harnesses (leak_regex_ipv4 4-digit symbolic; leak_regex_ipv6 narrowed to ::1; leak_regex_mac 12-nibble symbolic) in src/ai/leak_detector.rs. cargo-kani not installed locally; proof verification deferred to CI workflow_dispatch. |
-| S-4.03 Kani map-value substring (BC-5.02.002 pre-existing) | #82 | 31619ea | 2026-05-19T20:15:02Z | map_value_substring harness in src/ai/leak_detector.rs proves bidirectional iff invariant. Bounds N=16/K=1/value≤8 narrowed from spec ≤32/≤4 for tractable CBMC paths. cargo-kani not installed locally; proof deferred to CI. **All 5 autopilot stories complete (S-3.01, S-3.02, S-4.01, S-4.02, S-4.03). Wave 1: 32/32 stories completed.** |
-
-## Wave-1 gate result
-
-**Wave-1 PASSED — 2026-05-19. Develop tip: dd69ff8 (post-hardening PR #83).**
-
-| Gate | Result | Notes |
-|---|---|---|
-| G-1 Test Suite | PASS | 263 tests pre-PR-83; 297 after PR #83 hardening |
-| G-2 DTU Validation | SKIP | No module-criticality.md; brownfield project, no DTU clones |
-| G-3 Adversarial Review | PASS | 0 CRITICAL; 2 HIGH filed as tech debt (F-W1-001, F-W1-002) |
-| G-4 Demo Evidence | PASS | 29/32 stories have demo; 3 docs-only (S-1.01, S-1.02, S-1.05) no-demo-applicable |
-| G-5 Holdout Evaluation | PASS | Mean 0.94, min critical 0.90; evidence at `.factory/holdout-scenarios/evaluations/wave-1-2026-05-19T20-30-07Z.md` |
-| Mutation Testing | PASSED-WITH-DISPOSITIONS | 95 caught; 65 surviving dispositioned (51 cfg(kani) B, 9 LDAP equiv B, 5 claude_cli C); effective kill rate 84.1% after PR #83 (dd69ff8) |
-
-Stories: 32/32 complete. BCs: 84 → 99 (+14 net-new during wave). New CI jobs: Coverage, Perf, Kani, Prompt-evals. Tech-debt items filed: F-W1-001..005 (see `.factory/tech-debt-register.md`).
+Wave-1/2/3 gate results: see `cycles/v0.4.0-feature/adversarial-reviews/`
+and `stories/sprint-state.yaml` (archived at
+`cycles/v0.4.0-feature/sprint-state.yaml`).

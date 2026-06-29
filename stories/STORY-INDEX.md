@@ -1,16 +1,18 @@
 ---
 document_type: story-index
 project: otsniff
-cycle: v0.4.0-feature
+cycle: v0.6.0-feature
 phase: 2
 generated: 2026-05-11T20:40:00Z
 producer: phase-2-story-decomposition (inline)
-total_stories: 31
-total_epics: 6
-status: draft
+updated: 2026-06-29T00:00:00Z
+updater: state-manager (v0.5.0 backfill + v0.6.0-feature cycle open)
+total_stories: 40
+total_epics: 7
+status: active
 ---
 
-# Story Index — otsniff v0.4.0-feature
+# Story Index — otsniff (cumulative, all cycles)
 
 | ID | Title | Epic | Wave | Points | Status | Depends On | Subsystems |
 |----|-------|------|------|--------|--------|------------|------------|
@@ -53,21 +55,27 @@ status: draft
 | S-6.02 | `diff` subcommand core | E-6 | 2 | 5 | completed | S-6.01 | S.9 + new |
 | S-6.03 | Diff HTML + markdown renderer | E-6 | 3 | 5 | completed (#119, cb426fc) | S-6.02 | S.8 |
 
-**Total points:** 125 (Wave 1: ~88, Wave 2: ~24, Wave 3: ~13)
-**Total stories:** 38 (Wave 1: 30, Wave 2: 6, Wave 3: 2)
+| S-7.01 | Zonewarden segmentation-conformance module | E-7 | — | — | completed-backfill (#123–#130; v0.5.0) | S-6.01 conceptually | S.1, S.3, S.4, S.8, S.9 |
+| S-7.02 | Segmentation drift — `diff --policy` | E-7 | — | — | completed-backfill (#136; v0.5.0) | S-7.01, S-6.02, S-6.03 | S.4, S.8, S.9 |
+
+**Total points (v0.4.0-feature):** 125 (Wave 1: ~88, Wave 2: ~24, Wave 3: ~13)
+**Total stories (v0.4.0-feature):** 38 (Wave 1: 30, Wave 2: 6, Wave 3: 2)
 **Math check:** E-1=14, E-2=32, E-3=22, E-4=18, E-5=24, E-6=15 → 125.
-**Story-count check:** E-1=6, E-2=12, E-3=6, E-4=4, E-5=7, E-6=3 → 38.
+**Story-count check (v0.4.0-feature):** E-1=6, E-2=12, E-3=6, E-4=4, E-5=7, E-6=3 → 38.
+**v0.5.0 backfill:** E-7=2 stories (delivered outside VSDD pipeline — see story files).
+**Cumulative story count:** 40. **E-7** stories have no point values (not tracked through the pipeline).
 
 ## Epic rollup
 
-| Epic | Stories | Points | Goal |
-|---|---:|---:|---|
-| E-1 spec hygiene | 6 | 14 | Close ASR-001..007 + L-P0-001 + S7 trigger + ADR backfill + BC-AUDIT formalization |
-| E-2 detection | 12 | 32 | 9 new detectors + DNP3 parser + OUI refresh + cred_events cap + port-table test + recon-scan rollup fix |
-| E-3 perf/robustness | 6 | 22 | Criterion + prompt evals + mutation + fuzz + codecov coverage + macOS CI flake fix |
-| E-4 Kani | 4 | 18 | Four proofs covering privacy invariant |
-| E-5 UX + AI hardening | 7 | 24 | Progress feedback + heartbeat + AI second-pass + invocation hardening + report visual polish + brand application + collapsible finding cards |
-| E-6 diff | 3 | 15 | Map merge + diff core + renderer |
+| Epic | Stories | Points | Goal | Cycle |
+|---|---:|---:|---|---|
+| E-1 spec hygiene | 6 | 14 | Close ASR-001..007 + L-P0-001 + S7 trigger + ADR backfill + BC-AUDIT formalization | v0.4.0-feature |
+| E-2 detection | 12 | 32 | 9 new detectors + DNP3 parser + OUI refresh + cred_events cap + port-table test + recon-scan rollup fix | v0.4.0-feature |
+| E-3 perf/robustness | 6 | 22 | Criterion + prompt evals + mutation + fuzz + codecov coverage + macOS CI flake fix | v0.4.0-feature |
+| E-4 Kani | 4 | 18 | Four proofs covering privacy invariant | v0.4.0-feature |
+| E-5 UX + AI hardening | 7 | 24 | Progress feedback + heartbeat + AI second-pass + invocation hardening + report visual polish + brand application + collapsible finding cards | v0.4.0-feature |
+| E-6 diff | 3 | 15 | Map merge + diff core + renderer | v0.4.0-feature |
+| E-7 v0.5.0 backfill | 2 | — | Zonewarden segmentation-conformance (ADR-0013) + segmentation drift (P1-13); delivered outside VSDD pipeline | v0.5.0-backfill |
 
 ## BC coverage map
 

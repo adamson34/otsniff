@@ -1,0 +1,402 @@
+# Sprint state — otsniff v0.4.0-feature cycle
+# Produced by phase-2-story-decomposition.
+# This file is mutated by the orchestrator as waves progress. Initial state is "pending" for Wave 1, "blocked" for later waves.
+
+cycle: v0.4.0-feature
+current_wave: 3
+total_waves: 3
+total_stories: 38
+wave_1_status: completed
+wave_1_gate_passed_at: 2026-05-19T20:30:07Z
+wave_1_merge_sha: dd69ff8
+wave_1_notes: "All 6 gates pass. Mutation testing PASSED-WITH-DISPOSITIONS (84.1% effective kill rate after PR #83). 2 HIGH adversary findings (F-W1-001 run_unscrub validate, F-W1-002 pseudonym regex) tracked for tech debt."
+wave_2_status: completed
+wave_2_gate_passed_at: 2026-05-26T21:31:54Z
+wave_2_merge_sha: c8c231a
+wave_2_notes: "All 6 gates pass (run retroactively; stories S-3.03/3.04/4.04/6.02 had merged earlier without a gate). Gate1 tests 393->399. Gate2 DTU skipped (no clones/criticality manifest). Gate2b mutation on src/diff.rs PASS-WITH-DISPOSITIONS 83.9% (PR #107, report logs/mutation-report-wave-2-otsniff.md). Gate3 adversarial: 0 CRITICAL, 2 HIGH addressed (ADV-W2-001 resolve_endpoint fail-closed, ADV-W2-002 diff.rs added to mutation scope) + 2 LOW via PR #108; ADV-W2-003 dismissed. Gate5 holdout HS-005 (kani) 1.00 + HS-006 (fuzz) 1.00; fixed fuzz CI (cargo-fuzz pin + chrono dep + sentinel leak-oracle) via PR #109 — scrub_text confirmed correct, no privacy bug."
+# S-5.04 added mid-cycle 2026-05-12: harden --ai invocation surface (defense-in-depth on scrub privacy contract).
+# S-3.06 added mid-cycle 2026-05-14: investigate + fix recurring macOS CI rustup-init flake (cycle_target: v0.4.1-patch).
+
+stories:
+  # ===== Wave 1 (no dependencies) =====
+  S-1.01:
+    status: completed
+    wave: 1
+    branch: null  # docs-only on factory-artifacts; no develop-branch worktree
+    worktree: null
+    merge_sha: null  # no develop PR; committed directly to factory-artifacts
+    pr: null
+    completed_at: 2026-05-14T12:00:00Z
+    semantics: docs-only-on-factory-artifacts (no Rust code, no test infrastructure)
+  S-1.02:
+    status: completed
+    wave: 1
+    branch: null  # docs-only on factory-artifacts; no develop-branch worktree
+    worktree: null
+    merge_sha: null  # no develop PR; committed directly to factory-artifacts
+    pr: null
+    completed_at: 2026-05-14T12:45:00Z
+    semantics: docs-only-on-factory-artifacts (BC count drift from 60 → 69 + audit row separation)
+  S-1.03:
+    status: completed
+    wave: 1
+    branch: feature/S-1.03-s7-trigger-and-cli-defaults
+    worktree: null
+    semantics: hybrid (PRD edits on factory-artifacts + code changes on develop)
+    completed_at: 2026-05-14T14:30:00Z
+    docs_half:
+      status: completed
+      committed_at: 2026-05-14T13:15:00Z
+      branch: factory-artifacts
+      merge_sha: 1563848
+      covers: [AC-001, AC-002, AC-003, AC-004, AC-005]
+    code_half:
+      status: completed
+      branch: feature/S-1.03-s7-trigger-and-cli-defaults
+      merge_sha: 0830aa4
+      pr: 59
+      covers: [AC-005 ot_or_default unit test, AC-006 S7_METADATA.trigger edit + unit test + RULES.md regen + snapshot]
+      ci: 7/7 green (no macOS flake retries)
+      review_cycles: 1 (APPROVE, 0 blocking findings, 1 nit)
+  S-1.04:
+    status: completed
+    wave: 1
+    branch: feature/S-1.04-unexpected-protocols-trigger
+    worktree: null
+    merge_sha: 20c541c
+    pr: 43
+    completed_at: 2026-05-12T13:40:39Z
+  S-1.06:
+    status: completed
+    wave: 1
+    branch: feature/S-1.06-adr-backfill
+    worktree: null
+    merge_sha: 0a1bb8b
+    pr: 44
+    completed_at: 2026-05-12T14:09:37Z
+  S-2.02:
+    status: completed
+    wave: 1
+    branch: feature/S-2.02-cap-cred-events-dedup
+    worktree: null
+    merge_sha: 19ee8b0
+    pr: 67
+    merged_at: 2026-05-15T18:41:00Z
+    notes: "3 NITPICK findings from review noted as cosmetic follow-ups (cred_events_index doc, test accessor consistency, cast-style)."
+  S-2.03:
+    status: completed
+    wave: 1
+    branch: feature/S-2.03-oui-refresh
+    worktree: null
+    merge_sha: b34db4d
+    pr: 48
+    completed_at: 2026-05-12T17:10:00Z
+  S-2.04:
+    status: completed
+    wave: 1
+    branch: feature/S-2.04-dnp3-parser
+    worktree: null
+    merge_sha: 6de71c8
+    pr: 47
+    completed_at: 2026-05-12T16:24:47Z
+  S-2.05:
+    status: completed
+    wave: 1
+    branch: feature/S-2.05-ldap-simple-bind
+    worktree: null
+    merge_sha: 31e827b
+    pr: 68
+    merged_at: 2026-05-18T20:58:12Z
+    notes: "5 NITPICK findings logged during review (non-blocking)."
+  S-2.06:
+    status: completed
+    wave: 1
+    branch: feature/S-2.06-compat-ntlmv1
+    worktree: null
+    merge_sha: 317a575
+    pr: 69
+    merged_at: 2026-05-18T21:31:15Z
+    notes: "3 NITPICK findings deferred to follow-up: F-002 (single-match per packet), F-003 (src_port scan optimization), F-005 (no mid-payload offset test)."
+  S-2.07:
+    status: completed
+    wave: 1
+    branch: feature/S-2.07-compat-weak-tls-cipher
+    worktree: null
+    merge_sha: a866578
+    pr: 70
+    merged_at: 2026-05-18T23:58:12Z
+    notes: "1 NITPICK on trigger text wording, non-blocking, no fix required."
+  S-2.08:
+    status: completed
+    wave: 1
+    branch: feature/S-2.08-creds-rdp-no-nla
+    worktree: null
+    merge_sha: 387b239
+    pr: 71
+    merged_at: 2026-05-19T15:02:50Z
+    notes: "2 COSMETIC findings on stale doc comments (rdp_legacy.rs:4 and :62 still reference the AC-002 bit-test). Non-blocking, no fix required. AC-002 spec bit-test corrected to exact equality (implementation, BC-INDEX, and tests all agree)."
+  S-2.09:
+    status: completed
+    wave: 1
+    branch: feature/S-2.09-ntp-external
+    worktree: null
+    merge_sha: 89168bd
+    pr: 65
+    completed_at: 2026-05-14T18:45:00Z
+    notes: New detector mirroring boundary.dns_resolver; tests=166/166; macOS CI flake hit once (S-3.06), rerun cleared
+  S-2.10:
+    status: completed
+    wave: 1
+    branch: feature/S-2.10-recon-port-scan
+    worktree: null
+    merge_sha: 7aea34f
+    pr: 50
+    completed_at: 2026-05-12T18:15:00Z
+  S-2.11:
+    status: completed
+    wave: 1
+    branch: feature/S-2.11-ics-modbus-unit-id-sweep
+    worktree: null
+    merged_at: 2026-05-19T15:39:57Z
+    merge_sha: 238466b
+    pr: 72
+    notes: "Pre-flight BC renumber from BC-1.02.006→BC-1.02.009 to avoid DHCP option walk collision. 1 NITPICK on internal doc comment, non-blocking."
+  S-2.12:
+    status: completed
+    wave: 1
+    blocked_by: [S-2.10]
+    branch: feature/S-2.12-recon-rollup
+    worktree: null
+    merge_sha: 7c70ef4
+    pr: 54
+    completed_at: 2026-05-13T13:00:00Z
+    cycle_target: v0.4.1-patch
+    real_pcap_evidence: "4SICS-22: 26,067 → 23 recon findings (1,135× reduction)"
+  S-3.01:
+    status: completed
+    wave: 1
+    branch: feature/S-3.01-criterion-benchmarks
+    worktree: null
+    merge_sha: 0c64832
+    pr: 78
+    merged_at: 2026-05-19T19:02:15Z
+    notes: "6 criterion benches + procedural 1 MiB synthetic PCAP fixture (committed via !gitignore exception) + perf.yml workflow (cron + perf-labeled PR triggers) + recorded baseline timings. AC-004 satisfied by existing tests/memory_bound.rs from S-2.02."
+  S-3.02:
+    status: completed
+    wave: 1
+    branch: feature/S-3.02-prompt-eval-harness
+    worktree: null
+    merge_sha: 18a7b62
+    pr: 79
+    merged_at: 2026-05-19T19:25:16Z
+    notes: "Prompt-eval harness with 4 capture-source eval directories, parse_rubric + 7 unit tests, run_all.sh runner with leak detector, opt-in workflow_dispatch CI. BCs (BC-6.02.001, BC-6.02.002) pre-existing in BC-INDEX, no new registration."
+  S-3.05:
+    status: completed
+    wave: 1
+    branch: feature/S-3.05-codecov-coverage-reporting
+    worktree: null
+    merge_sha: 51a3faf
+    pr: 77
+    merged_at: 2026-05-19T18:32:29Z
+    cycle_target: v0.4.1-patch
+    notes: "Coverage job + codecov.yml + README badge landed. AC-006 (badge URL resolves) deferred to post-merge — user must one-time sign repo into codecov.io via OAuth before first upload renders. BC-build.001 informal (not in BC-INDEX, per S-3.06 precedent)."
+  S-3.06:
+    status: completed
+    wave: 1
+    branch: fix/S-3.06-drop-swatinem-macos
+    worktree: null
+    merge_sha: e425733
+    pr: 66
+    merged_at: 2026-05-15T17:12:47Z
+    cycle_target: v0.4.1-patch
+    notes: "5-run post-merge verification deferred per AC-002 plan; run 25931099632 = 1/5 PASS. Fix: drop Swatinem/rust-cache@v2 from test-macos job (option b'')."
+    investigation:
+      status: complete
+      attempts:
+        - {pr: 60, hypothesis: "macos-latest image 15 bug", outcome: "failed - flake hit macos-14 too", state: merged}
+        - {pr: 61, hypothesis: "PATH resolution wrong, add $HOME/.cargo/bin guard", outcome: "guard worked on its step; Swatinem broke things after", state: merged}
+        - {pr: 62, hypothesis: "skip PATH entirely, call cargo by absolute path", outcome: "diagnostic proved binary at path IS rustup-init bytes", state: reverted-via-pr-64}
+        - {pr: 63, hypothesis: "rustup default stable after cache restore", outcome: "rustup binary is also rustup-init bytes; no in-band repair", state: closed-unmerged}
+        - {pr: 64, hypothesis: "revert pr-62 to restore rerun-clears-it workaround", outcome: "success", state: merged}
+      root_cause: "Swatinem/rust-cache@v2 cache restore replaces ALL binaries in $HOME/.cargo/bin/ with rustup-init bytes on macOS. No in-band repair possible — the tools needed to fix it are themselves corrupted."
+  S-4.01:
+    status: completed
+    wave: 1
+    branch: feature/S-4.01-kani-scrub-round-trip
+    worktree: null
+    merge_sha: fde249d
+    pr: 80
+    merged_at: 2026-05-19T19:44:05Z
+    notes: "First of 3 Kani formal-verification stories. Kani harness in src/scrub.rs #[cfg(kani)] block (N=8, K=1 bounds). CI workflow .github/workflows/kani.yml on weekly cron + manual dispatch. cargo-kani not installed locally; proof verification deferred to first CI workflow_dispatch (per story Task #1, L-P3-002). BC-5.01.003 pre-existing."
+  S-4.02:
+    status: completed
+    wave: 1
+    branch: feature/S-4.02-kani-leak-detector-regex
+    worktree: null
+    merge_sha: 827d5b6
+    pr: 81
+    merged_at: 2026-05-19T20:00:57Z
+    notes: "Second Kani formal-verification story. 3 harnesses (leak_regex_ipv4 4-digit symbolic; leak_regex_ipv6 narrowed to ::1; leak_regex_mac 12-nibble symbolic) in src/ai/leak_detector.rs. BC-5.02.001 pre-existing. cargo-kani not installed locally; proof verification deferred to CI workflow_dispatch."
+  S-4.03:
+    status: completed
+    wave: 1
+    branch: feature/S-4.03-kani-map-value-substring
+    worktree: null
+    merge_sha: 31619ea
+    pr: 82
+    merged_at: 2026-05-19T20:15:02Z
+    notes: "Third/final Kani formal-verification story. map_value_substring harness in src/ai/leak_detector.rs proves bidirectional iff invariant. Bounds N=16/K=1/value≤8 narrowed from spec ≤32/≤4 for tractable CBMC paths. BC-5.02.002 pre-existing. cargo-kani not installed locally; proof deferred to CI. Wave 1 detector backlog now closed at 32/32 of detector-stories; remaining S-4.04 (composed privacy invariant) is in Wave 2."
+  S-5.01:
+    status: completed
+    wave: 1
+    branch: feature/S-5.01-parse-progress-feedback
+    worktree: null
+    merge_sha: 7556939
+    pr: 73
+    merged_at: 2026-05-19T16:17:44Z
+    notes: "2 NITPICKs deferred (stale `#[allow(unused_imports)] use crate::progress::ProgressReporter;` block in src/pcap.rs; doc-comment nit on analyze() type-parameter genericity)."
+  S-5.02:
+    status: completed
+    wave: 1
+    branch: feature/S-5.02-claude-heartbeat
+    worktree: null
+    merge_sha: 62c937d
+    pr: 74
+    merged_at: 2026-05-19T16:44:25Z
+    notes: "2-cycle review convergence: cycle 1 had 2 findings fixed in 7f80af0 (stale scaffold doc removal, narrowed verbose field visibility), 1 accepted, 1 F-004 retracted as false-positive."
+  S-5.05:
+    status: completed
+    wave: 1
+    branch: feature/S-5.05-html-polish
+    worktree: null
+    merge_sha: b3de579
+    pr: 51
+    completed_at: 2026-05-12T20:00:00Z
+  S-5.06:
+    status: completed
+    wave: 1
+    blocked_by: [S-5.05]
+    branch: feature/S-5.06-brand-application
+    worktree: null
+    merge_sha: d0f2fb0
+    pr: 52
+    completed_at: 2026-05-12T21:30:00Z
+  S-5.07:
+    status: completed
+    wave: 1
+    blocked_by: [S-5.06]
+    branch: feature/S-5.07-collapsible-finding-cards
+    worktree: null
+    merged_at: 2026-05-19T17:42:02Z
+    merge_sha: 84b0489
+    pr: 75
+    notes: "Template-only HTML change; insta snapshot diff was purely structural (<div> → <details open> swap + new CSS). AC-006 data-shape stability test confirms zero data changes."
+  S-5.04:
+    status: completed
+    wave: 1
+    branch: feature/S-5.04-harden-ai-invocation
+    worktree: null
+    merge_sha: 5a1fe21
+    pr: 45
+    completed_at: 2026-05-12T15:08:13Z
+  S-6.01:
+    status: completed
+    wave: 1
+    branch: feature/S-6.01-scrub-map-merge
+    worktree: null
+    merge_sha: 896c9e2
+    pr: 76
+    merged_at: 2026-05-19T18:12:08Z
+    notes: "Privacy-critical surface (scrub layer). Required one mid-PR fmt fix commit (f049191) — local rustfmt 1.9.0 produced a single-line collapse for a 100-char line; committed two-line form mismatched CI rustfmt expectation. Resolved by collapsing to single line."
+
+  # ===== Wave 2 (depends on Wave 1) =====
+  S-1.05:
+    status: completed
+    wave: 1  # promoted from wave 2 — dependencies S-1.01 + S-1.02 cleared 2026-05-14
+    blocked_by: [S-1.01, S-1.02]
+    branch: null  # docs-only on factory-artifacts
+    worktree: null
+    merge_sha: null  # no develop PR
+    pr: null
+    completed_at: 2026-05-14T15:30:00Z
+    semantics: docs-only (15 BC-AUDIT-* promoted to first-class numbered BCs + alias table + PRD FR cross-refs)
+    id_shifts:
+      - BC-AUDIT-005 → BC-1.02.006 (suggested .005 collides with DNP3 from S-2.04)
+      - BC-AUDIT-006 → BC-1.02.007 (cascade)
+      - BC-AUDIT-007 → BC-1.02.008 (cascade)
+      - BC-AUDIT-014 → BC-6.03.003 (suggested .002 collides with --disallowed-tools from S-5.04)
+  S-2.01:
+    status: completed
+    wave: 1
+    blocked_by: [S-1.04]
+    branch: feature/S-2.01-port-to-label-test
+    worktree: null
+    merge_sha: 2caa283
+    pr: 58
+    completed_at: 2026-05-14T11:30:00Z
+    semantics: regression-lockdown (tests pass on first commit; no implementer step)
+  S-3.03:
+    status: completed
+    wave: 2
+    blocked_by: [S-3.01]
+    branch: feature/S-3.03-mutation-testing-ci
+    worktree: null
+    merge_sha: cfd6058
+    pr: 94
+    merged_at: 2026-05-22T21:19:44Z
+    notes: ".cargo-mutants.toml scoped to 4 high-value modules + weekly mutants.yml (Mon 06:00 UTC) + docs/MUTANTS.md with 84.1% baseline and 5% ratchet. 11 acceptance tests in tests/s_3_03_mutation_testing_infrastructure.rs all green (total suite 314/0). cargo-mutants pinned to ^27."
+  S-3.04:
+    status: completed
+    wave: 2
+    blocked_by: [S-2.04]
+    branch: feature/S-3.04-fuzz-parsers
+    worktree: null
+    merge_sha: b7f7bf4
+    pr: 95
+    merged_at: 2026-05-22T21:56:58Z
+    notes: "fuzz/ isolated cargo package + 6 libFuzzer harnesses (parse_modbus/enip/s7comm/dhcp/dnp3 + scrub_text), each bounded to 64 KB per EC-001. Weekly .github/workflows/fuzz.yml (Sun 02:00 UTC) + tests/fuzz_regressions.rs replay dispatch. 14 acceptance tests; suite 314 → 329. Zero src/ changes, zero new main-crate deps."
+  S-4.04:
+    status: completed
+    wave: 2
+    blocked_by: [S-4.01, S-4.02, S-4.03]
+    branch: feature/S-4.04-kani-composed-proof
+    worktree: null
+    merge_sha: 5aaaff7
+    pr: 96
+    merged_at: 2026-05-23T02:53:00Z
+    notes: "Composed Kani harness composed_privacy_invariant in src/kani_proofs.rs proves BC-5.02.003 (post-scrub bytes either contain no map values OR substring scan catches them). Local cargo kani: VERIFICATION:- SUCCESSFUL in 9.99s with unwind=13. Uses local proof-model copies (SEMPORT-REVIEW markers) to avoid wave-1 helper visibility changes. Reviewer doc at docs/proofs/privacy-invariant.md. 12 acceptance tests; suite 329 → 341. kani.yml extended to 7 harnesses."
+  S-6.02:
+    status: completed
+    wave: 2
+    blocked_by: [S-6.01]
+    branch: feature/S-6.02-diff-subcommand
+    worktree: null
+    merge_sha: 5f9963a
+    pr: 97
+    merged_at: 2026-05-23T03:25:00Z
+    notes: "New src/diff.rs (Diff, RoleShift, FlowDelta, DiffInput, compute) + `otsniff diff` CLI subcommand. Implements BC-9.05.001 (subcommand exists), BC-3.08.001 (hosts new/gone by pseudonym), BC-3.08.002 ((rule_id, src_pseudo, dst_pseudo, port) tuple match), BC-3.08.003 (role + flow shifts, default 2× multiplier). 16 acceptance tests; suite 341 → 357. Placeholder rendering (JSON/HTML/MD); full HTML report is S-6.03's scope. Zero new deps."
+
+  # ===== Wave 3 (depends on Wave 1 or 2) =====
+  S-5.03:
+    status: completed
+    wave: 3
+    blocked_by: [S-2.05, S-2.06, S-2.07]  # all merged in wave 2 (verified 2026-05-28)
+    soft_prefers: [S-2.08, S-2.09, S-2.10, S-2.11]  # all merged in wave 2
+    branch: feature/S-5.03-ai-augmented-findings  # squash-merged, branch deleted
+    worktree: null  # .worktrees/S-5.03 removed
+    unblocked_at: 2026-05-28T00:00:00Z
+    merge_sha: 43fe86d
+    pr: 114
+    merged_at: 2026-05-28T20:51:20Z
+    notes: "Wave-3 first delivery. Adds AI-augmented findings: new src/findings/augmented.rs (augment_findings + parse_augmented_response + dedup_against_rule_findings + AugmentedFinding + Confidence), AiProvider::augment trait method, ClaudeCliProvider::augment shell-out, render_augmented_section in HTML + markdown reports, AuditLog.augment_pass field. Implements BC-6.05.001 (augment request scrubbed), BC-6.05.002 (response shape + parser tolerance), BC-6.05.003 (dedup against rule findings via pseudonym-set subset), BC-3.07.001 (HTML + markdown render section). Privacy invariant extended via invariant_no_real_values_reach_ai_provider_augment canary test. 23 new tests added; suite 400 → 423 → 426 after fix iteration. EC-001..004 covered (malformed JSON → empty, cap@25 stable-sort + truncate, host-pseudonym hallucination filter pre-unscrub, augment-error soft-fail). Required fix iteration after pr-reviewer found 3 CRITICAL + 4 HIGH + 3 MEDIUM (most notably: augment_findings was not wired into cli.rs::run_analyze in first pass — fixed in commit e8e59dd; EC-003 filter ran post-unscrub — fixed in e6b464b; AC-006 was unverifiable — fixed by returning AugmentInvocationSummary tuple). Second pr-reviewer pass: APPROVE. No new deps. Zero regressions to 271 pre-existing tests."
+  S-6.03:
+    status: completed
+    wave: 3
+    blocked_by: [S-6.02]  # merged 5f9963a (PR #97) on 2026-05-23
+    branch: feature/S-6.03-diff-renderer  # squash-merged, branch deleted
+    worktree: null  # .worktrees/S-6.03 removed
+    unblocked_at: 2026-05-28T00:00:00Z
+    merge_sha: cb426fc
+    pr: 119
+    merged_at: 2026-06-18T14:39:08Z
+    notes: "Wave-3 final delivery. Implements BC-8.04.001: render_diff_html (DiffReportView + askama templates/diff.html) + render_diff_markdown, wired into `otsniff diff` replacing the S-6.02 JSON/<pre> placeholder; leak-detector gate preserved on all three output paths. AC-001 (HTML sections: summary banner, new/recurring/resolved finding badges, host changes, role shifts, flow shifts >threshold), AC-002 (markdown parity), AC-003 (determinism — renderer self-sorts every section on a total key; compute->render-twice shared-rule-id test). EC-001 (empty → 'No deltas detected'), EC-002 (evidence cap 5 with 'showing X of N' label), EC-003 (OtError::Render via ?). Red Gate passed (6 failing tests). Adversary convergence: 7 passes, 3 consecutive NITPICK_ONLY; two rounds of SUBSTANTIVE fixes — (1) determinism for same-id findings + markdown table/heading/code-fence escaping (md_cell/md_heading/make_fence) + evidence-truncation label + EC-002/003 coverage; (2) configurable flow-shift-multiplier label threaded through Diff struct (was hardcoded ≥2×). Suite 426 → 437 tests. pr-reviewer APPROVE cycle 1; security PASS (0 CRITICAL/HIGH, leak-gate confirmed). Demos AC-001/002/003 + EC-001 (gif+webm). No new deps. **Wave 3 complete: S-5.03 + S-6.03 both delivered. 38/38 stories done — cycle v0.4.0-feature ready for /wave-gate wave-3 then convergence.**"
