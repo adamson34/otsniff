@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{dhcp, dnp3, enip, ldap, modbus, rdp, s7comm};
+use crate::parse::{dhcp, dnp3, enip, ldap, llmnr, mdns, modbus, netbios, rdp, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -866,6 +866,34 @@ impl Observer {
                 }
             }
         }
+
+        // mDNS hostname extraction (UDP/5353).
+        // Each A-record Answer carries (owner name, RDATA IPv4). The asset's IP
+        // is the RDATA address, NOT the multicast src_ip (224.0.0.251) — EC-011.
+        // BC-1.02.010, S-8.01 AC-001.
+        if pkt.src_port == 5353 || pkt.dst_port == 5353 {
+            for h in mdns::parse(&pkt.payload) {
+                self.obs.hostnames.insert(IpAddr::V4(h.ip), h.name);
+            }
+        }
+
+        // NetBIOS-NS workstation-name extraction (UDP/137).
+        // NBNS Registration Requests carry the encoded name; the asset's IP is
+        // the packet source IP (the registering node). BC-1.02.011, S-8.01 AC-002.
+        if pkt.src_port == 137 || pkt.dst_port == 137 {
+            if let Some(h) = netbios::parse_registration(&pkt.payload) {
+                self.obs.hostnames.insert(pkt.src_ip, h.name);
+            }
+        }
+
+        // LLMNR hostname extraction (UDP/5355).
+        // Only response messages (QR=1) carry A-record answers with RDATA IPv4.
+        // BC-1.02.012, S-8.01 AC-003.
+        if pkt.src_port == 5355 || pkt.dst_port == 5355 {
+            for h in llmnr::parse(&pkt.payload) {
+                self.obs.hostnames.insert(IpAddr::V4(h.ip), h.name);
+            }
+        }
     }
 }
 
@@ -936,6 +964,7 @@ fn classify_flow(pkt: &Packet) -> Option<String> {
             (Transport::Udp, 137 | 138) | (Transport::Tcp, 139) => "netbios",
             (Transport::Udp, 161 | 162) => "snmp",
             (Transport::Udp, 5353) => "mdns",
+            (Transport::Udp, 5355) => "llmnr",
             _ => return None,
         }
         .to_string(),
