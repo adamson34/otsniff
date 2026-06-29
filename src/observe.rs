@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use serde::Serialize;
 
-use crate::parse::{dhcp, dnp3, enip, ldap, modbus, rdp, s7comm};
+use crate::parse::{dhcp, dnp3, enip, ldap, llmnr, mdns, modbus, netbios, rdp, s7comm};
 use crate::pcap::{Packet, Transport};
 
 #[derive(Debug, Clone, Serialize)]
@@ -866,6 +866,34 @@ impl Observer {
                 }
             }
         }
+
+        // mDNS hostname extraction (UDP/5353).
+        // Each A-record Answer carries (owner name, RDATA IPv4). The asset's IP
+        // is the RDATA address, NOT the multicast src_ip (224.0.0.251) — EC-011.
+        // BC-1.02.010, S-8.01 AC-001.
+        if pkt.src_port == 5353 || pkt.dst_port == 5353 {
+            for h in mdns::parse(&pkt.payload) {
+                self.obs.hostnames.insert(IpAddr::V4(h.ip), h.name);
+            }
+        }
+
+        // NetBIOS-NS workstation-name extraction (UDP/137).
+        // NBNS Registration Requests carry the encoded name; the asset's IP is
+        // the packet source IP (the registering node). BC-1.02.011, S-8.01 AC-002.
+        if pkt.src_port == 137 || pkt.dst_port == 137 {
+            if let Some(h) = netbios::parse_registration(&pkt.payload) {
+                self.obs.hostnames.insert(pkt.src_ip, h.name);
+            }
+        }
+
+        // LLMNR hostname extraction (UDP/5355).
+        // Only response messages (QR=1) carry A-record answers with RDATA IPv4.
+        // BC-1.02.012, S-8.01 AC-003.
+        if pkt.src_port == 5355 || pkt.dst_port == 5355 {
+            for h in llmnr::parse(&pkt.payload) {
+                self.obs.hostnames.insert(IpAddr::V4(h.ip), h.name);
+            }
+        }
     }
 }
 
@@ -936,6 +964,7 @@ fn classify_flow(pkt: &Packet) -> Option<String> {
             (Transport::Udp, 137 | 138) | (Transport::Tcp, 139) => "netbios",
             (Transport::Udp, 161 | 162) => "snmp",
             (Transport::Udp, 5353) => "mdns",
+            (Transport::Udp, 5355) => "llmnr",
             _ => return None,
         }
         .to_string(),
@@ -1903,6 +1932,313 @@ mod modbus_unit_id_tests {
         assert!(
             summary.unit_ids.contains(&255u8),
             "EC-002: unit_id=0xFF (gateway/reserved) must be present in unit_ids"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // S-8.01 / BC-1.02.013: observer wiring for mDNS / NetBIOS-NS / LLMNR
+    // -------------------------------------------------------------------------
+
+    /// Build a minimal mDNS response message with one A record.
+    /// Flags: QR=1, AA=1 (0x84 0x00). QDCOUNT=0, ANCOUNT=1.
+    fn make_mdns_payload(hostname_labels: &[&[u8]], rdata_ip: [u8; 4]) -> Vec<u8> {
+        let mut msg = vec![
+            0x00, 0x00, 0x84, 0x00, // TxID, Flags (QR=1, AA=1)
+            0x00, 0x00, 0x00, 0x01, // QDCOUNT=0, ANCOUNT=1
+            0x00, 0x00, 0x00, 0x00, // NSCOUNT=0, ARCOUNT=0
+        ];
+        for &label in hostname_labels {
+            msg.push(label.len() as u8);
+            msg.extend_from_slice(label);
+        }
+        msg.push(0x00); // end of name
+        msg.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]); // RRTYPE=A, RRCLASS=IN
+        msg.extend_from_slice(&[0x00, 0x00, 0x00, 0x78, 0x00, 0x04]); // TTL, RDLEN=4
+        msg.extend_from_slice(&rdata_ip);
+        msg
+    }
+
+    /// Build a minimal LLMNR response message (QR=1) with one A record.
+    fn make_llmnr_payload(hostname_labels: &[&[u8]], rdata_ip: [u8; 4]) -> Vec<u8> {
+        let mut msg = vec![
+            0x00, 0x00, 0x80, 0x00, // TxID, Flags (QR=1)
+            0x00, 0x00, 0x00, 0x01, // QDCOUNT=0, ANCOUNT=1
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        for &label in hostname_labels {
+            msg.push(label.len() as u8);
+            msg.extend_from_slice(label);
+        }
+        msg.push(0x00);
+        msg.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]);
+        msg.extend_from_slice(&[0x00, 0x00, 0x00, 0x78, 0x00, 0x04]);
+        msg.extend_from_slice(&rdata_ip);
+        msg
+    }
+
+    /// Build a minimal NBNS Registration Request for the given name string.
+    /// The name is padded to 15 bytes with 0x20, suffix byte set to 0x00,
+    /// then first-level encoded into 32 bytes.
+    fn make_nbns_payload(name_str: &[u8]) -> Vec<u8> {
+        let mut decoded = [0x20u8; 16];
+        decoded[15] = 0x00;
+        let copy_len = name_str.len().min(15);
+        decoded[..copy_len].copy_from_slice(&name_str[..copy_len]);
+
+        let mut encoded = [0u8; 32];
+        for (i, &b) in decoded.iter().enumerate() {
+            encoded[2 * i] = ((b >> 4) & 0xF) + b'A';
+            encoded[2 * i + 1] = (b & 0xF) + b'A';
+        }
+
+        let mut buf = vec![
+            0x12, 0x34, // TxID
+            0x28, 0x00, // Flags: QR=0, OPCODE=5 (Registration)
+            0x00, 0x01, // QDCOUNT = 1
+            0x00, 0x00, // ANCOUNT = 0
+            0x00, 0x00, // NSCOUNT = 0
+            0x00, 0x00, // ARCOUNT = 0
+            0x20, // label_len = 32
+        ];
+        buf.extend_from_slice(&encoded);
+        buf.push(0x00); // end of QNAME
+        buf.extend_from_slice(&[0x00, 0x20, 0x00, 0x01]); // QTYPE=NB, QCLASS=IN
+        buf
+    }
+
+    /// Convenience: build a UDP `Packet` pointing to the given ports.
+    fn make_udp_pkt(
+        src_ip: &str,
+        dst_ip: &str,
+        src_port: u16,
+        dst_port: u16,
+        payload: Vec<u8>,
+    ) -> crate::pcap::Packet {
+        crate::pcap::Packet {
+            ts: fixed_ts(),
+            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+            dst_mac: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+            src_ip: src_ip.parse().unwrap(),
+            dst_ip: dst_ip.parse().unwrap(),
+            transport: crate::pcap::Transport::Udp,
+            src_port,
+            dst_port,
+            payload,
+        }
+    }
+
+    /// BC-1.02.013 / AC-004 step 1: mDNS packet on UDP/5353 must insert
+    /// the RDATA IPv4 → name into obs.hostnames.
+    #[test]
+    fn test_bc_1_02_013_mdns_udp_5353_populates_hostnames() {
+        let payload = make_mdns_payload(&[b"PLC-A", b"local"], [10, 0, 0, 1]);
+        // src_ip = 10.0.0.1 so that update_host creates a HostObs for the asset IP.
+        let pkt = make_udp_pkt("10.0.0.1", "224.0.0.251", 5353, 5353, payload);
+
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&pkt);
+        let obs = observer.finish();
+
+        assert_eq!(
+            obs.hostnames.get(&ip("10.0.0.1")).map(String::as_str),
+            Some("PLC-A"),
+            "BC-1.02.013: mDNS A record must insert RDATA IP → stripped name into obs.hostnames"
+        );
+    }
+
+    /// BC-1.02.013 / AC-004 step 3: NetBIOS-NS Registration on UDP/137 must
+    /// insert the src_ip → decoded workstation name into obs.hostnames.
+    #[test]
+    fn test_bc_1_02_013_netbios_udp_137_populates_hostnames() {
+        let payload = make_nbns_payload(b"ENG-WS");
+        let pkt = make_udp_pkt("10.0.0.3", "10.0.0.255", 137, 137, payload);
+
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&pkt);
+        let obs = observer.finish();
+
+        assert_eq!(
+            obs.hostnames.get(&ip("10.0.0.3")).map(String::as_str),
+            Some("ENG-WS"),
+            "BC-1.02.013: NetBIOS-NS registration must insert src_ip → name into obs.hostnames"
+        );
+    }
+
+    /// BC-1.02.013 / AC-004 step 4: LLMNR response on UDP/5355 must insert
+    /// the RDATA IPv4 → name into obs.hostnames.
+    #[test]
+    fn test_bc_1_02_013_llmnr_udp_5355_populates_hostnames() {
+        let payload = make_llmnr_payload(&[b"SCADA-SRV"], [10, 0, 0, 4]);
+        let pkt = make_udp_pkt("10.0.0.50", "224.0.0.252", 5355, 5355, payload);
+
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&pkt);
+        let obs = observer.finish();
+
+        assert_eq!(
+            obs.hostnames.get(&ip("10.0.0.4")).map(String::as_str),
+            Some("SCADA-SRV"),
+            "BC-1.02.013: LLMNR A-record response must insert RDATA IP → name into obs.hostnames"
+        );
+    }
+
+    /// BC-1.02.013 / EC-010: last-write-wins — two successive mDNS packets
+    /// naming the same IP must leave only the name from the later packet
+    /// in obs.hostnames (last-write-wins by packet/processing order, not by
+    /// reading `pkt.ts`).
+    #[test]
+    fn test_bc_1_02_013_last_write_wins_same_ip() {
+        let payload1 = make_mdns_payload(&[b"PLC-A", b"local"], [10, 0, 0, 1]);
+        let payload2 = make_mdns_payload(&[b"PLC-A-NEW", b"local"], [10, 0, 0, 1]);
+        let pkt1 = make_udp_pkt("10.0.0.1", "224.0.0.251", 5353, 5353, payload1);
+        let pkt2 = make_udp_pkt("10.0.0.1", "224.0.0.251", 5353, 5353, payload2);
+
+        let mut observer = Observer::new(vec![]);
+        observer.observe(&pkt1);
+        observer.observe(&pkt2);
+        let obs = observer.finish();
+
+        assert_eq!(
+            obs.hostnames.get(&ip("10.0.0.1")).map(String::as_str),
+            Some("PLC-A-NEW"),
+            "BC-1.02.013 EC-010: later mDNS packet must overwrite earlier one for the same IP"
+        );
+    }
+
+    /// BC-1.02.013 / AC-004: full 5-step multi-source hostname extraction
+    /// sequence as specified in story S-8.01 AC-004.
+    #[test]
+    fn test_bc_1_02_013_multi_source_synthetic_sequence() {
+        use crate::pcap::Transport;
+
+        let mut observer = Observer::new(vec![]);
+
+        // Step 1: mDNS → "PLC-A" at 10.0.0.1
+        observer.observe(&make_udp_pkt(
+            "10.0.0.1",
+            "224.0.0.251",
+            5353,
+            5353,
+            make_mdns_payload(&[b"PLC-A", b"local"], [10, 0, 0, 1]),
+        ));
+
+        // Step 2: DHCP ACK → "HMI-B" at 10.0.0.2  (DHCP is already implemented)
+        let mut dhcp = vec![0u8; 240];
+        dhcp[16..20].copy_from_slice(&[10, 0, 0, 2]); // yiaddr = 10.0.0.2
+        dhcp[236..240].copy_from_slice(&[0x63, 0x82, 0x53, 0x63]); // magic cookie
+        dhcp.extend_from_slice(&[12, 5, b'H', b'M', b'I', b'-', b'B', 0xFF]); // opt 12 + END
+        observer.observe(&crate::pcap::Packet {
+            ts: fixed_ts(),
+            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x02],
+            dst_mac: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+            src_ip: ip("10.0.0.2"),
+            dst_ip: ip("10.0.0.1"),
+            transport: Transport::Udp,
+            src_port: 68,
+            dst_port: 67,
+            payload: dhcp,
+        });
+
+        // Step 3: NetBIOS-NS → "ENG-WS" from 10.0.0.3
+        observer.observe(&make_udp_pkt(
+            "10.0.0.3",
+            "10.0.0.255",
+            137,
+            137,
+            make_nbns_payload(b"ENG-WS"),
+        ));
+
+        // Step 4: LLMNR response → "SCADA-SRV" at 10.0.0.4
+        observer.observe(&make_udp_pkt(
+            "10.0.0.50",
+            "224.0.0.252",
+            5355,
+            5355,
+            make_llmnr_payload(&[b"SCADA-SRV"], [10, 0, 0, 4]),
+        ));
+
+        // Step 5: second mDNS for 10.0.0.1 → "PLC-A-NEW" (later in packet/processing order, last-write-wins)
+        observer.observe(&make_udp_pkt(
+            "10.0.0.1",
+            "224.0.0.251",
+            5353,
+            5353,
+            make_mdns_payload(&[b"PLC-A-NEW", b"local"], [10, 0, 0, 1]),
+        ));
+
+        let obs = observer.finish();
+
+        assert_eq!(
+            obs.hostnames.get(&ip("10.0.0.1")).map(String::as_str),
+            Some("PLC-A-NEW"),
+            "AC-004 step 5: second mDNS packet for 10.0.0.1 must overwrite first (last-write-wins)"
+        );
+        assert_eq!(
+            obs.hostnames.get(&ip("10.0.0.2")).map(String::as_str),
+            Some("HMI-B"),
+            "AC-004 step 2: DHCP hostname extraction must continue to work"
+        );
+        assert_eq!(
+            obs.hostnames.get(&ip("10.0.0.3")).map(String::as_str),
+            Some("ENG-WS"),
+            "AC-004 step 3: NetBIOS-NS registration must insert hostname for src_ip"
+        );
+        assert_eq!(
+            obs.hostnames.get(&ip("10.0.0.4")).map(String::as_str),
+            Some("SCADA-SRV"),
+            "AC-004 step 4: LLMNR A-record response must insert hostname for RDATA IP"
+        );
+    }
+
+    /// BC-1.02.013 / AC-004: `classify_flow` must label UDP/5353 as "mdns",
+    /// UDP/5355 as "llmnr", and UDP/137 as "netbios".
+    ///
+    /// These labels drive both the flow table and the inventory layer's
+    /// protocol field. A regression here would silently drop the "mdns" /
+    /// "llmnr" labels from the comms-matrix and asset-role inference.
+    #[test]
+    fn test_bc_1_02_013_classify_flow_labels_mdns_llmnr_netbios() {
+        use crate::pcap::Transport;
+
+        // UDP/5353 → "mdns"
+        let pkt_mdns = make_udp_pkt("10.0.0.1", "224.0.0.251", 5353, 5353, vec![]);
+        assert_eq!(
+            super::classify_flow(&pkt_mdns).as_deref(),
+            Some("mdns"),
+            "classify_flow must return 'mdns' for UDP/5353"
+        );
+
+        // UDP/5355 → "llmnr"
+        let pkt_llmnr = make_udp_pkt("10.0.0.1", "224.0.0.252", 5355, 5355, vec![]);
+        assert_eq!(
+            super::classify_flow(&pkt_llmnr).as_deref(),
+            Some("llmnr"),
+            "classify_flow must return 'llmnr' for UDP/5355"
+        );
+
+        // UDP/137 → "netbios"
+        let pkt_netbios = make_udp_pkt("10.0.0.1", "10.0.0.255", 137, 137, vec![]);
+        assert_eq!(
+            super::classify_flow(&pkt_netbios).as_deref(),
+            Some("netbios"),
+            "classify_flow must return 'netbios' for UDP/137"
+        );
+
+        // Sanity: TCP/5353 (mDNS only runs over UDP) must NOT match.
+        let pkt_tcp_mdns = crate::pcap::Packet {
+            ts: fixed_ts(),
+            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+            dst_mac: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+            src_ip: "10.0.0.1".parse().unwrap(),
+            dst_ip: "10.0.0.2".parse().unwrap(),
+            transport: Transport::Tcp,
+            src_port: 12345,
+            dst_port: 5353,
+            payload: vec![],
+        };
+        assert!(
+            super::classify_flow(&pkt_tcp_mdns).is_none(),
+            "classify_flow must return None for TCP/5353 (mDNS is UDP only)"
         );
     }
 }
