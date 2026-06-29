@@ -1,7 +1,11 @@
 # ADR-0013: Zonewarden segmentation-conformance module
 
 ## Status
-Proposed (v0.6 target)
+Accepted — implemented. The engine was imported as `crates/zonewarden` (history
+preserved), bridged into `observe`, surfaced as `zonewarden.*` findings + a report
+section, wired into `analyze --policy`, and exposed via `otsniff zonewarden suggest`
+(policy drafting from the asset inventory). The 7 segmentation Kani proofs run in
+`kani.yml`. The standalone zonewarden repo is archived.
 
 ## Context
 `zonewarden` began as a separate tool: it takes a declarative IEC 62443

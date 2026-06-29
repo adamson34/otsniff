@@ -58,6 +58,51 @@ jobs:
         run: cargo kani --harness composed_privacy_invariant_non_vacuous --unwind 10
         timeout-minutes: 30
         continue-on-error: true
+      # --- Zonewarden segmentation proofs (ADR-0013), in crate `zonewarden`.
+      # The 7 below are required; proof_canonicalize_idempotent (VP-008) is
+      # partial (symbolic-length sort doesn't terminate in a practical bound;
+      # proptest-covered) and runs for signal only, not in the required count.
+      - name: ZW VP-001 resolver totality
+        id: zw_resolve_total
+        run: cargo kani -p zonewarden --harness resolve_is_total_on_empty_index
+        timeout-minutes: 15
+        continue-on-error: true
+      - name: ZW VP-002 longest-prefix selection
+        id: zw_longest_prefix
+        run: cargo kani -p zonewarden --harness longest_prefix_wins
+        timeout-minutes: 20
+        continue-on-error: true
+      - name: ZW VP-003 IDMZ truth table
+        id: zw_idmz
+        run: cargo kani -p zonewarden --harness bypass_truth_table
+        timeout-minutes: 15
+        continue-on-error: true
+      - name: ZW VP-004 verdict totality
+        id: zw_verdict
+        run: cargo kani -p zonewarden --harness verdict_total
+        timeout-minutes: 15
+        continue-on-error: true
+      - name: ZW VP-006 tally never wraps
+        id: zw_tally
+        run: cargo kani -p zonewarden --harness checked_inc_never_wraps
+        timeout-minutes: 15
+        continue-on-error: true
+      - name: ZW VP-010 multicast exempt (IPv4)
+        id: zw_mc_v4
+        run: cargo kani -p zonewarden --harness step1_ipv4_multicast_broadcast_exempt
+        timeout-minutes: 20
+        continue-on-error: true
+      - name: ZW VP-010 multicast exempt (IPv6)
+        id: zw_mc_v6
+        run: cargo kani -p zonewarden --harness step1_ipv6_multicast_exempt
+        timeout-minutes: 20
+        continue-on-error: true
+      - name: ZW VP-008 portset canonical (informational, partial)
+        id: zw_portset
+        run: cargo kani -p zonewarden --harness proof_canonicalize_idempotent
+        timeout-minutes: 20
+        continue-on-error: true
+
       - name: Summarize harness outcomes
         run: |
           echo "Harness outcomes:"
@@ -94,4 +139,39 @@ jobs:
             exit 0
           fi
           echo "::error::F-ADV-P4-005: only ${succeeded}/${EXPECTED} Kani harnesses reported success. A regression in the privacy invariant proofs is possible — inspect the per-harness output above."
+          exit 1
+
+      - name: Summarize segmentation proof outcomes (ADR-0013)
+        if: always()
+        run: |
+          echo "Zonewarden segmentation proof outcomes:"
+          echo "  resolve_is_total_on_empty_index:        ${{ steps.zw_resolve_total.outcome }}"
+          echo "  longest_prefix_wins:                    ${{ steps.zw_longest_prefix.outcome }}"
+          echo "  bypass_truth_table:                     ${{ steps.zw_idmz.outcome }}"
+          echo "  verdict_total:                          ${{ steps.zw_verdict.outcome }}"
+          echo "  checked_inc_never_wraps:                ${{ steps.zw_tally.outcome }}"
+          echo "  step1_ipv4_multicast_broadcast_exempt:  ${{ steps.zw_mc_v4.outcome }}"
+          echo "  step1_ipv6_multicast_exempt:            ${{ steps.zw_mc_v6.outcome }}"
+          echo "  proof_canonicalize_idempotent (info):   ${{ steps.zw_portset.outcome }}"
+
+          # Require all 7 core segmentation harnesses (VP-008 is informational).
+          EXPECTED=7
+          succeeded=0
+          for outcome in \
+            "${{ steps.zw_resolve_total.outcome }}" \
+            "${{ steps.zw_longest_prefix.outcome }}" \
+            "${{ steps.zw_idmz.outcome }}" \
+            "${{ steps.zw_verdict.outcome }}" \
+            "${{ steps.zw_tally.outcome }}" \
+            "${{ steps.zw_mc_v4.outcome }}" \
+            "${{ steps.zw_mc_v6.outcome }}"; do
+            if [ "$outcome" = "success" ]; then
+              succeeded=$((succeeded + 1))
+            fi
+          done
+          if [ "$succeeded" -eq "$EXPECTED" ]; then
+            echo "Check passed: ${succeeded}/${EXPECTED} segmentation Kani harnesses verified"
+            exit 0
+          fi
+          echo "::error::only ${succeeded}/${EXPECTED} segmentation Kani harnesses reported success (ADR-0013). A regression in the resolver/classifier/IDMZ/multicast proofs is possible — inspect the per-harness output above."
           exit 1
