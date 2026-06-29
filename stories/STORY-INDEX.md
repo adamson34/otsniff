@@ -57,7 +57,7 @@ status: active
 
 | S-7.01 | Zonewarden segmentation-conformance module | E-7 | — | — | completed-backfill (#123–#130; v0.5.0) | S-6.01 conceptually | S.1, S.3, S.4, S.8, S.9 |
 | S-7.02 | Segmentation drift — `diff --policy` | E-7 | — | — | completed-backfill (#136; v0.5.0) | S-7.01, S-6.02, S-6.03 | S.4, S.8, S.9 |
-| S-8.01 | mDNS / NetBIOS-NS / LLMNR hostname extraction | E-8 | 1 | 5 | ready | — | S.1 |
+| S-8.01 | mDNS / NetBIOS-NS / LLMNR hostname extraction | E-8 | 1 | 5 | completed | #138 (6334e36) | S.1 |
 
 **Total points (v0.4.0-feature):** 125 (Wave 1: ~88, Wave 2: ~24, Wave 3: ~13)
 **Total stories (v0.4.0-feature):** 38 (Wave 1: 30, Wave 2: 6, Wave 3: 2)
