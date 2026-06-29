@@ -1987,8 +1987,8 @@ mod modbus_unit_id_tests {
 
         let mut encoded = [0u8; 32];
         for (i, &b) in decoded.iter().enumerate() {
-            encoded[2 * i]     = ((b >> 4) & 0xF) + b'A';
-            encoded[2 * i + 1] = (b & 0xF)        + b'A';
+            encoded[2 * i] = ((b >> 4) & 0xF) + b'A';
+            encoded[2 * i + 1] = (b & 0xF) + b'A';
         }
 
         let mut buf = vec![
@@ -1998,7 +1998,7 @@ mod modbus_unit_id_tests {
             0x00, 0x00, // ANCOUNT = 0
             0x00, 0x00, // NSCOUNT = 0
             0x00, 0x00, // ARCOUNT = 0
-            0x20,       // label_len = 32
+            0x20, // label_len = 32
         ];
         buf.extend_from_slice(&encoded);
         buf.push(0x00); // end of QNAME
@@ -2113,7 +2113,10 @@ mod modbus_unit_id_tests {
 
         // Step 1: mDNS → "PLC-A" at 10.0.0.1
         observer.observe(&make_udp_pkt(
-            "10.0.0.1", "224.0.0.251", 5353, 5353,
+            "10.0.0.1",
+            "224.0.0.251",
+            5353,
+            5353,
             make_mdns_payload(&[b"PLC-A", b"local"], [10, 0, 0, 1]),
         ));
 
@@ -2136,19 +2139,28 @@ mod modbus_unit_id_tests {
 
         // Step 3: NetBIOS-NS → "ENG-WS" from 10.0.0.3
         observer.observe(&make_udp_pkt(
-            "10.0.0.3", "10.0.0.255", 137, 137,
+            "10.0.0.3",
+            "10.0.0.255",
+            137,
+            137,
             make_nbns_payload(b"ENG-WS"),
         ));
 
         // Step 4: LLMNR response → "SCADA-SRV" at 10.0.0.4
         observer.observe(&make_udp_pkt(
-            "10.0.0.50", "224.0.0.252", 5355, 5355,
+            "10.0.0.50",
+            "224.0.0.252",
+            5355,
+            5355,
             make_llmnr_payload(&[b"SCADA-SRV"], [10, 0, 0, 4]),
         ));
 
         // Step 5: second mDNS for 10.0.0.1 → "PLC-A-NEW" (later, overwrites step 1)
         observer.observe(&make_udp_pkt(
-            "10.0.0.1", "224.0.0.251", 5353, 5353,
+            "10.0.0.1",
+            "224.0.0.251",
+            5353,
+            5353,
             make_mdns_payload(&[b"PLC-A-NEW", b"local"], [10, 0, 0, 1]),
         ));
 

@@ -163,12 +163,18 @@ mod tests {
     /// QDCOUNT, NSCOUNT, ARCOUNT are all zero.
     fn dns_header(ancount: u16) -> Vec<u8> {
         vec![
-            0x00, 0x00,                                    // TxID
-            0x84, 0x00,                                    // Flags: QR=1, AA=1
-            0x00, 0x00,                                    // QDCOUNT = 0
-            (ancount >> 8) as u8, (ancount & 0xFF) as u8, // ANCOUNT
-            0x00, 0x00,                                    // NSCOUNT = 0
-            0x00, 0x00,                                    // ARCOUNT = 0
+            0x00,
+            0x00, // TxID
+            0x84,
+            0x00, // Flags: QR=1, AA=1
+            0x00,
+            0x00, // QDCOUNT = 0
+            (ancount >> 8) as u8,
+            (ancount & 0xFF) as u8, // ANCOUNT
+            0x00,
+            0x00, // NSCOUNT = 0
+            0x00,
+            0x00, // ARCOUNT = 0
         ]
     }
 
