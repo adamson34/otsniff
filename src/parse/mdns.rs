@@ -74,12 +74,25 @@ pub fn parse(payload: &[u8]) -> Vec<MdnsHostname> {
                 payload[pos + 2],
                 payload[pos + 3],
             ]);
-            // BC-1.02.013 precondition: strip `.local` suffix, then any trailing dot.
-            let stripped = name.strip_suffix(".local").unwrap_or(&name);
+            // BC-1.02.013 precondition: strip `.local` suffix (case-insensitive),
+            // then any trailing dot.
+            const LOCAL_SUFFIX: &str = ".local";
+            let stripped = if name.to_ascii_lowercase().ends_with(LOCAL_SUFFIX) {
+                &name[..name.len() - LOCAL_SUFFIX.len()]
+            } else {
+                &name
+            };
             let normalized = stripped.trim_end_matches('.');
-            if !normalized.is_empty() {
+            // F-001: sanitize to printable ASCII (mirror dhcp.rs) before the
+            // empty-check, so control bytes / NULs do not survive into reports.
+            let sanitized: String = normalized
+                .bytes()
+                .filter(|&b| (0x20..0x7F).contains(&b))
+                .map(|b| b as char)
+                .collect();
+            if !sanitized.is_empty() {
                 results.push(MdnsHostname {
-                    name: normalized.to_string(),
+                    name: sanitized,
                     ip,
                 });
             }
@@ -351,5 +364,49 @@ mod tests {
     fn test_bc_1_02_010_malformed_payload_never_panics() {
         let _ = parse(&[]);
         let _ = parse(&[0xFFu8; 1500]);
+    }
+
+    // ── F-001: hostname sanitization (printable ASCII filter) ─────────────────
+
+    /// F-001 / BC-1.02.010: a label containing an embedded NUL byte (0x00)
+    /// must have that byte stripped.  The remaining printable chars must be
+    /// returned; the name must not contain 0x00.
+    ///
+    /// Fixture: single-label "HMI\x00-3" → after filter → "HMI-3".
+    #[test]
+    fn test_f001_sanitize_strips_embedded_nul() {
+        // Encode the label bytes directly — note dns_name uses the slice len as
+        // the length prefix, so the NUL is part of the label payload.
+        let label: &[u8] = b"HMI\x00-3";
+        let name = dns_name(&[label]);
+        let ans = a_record(&name, [10, 0, 0, 20]);
+        let msg = build_mdns(&[ans]);
+        let results = parse(&msg);
+        assert_eq!(
+            results.len(),
+            1,
+            "F-001 mDNS: name with embedded NUL must yield one record after sanitization"
+        );
+        assert_eq!(
+            results[0].name, "HMI-3",
+            "F-001 mDNS: embedded NUL (0x00) must be stripped; remaining chars preserved"
+        );
+    }
+
+    /// F-001 / BC-1.02.010: a name consisting entirely of control bytes must be
+    /// discarded (sanitizes to empty string).
+    ///
+    /// Fixture: label is [0x01, 0x07, 0x1F] (all below 0x20) → sanitized to "" → discarded.
+    #[test]
+    fn test_f001_sanitize_discards_all_control_byte_name() {
+        let label: &[u8] = &[0x01, 0x07, 0x1F];
+        let name = dns_name(&[label]);
+        let ans = a_record(&name, [10, 0, 0, 21]);
+        let msg = build_mdns(&[ans]);
+        let results = parse(&msg);
+        assert!(
+            results.is_empty(),
+            "F-001 mDNS: name consisting entirely of control bytes must be discarded (sanitizes to empty)"
+        );
     }
 }
