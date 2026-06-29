@@ -3,8 +3,21 @@
   "cycle": "v0.6.0-feature",
   "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
   "clean_streak": 2,
-  "last_classification": "NITPICK_ONLY",
+  "last_classification": "NITPICK_ONLY (pass 5 reported SUBSTANTIVE; F-201 overturned by orchestrator verification)",
   "passes": [
+    {
+      "pass": 5,
+      "classification_reported": "SUBSTANTIVE",
+      "classification_effective": "NITPICK_ONLY",
+      "findings": {
+        "blocking": 0,
+        "substantive_reported": ["F-201 claims observer tests for NetBIOS/LLMNR wiring + last-write-wins are missing"],
+        "substantive_overturned": ["F-201 is a FALSE POSITIVE — orchestrator verified the tests EXIST: src/observe.rs test_bc_1_02_013_{mdns,netbios,llmnr}_*_populates_hostnames (lines 2033/2052/2070) + test_bc_1_02_013_last_write_wins_same_ip (line 2090); the netbios test asserts src_ip->name (the differing branch). Adversary's grep missed the test module at 1939-2104. Pass 4 cited these same tests correctly."],
+        "nitpick": ["F-202 (real): mDNS/LLMNR don't discard whitespace-only names (NetBIOS does) — being fixed", "F-201 valid residual: add single combined AC-004 multi-source sequence test + classify_flow label assertion — being added"]
+      },
+      "resolution": "F-201 overturned with evidence (does not reset streak). F-202 fix + combined-sequence test + classify_flow label test dispatched. Final confirmation pass to follow.",
+      "verification_discipline_note": "Per orchestrator 'verification output is evidence, agent reports are claims' — an adversary report contradicting prior passes on a checkable fact was verified against code before acceptance."
+    },
     {
       "pass": 4,
       "classification": "NITPICK_ONLY",
