@@ -72,18 +72,22 @@ pub fn parse_registration(payload: &[u8]) -> Option<NetBiosHostname> {
         .unwrap_or(0);
     let trimmed = &name_bytes[..trimmed_len];
 
-    // EC-003: empty after trim → None.
-    if trimmed.is_empty() {
+    // F-001: sanitize to printable ASCII (mirror dhcp.rs) before the
+    // empty-check.  This strips embedded NULs (0x00) and any other control
+    // bytes that survived the space-trim, and supersedes the previous "all NULs"
+    // guard (NUL is not in 0x20..0x7F so it is filtered here).
+    let sanitized: String = trimmed
+        .iter()
+        .filter(|&&b| (0x20..0x7F).contains(&b))
+        .map(|&b| b as char)
+        .collect();
+
+    // EC-003: empty after sanitize → None.
+    if sanitized.is_empty() {
         return None;
     }
 
-    // Discard names that are entirely null bytes (0x00).
-    if trimmed.iter().all(|&b| b == 0x00) {
-        return None;
-    }
-
-    let name = String::from_utf8_lossy(trimmed).into_owned();
-    Some(NetBiosHostname { name })
+    Some(NetBiosHostname { name: sanitized })
 }
 
 #[cfg(test)]
@@ -246,5 +250,65 @@ mod tests {
     fn test_bc_1_02_011_malformed_payload_never_panics() {
         let _ = parse_registration(&[]);
         let _ = parse_registration(&[0xFFu8; 1500]);
+    }
+
+    // ── F-001: hostname sanitization (printable ASCII filter) ─────────────────
+
+    /// F-001 / BC-1.02.011: a decoded NBNS name that contains embedded NUL
+    /// bytes (0x00, from encoded 'A','A' pairs) must have those bytes stripped
+    /// by the printable ASCII filter.  Only the visible chars before the NULs
+    /// must survive.
+    ///
+    /// Fixture: decoded 16-byte array is [b'A', b'B', 0x00 × 13, 0x00 suffix].
+    /// Expected result: Some(NetBiosHostname { name: "AB" }).
+    ///
+    /// Without the filter the current code would return "AB\x00\x00..." with
+    /// embedded NULs because the "all NULs" check only rejects names that are
+    /// *entirely* null.
+    #[test]
+    fn test_f001_sanitize_strips_embedded_nuls_netbios() {
+        // Build decoded 16-byte: "AB" + 13 NULs + suffix NUL.
+        let mut decoded = [0x00u8; 16];
+        decoded[0] = b'A';
+        decoded[1] = b'B';
+        // bytes [2..15] stay 0x00 (NUL padding)
+        // decoded[15] = 0x00 (suffix, already set)
+        let encoded = nbns_encode(&decoded);
+        let (fh, fl) = reg_flags();
+        let pkt = make_nbns_reg(fh, fl, 32, &encoded);
+        let result = parse_registration(&pkt);
+        assert!(
+            result.is_some(),
+            "F-001 NetBIOS: 'AB' followed by NULs must yield Some(NetBiosHostname)"
+        );
+        let name = result.unwrap().name;
+        assert_eq!(
+            name, "AB",
+            "F-001 NetBIOS: embedded NUL bytes must be stripped; only 'AB' must survive"
+        );
+        assert!(
+            !name.contains('\x00'),
+            "F-001 NetBIOS: result name must not contain any NUL byte"
+        );
+    }
+
+    /// F-001 / BC-1.02.011: a decoded NBNS name that consists entirely of
+    /// non-printable control bytes (after trailing-space trim) must be
+    /// discarded → None.
+    ///
+    /// Fixture: decoded bytes are all 0x01 (SOH) — none in (0x20..0x7F) →
+    /// sanitized string is empty → None.
+    #[test]
+    fn test_f001_sanitize_discards_all_control_byte_name_netbios() {
+        // Build decoded 16-byte: all 0x01 (SOH, a control char below 0x20).
+        let decoded = [0x01u8; 16];
+        let encoded = nbns_encode(&decoded);
+        let (fh, fl) = reg_flags();
+        let pkt = make_nbns_reg(fh, fl, 32, &encoded);
+        let result = parse_registration(&pkt);
+        assert!(
+            result.is_none(),
+            "F-001 NetBIOS: name consisting entirely of control bytes must be discarded → None"
+        );
     }
 }
