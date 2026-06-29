@@ -30,6 +30,7 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1.11"
 sha2 = "0.11"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+zonewarden = { path = "crates/zonewarden" }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
