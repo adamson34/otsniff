@@ -262,6 +262,46 @@ mod tests {
         );
     }
 
+    /// EC-001 contract-lock: compression pointer in answer #1 must discard
+    /// already-accumulated valid answer #0 (ANCOUNT=2).
+    ///
+    /// The existing rejection test only exercises a pointer as the first/only
+    /// record, so a future refactor to partial-insertion wouldn't be caught.
+    /// This fixture places a valid A record first and a compression-pointer
+    /// owner name second; the entire message must still be rejected.
+    #[test]
+    fn test_ec001_compression_pointer_discards_prior_valid_record() {
+        // Answer #0: valid A record for "ENG-WS-01" → 10.0.1.20.
+        let name0 = dns_name(&[b"ENG-WS-01"]);
+        let ans0 = a_record(&name0, [10, 0, 1, 20]);
+
+        // Answer #1: owner name is a compression pointer (0xC0 0x0C) followed
+        // by a complete but unreachable RR body.  The pointer triggers the
+        // `read_name` → None → `return Vec::new()` path on the second loop
+        // iteration, discarding the already-accumulated ans0 result.
+        let mut ans1: Vec<u8> = Vec::new();
+        ans1.extend_from_slice(&[0xC0, 0x0C]); // DNS compression pointer
+        ans1.extend_from_slice(&[0x00, 0x01]); // RRTYPE = A
+        ans1.extend_from_slice(&[0x00, 0x01]); // RRCLASS = IN
+        ans1.extend_from_slice(&[0x00, 0x00, 0x00, 0x78]); // TTL = 120 s
+        ans1.extend_from_slice(&[0x00, 0x04]); // RDLENGTH = 4
+        ans1.extend_from_slice(&[10, 0, 1, 21]); // RDATA: 10.0.1.21
+
+        // Assemble: QR=1 response, ANCOUNT=2, then the two answer bytes.
+        let mut msg = llmnr_header(true, 2);
+        msg.extend_from_slice(&ans0);
+        msg.extend_from_slice(&ans1);
+
+        let results = parse(&msg);
+        assert!(
+            results.is_empty(),
+            "EC-001 LLMNR: compression pointer in answer #1 must discard the \
+             entire message, including already-accumulated valid answer #0; \
+             got: {:?}",
+            results
+        );
+    }
+
     /// BC-1.02.012 precondition / EC-001: compression pointer (0xC0 byte) in
     /// the answer owner name → entire message rejected → empty Vec.
     #[test]
