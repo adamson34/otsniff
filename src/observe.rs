@@ -2189,4 +2189,56 @@ mod modbus_unit_id_tests {
             "AC-004 step 4: LLMNR A-record response must insert hostname for RDATA IP"
         );
     }
+
+    /// BC-1.02.013 / AC-004: `classify_flow` must label UDP/5353 as "mdns",
+    /// UDP/5355 as "llmnr", and UDP/137 as "netbios".
+    ///
+    /// These labels drive both the flow table and the inventory layer's
+    /// protocol field. A regression here would silently drop the "mdns" /
+    /// "llmnr" labels from the comms-matrix and asset-role inference.
+    #[test]
+    fn test_bc_1_02_013_classify_flow_labels_mdns_llmnr_netbios() {
+        use crate::pcap::Transport;
+
+        // UDP/5353 → "mdns"
+        let pkt_mdns = make_udp_pkt("10.0.0.1", "224.0.0.251", 5353, 5353, vec![]);
+        assert_eq!(
+            super::classify_flow(&pkt_mdns).as_deref(),
+            Some("mdns"),
+            "classify_flow must return 'mdns' for UDP/5353"
+        );
+
+        // UDP/5355 → "llmnr"
+        let pkt_llmnr = make_udp_pkt("10.0.0.1", "224.0.0.252", 5355, 5355, vec![]);
+        assert_eq!(
+            super::classify_flow(&pkt_llmnr).as_deref(),
+            Some("llmnr"),
+            "classify_flow must return 'llmnr' for UDP/5355"
+        );
+
+        // UDP/137 → "netbios"
+        let pkt_netbios = make_udp_pkt("10.0.0.1", "10.0.0.255", 137, 137, vec![]);
+        assert_eq!(
+            super::classify_flow(&pkt_netbios).as_deref(),
+            Some("netbios"),
+            "classify_flow must return 'netbios' for UDP/137"
+        );
+
+        // Sanity: TCP/5353 (mDNS only runs over UDP) must NOT match.
+        let pkt_tcp_mdns = crate::pcap::Packet {
+            ts: fixed_ts(),
+            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+            dst_mac: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+            src_ip: "10.0.0.1".parse().unwrap(),
+            dst_ip: "10.0.0.2".parse().unwrap(),
+            transport: Transport::Tcp,
+            src_port: 12345,
+            dst_port: 5353,
+            payload: vec![],
+        };
+        assert!(
+            super::classify_flow(&pkt_tcp_mdns).is_none(),
+            "classify_flow must return None for TCP/5353 (mDNS is UDP only)"
+        );
+    }
 }
