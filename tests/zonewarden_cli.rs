@@ -63,3 +63,22 @@ fn analyze_without_policy_has_no_conformance_section() {
         "no conformance section without --policy"
     );
 }
+
+#[test]
+fn zonewarden_suggest_emits_a_valid_draft_policy() {
+    let assert = Command::cargo_bin("otsniff")
+        .unwrap()
+        .arg("zonewarden")
+        .arg("suggest")
+        .arg(PCAP)
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(out.contains("zones:"), "draft has a zones section");
+    assert!(out.contains("purdue_level:"), "draft assigns Purdue levels");
+    assert!(out.contains("conduits:"), "draft has a conduits section");
+    assert!(
+        out.contains("otsniff zonewarden suggest"),
+        "draft is self-documenting"
+    );
+}

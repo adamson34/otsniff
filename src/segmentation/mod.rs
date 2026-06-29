@@ -11,6 +11,7 @@
 pub mod bridge;
 pub mod engine;
 pub mod policy;
+pub mod suggest;
 
 use zonewarden::errors::ZonewardenError;
 use zonewarden::types::ConformanceResult;
