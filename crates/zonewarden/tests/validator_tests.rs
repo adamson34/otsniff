@@ -8,12 +8,12 @@
 //! Test names intentionally use the upper-case `BC` contract id.
 #![allow(non_snake_case)]
 
-use zonewarden_core::errors::PolicyError;
-use zonewarden_core::portset::PortSet;
-use zonewarden_core::types::{
+use zonewarden::errors::PolicyError;
+use zonewarden::portset::PortSet;
+use zonewarden::types::{
     AssetMatcher, Conduit, Direction, Policy, Proto, PurdueLevel, Zone, ZoneId,
 };
-use zonewarden_core::validator::validate;
+use zonewarden::validator::validate;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

@@ -7,8 +7,8 @@
 //! acceptance criteria.
 #![allow(non_snake_case)]
 
-use zonewarden_core::severity::{conn_state_from_token, grade};
-use zonewarden_core::types::{ConnState, Severity};
+use zonewarden::severity::{conn_state_from_token, grade};
+use zonewarden::types::{ConnState, Severity};
 
 /// End-to-end path a violation reporter takes: raw Zeek token → bucket → graded
 /// severity.

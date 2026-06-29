@@ -5,12 +5,12 @@
 
 use std::net::IpAddr;
 
-use zonewarden_core::idmz::check;
-use zonewarden_core::types::{
+use zonewarden::idmz::check;
+use zonewarden::types::{
     AssetMatcher, DstKind, MatchKind, Policy, PurdueLevel, ResolvedEndpoint, ValidatedPolicy, Zone,
     ZoneId,
 };
-use zonewarden_core::validator::validate;
+use zonewarden::validator::validate;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

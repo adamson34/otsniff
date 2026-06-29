@@ -9,13 +9,13 @@
 use std::net::IpAddr;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use zonewarden_core::classifier::{classify, ClassifyCtx};
-use zonewarden_core::portset::PortSet;
-use zonewarden_core::types::{
+use zonewarden::classifier::{classify, ClassifyCtx};
+use zonewarden::portset::PortSet;
+use zonewarden::types::{
     AssetMatcher, Conduit, Direction, DstKind, Flow, MatchKind, Proto, PurdueLevel,
     ResolvedEndpoint, ResolvedPair, ServiceSource, Timestamp, ValidatedPolicy, Zone, ZoneId,
 };
-use zonewarden_core::validator::validate;
+use zonewarden::validator::validate;
 
 fn zone(id: &str, level: PurdueLevel, cidr: &str) -> Zone {
     let (addr, plen) = cidr.split_once('/').unwrap();
@@ -48,7 +48,7 @@ fn policy() -> ValidatedPolicy {
             ports: PortSet::from_pairs(&[(44818, 44818)]).unwrap(),
         },
     ];
-    validate(zonewarden_core::types::Policy {
+    validate(zonewarden::types::Policy {
         zones: vec![
             zone("plc", PurdueLevel::L1, "10.0.1.0/24"),
             zone("hist", PurdueLevel::L3, "10.0.3.0/24"),

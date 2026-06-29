@@ -6,14 +6,14 @@
 
 use std::net::IpAddr;
 
-use zonewarden_core::classifier::{classify, violations_for, ClassifyCtx};
-use zonewarden_core::portset::PortSet;
-use zonewarden_core::types::{
+use zonewarden::classifier::{classify, violations_for, ClassifyCtx};
+use zonewarden::portset::PortSet;
+use zonewarden::types::{
     AssetMatcher, Conduit, ConnState, Direction, DstKind, Flow, MatchKind, Proto, PurdueLevel,
     ResolvedEndpoint, ResolvedPair, ServiceSource, Severity, Timestamp, ValidatedPolicy, Verdict,
     VerdictKind, Violation, ViolationKind, Zone, ZoneId,
 };
-use zonewarden_core::validator::validate;
+use zonewarden::validator::validate;
 
 /// S-4.03 tests classify non-multicast flows; this wrapper passes Normal so they
 /// stay readable. S-4.04 multicast tests call `classify` with the dst_kind.
@@ -53,7 +53,7 @@ fn ports(pairs: &[(u16, u16)]) -> PortSet {
 
 /// Validated policy: zones a (L2), b (L2), it (L4) + the given conduits.
 fn vp(conduits: Vec<Conduit>) -> ValidatedPolicy {
-    validate(zonewarden_core::types::Policy {
+    validate(zonewarden::types::Policy {
         zones: vec![
             zone("a", PurdueLevel::L2, "10.0.0.0/24"),
             zone("b", PurdueLevel::L2, "10.0.1.0/24"),
@@ -172,13 +172,13 @@ fn test_BC_1_04_003_any_match_first_conduit_permits() {
     let v = classify_normal(&ctx, &flow(Proto::Tcp, Some(502), None), &pair("a", "b"));
     assert_eq!(
         v.kind,
-        VerdictKind::Allowed(zonewarden_core::types::ConduitId(0))
+        VerdictKind::Allowed(zonewarden::types::ConduitId(0))
     );
     // EC-003: second conduit matches when first doesn't
     let v2 = classify_normal(&ctx, &flow(Proto::Tcp, Some(44818), None), &pair("a", "b"));
     assert_eq!(
         v2.kind,
-        VerdictKind::Allowed(zonewarden_core::types::ConduitId(1))
+        VerdictKind::Allowed(zonewarden::types::ConduitId(1))
     );
 }
 

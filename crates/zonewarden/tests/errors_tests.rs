@@ -5,7 +5,7 @@
 //! against a constant-return mutation (→ 0 or → 1).
 #![allow(non_snake_case)]
 
-use zonewarden_core::errors::{IoError, PolicyError, SysError, ZonewardenError};
+use zonewarden::errors::{IoError, PolicyError, SysError, ZonewardenError};
 
 #[test]
 fn test_ST_8_all_error_variants_exit_two() {

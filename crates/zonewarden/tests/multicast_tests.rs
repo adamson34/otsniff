@@ -8,11 +8,9 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use proptest::prelude::*;
 
-use zonewarden_core::multicast::classify_dst;
-use zonewarden_core::types::{
-    AssetMatcher, DstKind, Policy, PrefixIndex, PurdueLevel, Zone, ZoneId,
-};
-use zonewarden_core::validator::validate;
+use zonewarden::multicast::classify_dst;
+use zonewarden::types::{AssetMatcher, DstKind, Policy, PrefixIndex, PurdueLevel, Zone, ZoneId};
+use zonewarden::validator::validate;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

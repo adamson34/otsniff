@@ -1,12 +1,12 @@
 [package]
-name = "zonewarden-core"
+name = "zonewarden"
 version = "0.0.1"
-description = "Pure, deterministic core for OT segmentation conformance (zonewarden)."
-edition.workspace = true
-license.workspace = true
-authors.workspace = true
-repository.workspace = true
-rust-version.workspace = true
+description = "Pure, deterministic core for OT segmentation conformance — the Zonewarden module of otsniff (ADR-0013)."
+edition = "2021"
+license = "MIT"
+authors = ["Luke Adamson"]
+repository = "https://github.com/adamson34/otsniff"
+rust-version = "1.85"
 
 # Pure-core deps only: no I/O, no network. `thiserror` is a proc-macro/std-only
 # error-derive crate (ADR-006). Serialization (serde) is kept OUT of the core —

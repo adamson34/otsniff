@@ -5,9 +5,9 @@
 
 use proptest::prelude::*;
 
-use zonewarden_core::digest::compute;
-use zonewarden_core::portset::PortSet;
-use zonewarden_core::types::{
+use zonewarden::digest::compute;
+use zonewarden::portset::PortSet;
+use zonewarden::types::{
     AssetMatcher, Conduit, Direction, Policy, Proto, PurdueLevel, SlTarget, Zone, ZoneId,
 };
 

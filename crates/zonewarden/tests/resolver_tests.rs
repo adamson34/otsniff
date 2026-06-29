@@ -10,11 +10,9 @@ use std::net::IpAddr;
 
 use proptest::prelude::*;
 
-use zonewarden_core::resolver::{resolve, resolve_pair};
-use zonewarden_core::types::{
-    AssetMatcher, MatchKind, Policy, PrefixIndex, PurdueLevel, Zone, ZoneId,
-};
-use zonewarden_core::validator::validate;
+use zonewarden::resolver::{resolve, resolve_pair};
+use zonewarden::types::{AssetMatcher, MatchKind, Policy, PrefixIndex, PurdueLevel, Zone, ZoneId};
+use zonewarden::validator::validate;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

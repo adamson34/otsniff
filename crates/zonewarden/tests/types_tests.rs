@@ -6,7 +6,7 @@
 //! mutation (→ true or → false).
 #![allow(non_snake_case)]
 
-use zonewarden_core::types::Proto;
+use zonewarden::types::Proto;
 
 #[test]
 fn test_BC_1_04_006_is_portless_by_proto() {

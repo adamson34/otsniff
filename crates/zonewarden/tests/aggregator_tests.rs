@@ -5,14 +5,14 @@
 
 use proptest::prelude::*;
 
-use zonewarden_core::aggregator::{aggregate, checked_inc};
-use zonewarden_core::errors::SysError;
-use zonewarden_core::types::ValidatedPolicy;
-use zonewarden_core::types::{
+use zonewarden::aggregator::{aggregate, checked_inc};
+use zonewarden::errors::SysError;
+use zonewarden::types::ValidatedPolicy;
+use zonewarden::types::{
     AssetMatcher, ConduitId, Policy, Proto, PurdueLevel, ServiceSource, Severity, Timestamp,
     Verdict, VerdictKind, Violation, ViolationKind, Zone, ZoneId,
 };
-use zonewarden_core::validator::validate;
+use zonewarden::validator::validate;
 
 /// A violation with the sort-key fields set; other fields fixed.
 fn vio(
@@ -235,8 +235,8 @@ fn test_violations_collected_into_result() {
         flow_index: 0,
         src_zone: ZoneId("a".to_string()),
         dst_zone: ZoneId("b".to_string()),
-        kind: zonewarden_core::types::ViolationKind::NoMatchingConduit,
-        severity: zonewarden_core::types::Severity::Established,
+        kind: zonewarden::types::ViolationKind::NoMatchingConduit,
+        severity: zonewarden::types::Severity::Established,
         idmz_bypass: false,
         explanation: "x".to_string(),
         ts: Timestamp(0),
@@ -244,9 +244,9 @@ fn test_violations_collected_into_result() {
         dst_ip: "10.0.1.1".parse().unwrap(),
         src_port: Some(1),
         dst_port: Some(502),
-        proto: zonewarden_core::types::Proto::Tcp,
+        proto: zonewarden::types::Proto::Tcp,
         service: None,
-        service_source: zonewarden_core::types::ServiceSource::Unknown,
+        service_source: zonewarden::types::ServiceSource::Unknown,
         conn_state: None,
     };
     let r = aggregate(vec![(v, vec![vio])], &p, 0, vec![]).expect("ok");
@@ -299,7 +299,7 @@ fn items_with_vios(vios: Vec<Violation>) -> Vec<(Verdict, Vec<Violation>)> {
         .collect()
 }
 
-fn assert_sorted(r: &zonewarden_core::types::ConformanceResult) {
+fn assert_sorted(r: &zonewarden::types::ConformanceResult) {
     for w in r.violations.windows(2) {
         assert!(key(&w[0]) <= key(&w[1]), "violations not in total order");
     }
