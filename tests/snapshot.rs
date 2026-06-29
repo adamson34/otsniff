@@ -228,6 +228,7 @@ fn html_report_snapshot() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
     insta::assert_snapshot!("report_html", html);
@@ -552,6 +553,7 @@ fn ai_section_in_html_strips_script_tags_from_claude_response() {
         fixed_ts(),
         None,
         Some(ai_html),
+        None,
     )
     .unwrap();
 
@@ -666,6 +668,7 @@ fn cred_event_note_must_not_reach_any_rendered_output() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -1686,6 +1689,7 @@ fn render_html_includes_hero_band_with_inline_svg() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1729,6 +1733,7 @@ fn render_html_finding_cards_have_severity_tinted_background() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1761,6 +1766,7 @@ fn render_html_has_dark_mode_media_query() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1790,6 +1796,7 @@ fn render_html_print_styles_preserve_color() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -1826,6 +1833,7 @@ fn render_html_snapshot_remains_data_stable() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -1884,6 +1892,7 @@ fn render_html_logo_uses_pcb_style_traces() {
         fixed_ts(),
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1913,6 +1922,7 @@ fn render_fixture() -> String {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -2123,6 +2133,7 @@ fn render_html_tables_wrapped_in_collapsible_details() {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -2502,6 +2513,7 @@ fn render_report_html() -> String {
         &obs,
         "tests/fixtures/synthetic.pcap",
         fixed_ts(),
+        None,
         None,
         None,
     )
@@ -3483,6 +3495,7 @@ fn augment_failure_after_analyze_success_renders_without_augment() {
         fixed_ts(),
         None,
         None, // no AI section — augment failed
+        None,
     )
     .expect("EC-004: HTML render must succeed even when augment pass failed");
 

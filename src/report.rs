@@ -39,6 +39,10 @@ struct ReportView {
     /// askama escaping — that's intentional and only sound because
     /// of the prior filtering.
     ai_section: Option<String>,
+    /// Pre-rendered HTML for the Zonewarden segmentation-conformance section,
+    /// present only when a `--policy` was supplied (ADR-0013). Tool-controlled
+    /// content (tallies + a hex digest), so `|safe` is sound.
+    conformance_section: Option<String>,
 }
 
 struct FindingView {
@@ -79,6 +83,9 @@ struct TopFlow {
     bytes: String,
 }
 
+// Eight render inputs — a report is inherently wide. A params struct would just
+// move the width to the call sites without improving clarity.
+#[allow(clippy::too_many_arguments)]
 pub fn render_html(
     inventory: &[Asset],
     findings: &[Finding],
@@ -87,6 +94,7 @@ pub fn render_html(
     generated_at: DateTime<Utc>,
     capture_source: Option<&Classification>,
     ai_section: Option<String>,
+    conformance_section: Option<String>,
 ) -> Result<String> {
     let span = match (obs.first_ts, obs.last_ts) {
         (Some(a), Some(b)) => format!("{} → {}", fmt_ts(a), fmt_ts(b)),
@@ -165,6 +173,7 @@ pub fn render_html(
         assets: assets_view,
         top_flows,
         ai_section,
+        conformance_section,
     };
     Ok(view.render()?)
 }

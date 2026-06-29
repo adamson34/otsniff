@@ -221,6 +221,13 @@ pub struct AnalyzeArgs {
     /// detector still runs; this adds a human eyeball.
     #[arg(long = "review-scrub")]
     pub review_scrub: bool,
+    /// Path to a Zonewarden segmentation policy (YAML). When set, otsniff
+    /// classifies observed flows against the declared IEC 62443 zones/conduits
+    /// (ADR-0013): the report gains a "Zonewarden — Segmentation Conformance"
+    /// section and `zonewarden.*` findings, and the subnet-based
+    /// `egress.ot_to_internet` rule is superseded by the engine.
+    #[arg(long = "policy", value_name = "PATH")]
+    pub policy: Option<PathBuf>,
     /// Print parse summary + (with `--ai`) privacy ledger lines to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
@@ -601,7 +608,27 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     reporter.finish();
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
-    let findings = crate::findings::run_all(&obs, &ot_subnets);
+
+    // Zonewarden segmentation conformance (ADR-0013): only when --policy is set.
+    // With a policy, findings come from the policy-aware path (which supersedes
+    // the subnet-based egress rule) and the report gains the conformance section.
+    let conformance = match &args.policy {
+        Some(path) => {
+            let flows: Vec<crate::observe::FlowObs> = obs.flows.values().cloned().collect();
+            Some(crate::segmentation::run_conformance_path(path, &flows)?)
+        }
+        None => None,
+    };
+    let findings = match &conformance {
+        Some(result) => crate::findings::run_with_conformance(&obs, &ot_subnets, result),
+        None => crate::findings::run_all(&obs, &ot_subnets),
+    };
+    let conformance_html = conformance
+        .as_ref()
+        .map(crate::report::render_conformance_section);
+    let conformance_md = conformance
+        .as_ref()
+        .map(crate::report_md::render_conformance_section_md);
     let generated_at = Utc::now();
 
     // Always build the rules-based markdown — used both as the AI's
@@ -627,6 +654,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         generated_at,
         Some(&classification),
     )?;
+    let raw_md = match &conformance_md {
+        Some(section) => format!("{raw_md}\n{section}"),
+        None => raw_md,
+    };
 
     // Without --ai, the only outputs are the HTML report + optional
     // --md / --json sidecars. Short-circuit.
@@ -639,6 +670,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             generated_at,
             Some(&classification),
             None,
+            conformance_html.clone(),
         )?;
         std::fs::write(&args.output, html).map_err(|source| OtError::WriteOutput {
             path: args.output.clone(),
@@ -805,6 +837,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         generated_at,
         Some(&classification),
         Some(ai_html),
+        conformance_html,
     )?;
     std::fs::write(&args.output, html).map_err(|source| OtError::WriteOutput {
         path: args.output.clone(),

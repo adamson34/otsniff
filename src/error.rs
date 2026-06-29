@@ -53,6 +53,11 @@ pub enum OtError {
         /// Length, byte offset, and hash prefix only.
         message: String,
     },
+
+    /// A Zonewarden segmentation policy failed to load/validate, or the
+    /// conformance engine errored (ADR-0013).
+    #[error("segmentation policy error: {0}")]
+    Segmentation(#[from] ::zonewarden::errors::ZonewardenError),
 }
 
 impl OtError {
@@ -70,6 +75,7 @@ impl OtError {
             // re-run after fixing the scrub map).
             Self::PrivacyLeak { .. } => 75,
             Self::Parse(_) | Self::Render(_) | Self::Json(_) => 70, // EX_SOFTWARE
+            Self::Segmentation(_) => 2, // config/usage error, like bad input
         }
     }
 }
