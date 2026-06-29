@@ -107,33 +107,7 @@ pub enum Command {
     //
     // Internal traceability: BC-9.05.001 (subcommand surface),
     // BC-3.08.001..003 (delta shape). See docs/ROADMAP.md P1-3.
-    Diff {
-        /// Baseline capture (the "before" PCAP).
-        baseline_pcap: PathBuf,
-        /// Current capture (the "after" PCAP).
-        current_pcap: PathBuf,
-        /// Merged scrub map for the baseline capture.
-        #[arg(long)]
-        baseline_map: PathBuf,
-        /// Merged scrub map for the current capture.
-        #[arg(long)]
-        current_map: PathBuf,
-        /// Output report path (.html, .md, or .json).
-        #[arg(short, long)]
-        output: PathBuf,
-        /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
-        /// MUST match the value passed to `analyze` for the same captures, or
-        /// the findings layer will classify hosts differently and produce
-        /// spurious findings_new/findings_resolved entries (F-ADV-P1-001).
-        #[arg(long = "ot-subnet", value_name = "CIDR")]
-        ot_subnets: Vec<IpNet>,
-        /// Ratio threshold for flow-volume shift detection (default 2.0).
-        /// A flow appearing in both captures is reported as a shift when
-        /// the larger byte count is at least this multiple of the smaller.
-        /// Values < 1.0 are rejected at parse time.
-        #[arg(long, default_value_t = crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER)]
-        flow_shift_multiplier: f64,
-    },
+    Diff(DiffArgs),
     /// Zonewarden segmentation-conformance tools (ADR-0013).
     #[command(subcommand)]
     Zonewarden(ZonewardenCmd),
@@ -151,6 +125,42 @@ pub enum ZonewardenCmd {
         #[arg(long = "ot-subnet", value_name = "CIDR")]
         ot_subnets: Vec<IpNet>,
     },
+}
+
+#[derive(Args, Debug)]
+pub struct DiffArgs {
+    /// Baseline capture (the "before" PCAP).
+    pub baseline_pcap: PathBuf,
+    /// Current capture (the "after" PCAP).
+    pub current_pcap: PathBuf,
+    /// Merged scrub map for the baseline capture.
+    #[arg(long)]
+    pub baseline_map: PathBuf,
+    /// Merged scrub map for the current capture.
+    #[arg(long)]
+    pub current_map: PathBuf,
+    /// Output report path (.html, .md, or .json).
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
+    /// MUST match the value passed to `analyze` for the same captures, or
+    /// the findings layer will classify hosts differently and produce
+    /// spurious findings_new/findings_resolved entries (F-ADV-P1-001).
+    #[arg(long = "ot-subnet", value_name = "CIDR")]
+    pub ot_subnets: Vec<IpNet>,
+    /// Ratio threshold for flow-volume shift detection (default 2.0).
+    /// A flow appearing in both captures is reported as a shift when
+    /// the larger byte count is at least this multiple of the smaller.
+    /// Values < 1.0 are rejected at parse time.
+    #[arg(long, default_value_t = crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER)]
+    pub flow_shift_multiplier: f64,
+    /// Path to a Zonewarden segmentation policy (YAML). When set, the same
+    /// policy scores BOTH captures and the report gains a "Segmentation
+    /// drift" section: conformance tally deltas, per-violation
+    /// new/resolved/persisting, and the policy digest (P1-13). Omitting it
+    /// leaves the diff unchanged.
+    #[arg(long = "policy", value_name = "PATH")]
+    pub policy: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -280,23 +290,7 @@ pub fn run() -> Result<()> {
         Command::Scrub(a) => run_scrub(a),
         Command::Unscrub(a) => run_unscrub(a),
         Command::Rules(a) => run_rules(a),
-        Command::Diff {
-            baseline_pcap,
-            current_pcap,
-            baseline_map,
-            current_map,
-            output,
-            ot_subnets,
-            flow_shift_multiplier,
-        } => run_diff(
-            baseline_pcap,
-            current_pcap,
-            baseline_map,
-            current_map,
-            output,
-            ot_subnets,
-            flow_shift_multiplier,
-        ),
+        Command::Diff(a) => run_diff(a),
         Command::Zonewarden(ZonewardenCmd::Suggest { input, ot_subnets }) => {
             run_zonewarden_suggest(input, ot_subnets)
         }
@@ -318,15 +312,17 @@ fn run_zonewarden_suggest(input: PathBuf, ot_subnets: Vec<IpNet>) -> Result<()> 
 /// each side, calls `crate::diff::compute`, and writes the result. For `.json`
 /// outputs the `Diff` is serialized as pretty JSON. For `.html` and `.md`
 /// outputs a placeholder is written — full rendering arrives in S-6.03.
-fn run_diff(
-    baseline_pcap: PathBuf,
-    current_pcap: PathBuf,
-    baseline_map_path: PathBuf,
-    current_map_path: PathBuf,
-    output: PathBuf,
-    user_ot_subnets: Vec<IpNet>,
-    flow_shift_multiplier: f64,
-) -> Result<()> {
+fn run_diff(args: DiffArgs) -> Result<()> {
+    let DiffArgs {
+        baseline_pcap,
+        current_pcap,
+        baseline_map: baseline_map_path,
+        current_map: current_map_path,
+        output,
+        ot_subnets: user_ot_subnets,
+        flow_shift_multiplier,
+        policy,
+    } = args;
     // F-ADV-P1-002: validate the user-supplied multiplier at parse time so a
     // bogus value (e.g. 0 or negative) fails early instead of silently
     // producing zero shifts.
@@ -394,9 +390,27 @@ fn run_diff(
         report_coverage("current", &curr_obs, &curr_map);
     }
 
-    // Run findings for each side.
+    // Run findings for each side. P1-13: findings deliberately keep coming from
+    // `run_all` (NOT `run_with_conformance`), so the existing finding deltas stay
+    // policy-independent and comparable run to run. The segmentation-drift
+    // section owns all conformance-derived output.
     let base_findings = crate::findings::run_all(&base_obs, &ot_subnets);
     let curr_findings = crate::findings::run_all(&curr_obs, &ot_subnets);
+
+    // P1-13: when --policy is set, score BOTH captures against the SAME policy
+    // (single-policy-held-constant) using the exact path `analyze --policy` uses.
+    let (base_conf, curr_conf) = match &policy {
+        Some(policy_path) => {
+            let base_flows: Vec<crate::observe::FlowObs> =
+                base_obs.flows.values().cloned().collect();
+            let curr_flows: Vec<crate::observe::FlowObs> =
+                curr_obs.flows.values().cloned().collect();
+            let base_conf = crate::segmentation::run_conformance_path(policy_path, &base_flows)?;
+            let curr_conf = crate::segmentation::run_conformance_path(policy_path, &curr_flows)?;
+            (Some(base_conf), Some(curr_conf))
+        }
+        None => (None, None),
+    };
 
     // Compute the diff using the user-supplied multiplier directly
     // (F-ADV-P1-002: post-filter was silently a no-op for values < 2.0).
@@ -405,11 +419,13 @@ fn run_diff(
             observations: &base_obs,
             map: &base_map,
             findings: &base_findings,
+            conformance: base_conf.as_ref(),
         },
         crate::diff::DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &curr_findings,
+            conformance: curr_conf.as_ref(),
         },
         flow_shift_multiplier,
     );

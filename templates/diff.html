@@ -358,6 +358,9 @@
 {% endif %}
 
 {% endif %}
+{%- if !segmentation_section.is_empty() %}
+{{ segmentation_section|safe }}
+{%- endif %}
 </div>
 </body>
 </html>

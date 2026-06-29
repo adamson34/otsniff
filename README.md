@@ -237,6 +237,18 @@ With `--policy`, the report gains a **"Zonewarden — Segmentation Conformance"*
 
 > **Egress dedup.** When `--policy` is supplied, OT→internet flows are owned by the Zonewarden engine (which knows the declared zones precisely), so the subnet-based `egress.ot_to_internet` rule steps aside for those flows — you never get both findings for the same flow. Without a policy, the subnet rule fires unchanged.
 
+### Tracking drift over time
+
+Pass the same `--policy` to `diff` to compare two captures' conformance and answer *"did our segmentation posture regress since last quarter?"*:
+
+```sh
+otsniff diff baseline.pcap current.pcap \
+  --baseline-map baseline.map.json --current-map current.map.json \
+  --policy zones.yaml -o drift.html
+```
+
+The report gains a "Segmentation drift" section: per-metric conformance tally deltas (allowed / intra-zone / IDMZ-bypass / violation counts moving baseline→current), per-violation **new / resolved / persisting** lists, and the `policy_digest` as the audit anchor. One policy scores both captures, so the comparison holds the yardstick constant.
+
 ## Scope
 
 **In scope:**
@@ -261,9 +273,8 @@ With `--policy`, the report gains a **"Zonewarden — Segmentation Conformance"*
 
 ## What's next
 
-A taste of the proposed work — the full prioritized backlog with rationale lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Recently shipped: AI-augmented findings (`P0-8`), cross-capture diff (`P1-3`), and the Zonewarden segmentation module ([ADR-0013](docs/adr/0013-zonewarden-segmentation-module.md)).
+A taste of the proposed work — the full prioritized backlog with rationale lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Recently shipped: AI-augmented findings (`P0-8`), cross-capture diff (`P1-3`), the Zonewarden segmentation module ([ADR-0013](docs/adr/0013-zonewarden-segmentation-module.md)), and segmentation drift (`P1-13`, [see above](#tracking-drift-over-time)).
 
-- **Segmentation drift** — `otsniff diff` over two runs' `policy_digest` + conformance tallies: "did our segmentation posture regress since last quarter?" Pairs the cross-capture diff with the Zonewarden engine.
 - **mDNS / NetBIOS / LLMNR hostnames** (`P0-9`) — extend the asset inventory beyond DHCP-named hosts.
 - **Multi-PCAP analyze** (`P0-10`) — `otsniff analyze rotated-*.pcap` without needing `mergecap`.
 - **MITRE ATT&CK for ICS mapping** (`P1-6`) — every finding tagged with technique IDs blue teams already use.

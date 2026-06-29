@@ -624,7 +624,7 @@ deployments" gap discovered in May 2026 triage.
 (per-finding suppression hook), snapshot tests.
 **Deps:** none.
 
-### P1-13: Segmentation drift (M) — proposed
+### P1-13: Segmentation drift (M) — ✅ shipped
 
 `otsniff diff baseline.pcap current.pcap --policy zones.yaml` (or a
 dedicated `--segmentation-drift` mode) compares the *Zonewarden

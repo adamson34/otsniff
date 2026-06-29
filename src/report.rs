@@ -301,6 +301,168 @@ pub fn render_conformance_section(r: &zonewarden::types::ConformanceResult) -> S
     out
 }
 
+/// True when a [`SegmentationDrift`] carries any actual movement: a non-empty
+/// new/resolved violation list, or a tally metric that changed between captures.
+/// (Persisting violations and an all-equal tally are not, on their own, a delta.)
+fn segmentation_has_drift(drift: &crate::diff::SegmentationDrift) -> bool {
+    !drift.violations_new.is_empty()
+        || !drift.violations_resolved.is_empty()
+        || drift.tally.iter().any(|t| t.baseline != t.current)
+}
+
+/// Render the "Segmentation drift" HTML section from a [`SegmentationDrift`]
+/// (P1-13), as a self-contained fragment injected into the diff report (mirrors
+/// [`render_conformance_section`]). All content is tool-controlled — pseudonyms,
+/// integer tallies, and a hex digest — so plain HTML is safe.
+///
+/// Layout: a muted policy-digest anchor line, a tally table
+/// (metric | baseline | current | direction), and three violation-delta lists
+/// (new / resolved / persisting), each row `kind · src → dst:port/proto · severity`.
+pub fn render_segmentation_drift_section(drift: &crate::diff::SegmentationDrift) -> String {
+    /// Cap on violation rows per list to keep the report readable.
+    const MAX_VIOLATIONS: usize = 10;
+
+    let mut out = String::new();
+    out.push_str("<h2>Segmentation drift</h2>\n");
+    out.push_str(&format!(
+        "<p class=\"muted\" style=\"font-size:0.8rem;\">Policy digest: <code>{}</code> \
+         — one policy scored both captures; identical on each side by construction.</p>\n",
+        escape_html(&drift.policy_digest)
+    ));
+
+    // ---- Tally deltas ----
+    out.push_str("<h3>Conformance tally</h3>\n<table>\n<thead>\n");
+    out.push_str(
+        "<tr><th>Metric</th><th style=\"text-align:right\">Baseline</th>\
+                  <th style=\"text-align:right\">Current</th><th></th></tr>\n",
+    );
+    out.push_str("</thead>\n<tbody>\n");
+    for t in &drift.tally {
+        // More violations/bypasses = worse. Whether "up is bad" depends on the
+        // metric: for allowed/intra-zone/multicast-exempt a rise is benign, for
+        // the violation metrics a rise is a regression. We tint a rise on a
+        // violation metric with the high-severity color and a fall (good news)
+        // with the ok color.
+        let (arrow, cls) = match t.current.cmp(&t.baseline) {
+            std::cmp::Ordering::Greater => ("▲", drift_metric_class(&t.metric, true)),
+            std::cmp::Ordering::Less => ("▼", drift_metric_class(&t.metric, false)),
+            std::cmp::Ordering::Equal => ("—", ""),
+        };
+        let cls_attr = if cls.is_empty() {
+            String::new()
+        } else {
+            format!(" class=\"{cls}\"")
+        };
+        out.push_str(&format!(
+            "<tr><td>{}</td><td style=\"text-align:right\">{}</td>\
+             <td style=\"text-align:right\">{}</td><td{}>{}</td></tr>\n",
+            escape_html(&t.metric),
+            t.baseline,
+            t.current,
+            cls_attr,
+            arrow,
+        ));
+    }
+    out.push_str("</tbody>\n</table>\n");
+
+    // ---- Violation deltas ----
+    render_violation_list(
+        &mut out,
+        "New violations — NEW since baseline",
+        &drift.violations_new,
+        "host-new",
+        MAX_VIOLATIONS,
+    );
+    render_violation_list(
+        &mut out,
+        "Resolved violations",
+        &drift.violations_resolved,
+        "host-gone",
+        MAX_VIOLATIONS,
+    );
+    render_violation_list(
+        &mut out,
+        "Persisting violations",
+        &drift.violations_persisting,
+        "",
+        MAX_VIOLATIONS,
+    );
+
+    out
+}
+
+/// CSS class for a tally direction arrow. `up` is true when current > baseline.
+/// A rise in a violation metric is a regression (high color); a fall is good
+/// news (ok color). Benign metrics (allowed/intra-zone/multicast/external) carry
+/// no tint.
+fn drift_metric_class(metric: &str, up: bool) -> &'static str {
+    let is_violation = matches!(
+        metric,
+        "distinct_violating_flows" | "idmz_bypasses" | "no_matching_conduit" | "wrong_direction"
+    );
+    if !is_violation {
+        return "";
+    }
+    if up {
+        "host-gone"
+    } else {
+        "host-new"
+    }
+}
+
+/// Append a titled violation-delta list to `out`. `row_class` tints the kind
+/// cell ("host-new" green / "host-gone" struck-through / "" plain). Skips
+/// entirely when the slice is empty.
+fn render_violation_list(
+    out: &mut String,
+    title: &str,
+    refs: &[crate::diff::ViolationRef],
+    row_class: &str,
+    max: usize,
+) {
+    if refs.is_empty() {
+        return;
+    }
+    out.push_str(&format!(
+        "<h3>{} ({})</h3>\n<ul>\n",
+        escape_html(title),
+        refs.len()
+    ));
+    for v in refs.iter().take(max) {
+        let cls_attr = if row_class.is_empty() {
+            String::new()
+        } else {
+            format!(" class=\"{row_class}\"")
+        };
+        out.push_str(&format!(
+            "<li><code{}>{}</code> · <code>{}</code> → <code>{}:{}/{}</code> · {}</li>\n",
+            cls_attr,
+            escape_html(&v.kind),
+            escape_html(&v.src_pseudonym),
+            escape_html(&v.dst_pseudonym),
+            v.dst_port,
+            escape_html(&v.proto),
+            escape_html(&v.severity),
+        ));
+    }
+    if refs.len() > max {
+        out.push_str(&format!(
+            "<li class=\"muted\">… and {} more</li>\n",
+            refs.len() - max
+        ));
+    }
+    out.push_str("</ul>\n");
+}
+
+/// Minimal HTML-escape for the hand-built drift fragment. The inputs are
+/// tool-controlled (pseudonyms / digests / fixed metric ids) so this is
+/// defense-in-depth, matching the project's "fail safe" stance.
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 /// Render a cross-capture diff as a self-contained HTML report (S-6.03 AC-001).
 ///
 /// Produces a self-contained HTML document with sections for new, recurring,
@@ -316,6 +478,13 @@ pub fn render_conformance_section(r: &zonewarden::types::ConformanceResult) -> S
 pub fn render_diff_html(diff: &Diff) -> Result<String> {
     const MAX_EVIDENCE: usize = 5;
 
+    // P1-13: segmentation drift counts as a delta, so a diff with only drift
+    // doesn't fall under the "no deltas" banner.
+    let seg_has_drift = diff
+        .segmentation
+        .as_ref()
+        .map(segmentation_has_drift)
+        .unwrap_or(false);
     let no_deltas = diff.hosts_new.is_empty()
         && diff.hosts_gone.is_empty()
         && diff.findings_new.is_empty()
@@ -324,7 +493,8 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
         && diff.role_shifts.is_empty()
         && diff.flow_shifts.is_empty()
         && diff.flows_new.is_empty()
-        && diff.flows_gone.is_empty();
+        && diff.flows_gone.is_empty()
+        && !seg_has_drift;
 
     // C-1 (AC-003): sort each finding slice by a total key before rendering
     // so that two findings sharing the same rule `id` produce a deterministic
@@ -430,9 +600,17 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
         .map(diff_flow_summary_view)
         .collect();
 
+    // P1-13: pre-render the drift fragment (empty when no policy was supplied).
+    let segmentation_section = diff
+        .segmentation
+        .as_ref()
+        .map(render_segmentation_drift_section)
+        .unwrap_or_default();
+
     let view = DiffReportView {
         version: crate::VERSION.to_string(),
         no_deltas,
+        segmentation_section,
         findings_new_count: diff.findings_new.len(),
         findings_recurring_count: diff.findings_recurring.len(),
         findings_resolved_count: diff.findings_resolved.len(),
@@ -458,6 +636,10 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
 struct DiffReportView {
     version: String,
     no_deltas: bool,
+    /// Pre-rendered "Segmentation drift" HTML fragment (P1-13), empty when no
+    /// `--policy` was supplied. Tool-controlled content (pseudonyms + integer
+    /// tallies + a hex digest), so the template's `|safe` is sound.
+    segmentation_section: String,
     findings_new_count: usize,
     findings_recurring_count: usize,
     findings_resolved_count: usize,

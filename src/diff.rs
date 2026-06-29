@@ -103,6 +103,58 @@ pub struct FlowDelta {
     pub ratio: f64,
 }
 
+/// Segmentation-drift section (P1-13). Present on `Diff` only when BOTH diff
+/// inputs carried a Zonewarden `ConformanceResult` (i.e. `diff --policy`).
+///
+/// One policy scores both captures (single-policy-held-constant — see
+/// `docs/specs/segmentation-drift.md`), so `policy_digest` is identical on both
+/// sides by construction and recorded here as a displayed audit anchor.
+///
+/// **Privacy:** every endpoint in `violations_*` is a pseudonym resolved through
+/// the side's `ScrubMap` at construction time; raw IPs from the underlying
+/// `Violation` rows never reach this struct.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SegmentationDrift {
+    /// SHA-256 of the policy document the drift was measured against. Identical
+    /// on both sides (one policy); a displayed audit anchor, not a comparison.
+    pub policy_digest: String,
+    /// One row per conformance metric, in a fixed order (see [`TALLY_METRICS`]).
+    pub tally: Vec<TallyDelta>,
+    /// Violations present in current but not baseline (matched on the scrubbed key).
+    pub violations_new: Vec<ViolationRef>,
+    /// Violations present in baseline but not current.
+    pub violations_resolved: Vec<ViolationRef>,
+    /// Violations present in both captures.
+    pub violations_persisting: Vec<ViolationRef>,
+}
+
+/// Baseline → current movement of a single conformance tally metric. The
+/// direction (▲/▼/—) is derived in the view layer via `current.cmp(&baseline)`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TallyDelta {
+    /// Metric id, e.g. `"idmz_bypasses"`, `"allowed"`.
+    pub metric: String,
+    pub baseline: u64,
+    pub current: u64,
+}
+
+/// A pseudonymized projection of a Zonewarden `Violation`. This is the
+/// privacy-load-bearing type: the engine's `Violation` carries raw `src_ip` /
+/// `dst_ip`, so the drift builder resolves both endpoints to pseudonyms via the
+/// side's `ScrubMap` (`resolve_ip_to_pseudonym`, falling back to
+/// `unmapped_label`) before constructing this — a raw IP never reaches output.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ViolationRef {
+    /// Finding-id-style kind: `"idmz_bypass" | "wrong_direction" | "deny_by_default"`.
+    pub kind: String,
+    pub src_pseudonym: String,
+    pub dst_pseudonym: String,
+    pub dst_port: u16,
+    pub proto: String,
+    /// `"established" | "attempted"`.
+    pub severity: String,
+}
+
 /// Top-level diff output. Pure data; renderer (S-6.03) consumes this.
 ///
 /// Note: `Deserialize` is intentionally omitted — `Finding` contains
@@ -129,6 +181,11 @@ pub struct Diff {
     /// The flow-shift threshold this diff was computed with (used by renderers
     /// for accurate labels). Default is `DEFAULT_FLOW_SHIFT_MULTIPLIER` (2.0).
     pub flow_shift_multiplier: f64,
+    /// **P1-13:** segmentation-drift section, present only when both diff inputs
+    /// carried a Zonewarden conformance result (`diff --policy`). Absent from
+    /// JSON output otherwise (`skip_serializing_if`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segmentation: Option<SegmentationDrift>,
 }
 
 impl Default for Diff {
@@ -144,6 +201,7 @@ impl Default for Diff {
             flows_new: Vec::new(),
             flows_gone: Vec::new(),
             flow_shift_multiplier: DEFAULT_FLOW_SHIFT_MULTIPLIER,
+            segmentation: None,
         }
     }
 }
@@ -159,6 +217,14 @@ pub struct DiffInput<'a> {
     pub map: &'a ScrubMap,
     /// Pre-computed findings for this capture side.
     pub findings: &'a [Finding],
+    /// Optional Zonewarden conformance result for this capture side, produced by
+    /// the `analyze --policy` path (`segmentation::run_conformance_path`). Present
+    /// only when `diff --policy` ran the engine; `None` for a plain diff. When
+    /// BOTH sides carry a result the diff emits a `SegmentationDrift` section
+    /// (P1-13). The raw result holds real IPs in its `Violation` rows and is
+    /// never stored on `Diff` or serialized — only the pseudonymized
+    /// `ViolationRef` projection reaches output.
+    pub conformance: Option<&'a zonewarden::types::ConformanceResult>,
 }
 
 /// Configurable threshold for the flow-shift detector (AC-004). Default 2×.
@@ -675,6 +741,17 @@ pub fn compute_with_multiplier(
             .then_with(|| a.dst_port.cmp(&b.dst_port))
     });
 
+    // ---- P1-13: segmentation drift (only when BOTH sides ran conformance) ----
+    let segmentation = match (baseline.conformance, current.conformance) {
+        (Some(base_conf), Some(curr_conf)) => Some(build_segmentation_drift(
+            base_conf,
+            curr_conf,
+            baseline.map,
+            current.map,
+        )),
+        _ => None,
+    };
+
     Diff {
         hosts_new,
         hosts_gone,
@@ -686,7 +763,181 @@ pub fn compute_with_multiplier(
         flows_new,
         flows_gone,
         flow_shift_multiplier,
+        segmentation,
     }
+}
+
+/// Fixed metric order for the tally-delta table (spec §Determinism). Each tuple
+/// is `(metric id, selector)`; the selector reads the `u64` off a
+/// `ConformanceResult` so baseline and current rows stay aligned.
+type TallyMetric = (
+    &'static str,
+    fn(&zonewarden::types::ConformanceResult) -> u64,
+);
+const TALLY_METRICS: [TallyMetric; 8] = [
+    ("allowed", |r| r.allowed),
+    ("intra_zone", |r| r.intra_zone),
+    ("distinct_violating_flows", |r| r.distinct_violating_flows),
+    ("idmz_bypasses", |r| r.idmz_bypasses),
+    ("no_matching_conduit", |r| r.no_matching_conduit),
+    ("wrong_direction", |r| r.wrong_direction),
+    ("multicast_exempt", |r| r.multicast_exempt),
+    ("external_endpoints", |r| r.external_endpoints),
+];
+
+/// Build the [`SegmentationDrift`] from two conformance results scored against
+/// the same policy (P1-13).
+///
+/// - **Tally:** one [`TallyDelta`] per metric in [`TALLY_METRICS`] order.
+/// - **policy_digest:** taken from `curr_conf` (identical to baseline by
+///   construction — one policy scores both captures).
+/// - **Violations:** each `Violation` is pseudonymized into a [`ViolationRef`]
+///   (raw IPs resolved through the side's `ScrubMap`), deduplicated, then matched
+///   on the scrubbed key `(kind, src_pseudonym, dst_pseudonym, dst_port, proto)`.
+///   `flow_index` is deliberately NOT a match key — it is a per-capture dense
+///   index, not stable across captures.
+/// - **Determinism:** every output vector is sorted by its scrubbed key.
+fn build_segmentation_drift(
+    base_conf: &zonewarden::types::ConformanceResult,
+    curr_conf: &zonewarden::types::ConformanceResult,
+    base_map: &ScrubMap,
+    curr_map: &ScrubMap,
+) -> SegmentationDrift {
+    let tally: Vec<TallyDelta> = TALLY_METRICS
+        .iter()
+        .map(|(metric, sel)| TallyDelta {
+            metric: (*metric).to_string(),
+            baseline: sel(base_conf),
+            current: sel(curr_conf),
+        })
+        .collect();
+
+    // Deduplicated, sorted sets of pseudonymized violations per side.
+    let base_refs = violation_refs(&base_conf.violations, base_map);
+    let curr_refs = violation_refs(&curr_conf.violations, curr_map);
+
+    let base_set: HashSet<ViolationKey> = base_refs.iter().map(violation_ref_key).collect();
+    let curr_set: HashSet<ViolationKey> = curr_refs.iter().map(violation_ref_key).collect();
+
+    let mut violations_new: Vec<ViolationRef> = curr_refs
+        .iter()
+        .filter(|v| !base_set.contains(&violation_ref_key(v)))
+        .cloned()
+        .collect();
+    let mut violations_resolved: Vec<ViolationRef> = base_refs
+        .iter()
+        .filter(|v| !curr_set.contains(&violation_ref_key(v)))
+        .cloned()
+        .collect();
+    let mut violations_persisting: Vec<ViolationRef> = curr_refs
+        .iter()
+        .filter(|v| base_set.contains(&violation_ref_key(v)))
+        .cloned()
+        .collect();
+
+    sort_violation_refs(&mut violations_new);
+    sort_violation_refs(&mut violations_resolved);
+    sort_violation_refs(&mut violations_persisting);
+
+    SegmentationDrift {
+        // Identical to baseline by construction; take from current (source of truth).
+        policy_digest: curr_conf.policy_digest.clone(),
+        tally,
+        violations_new,
+        violations_resolved,
+        violations_persisting,
+    }
+}
+
+/// The scrubbed match key for a violation: `(kind, src, dst, dst_port, proto)`.
+/// Mirrors `finding_diff_key` (P1-13 spec). Never includes `flow_index`.
+type ViolationKey = (String, String, String, u16, String);
+
+fn violation_ref_key(v: &ViolationRef) -> ViolationKey {
+    (
+        v.kind.clone(),
+        v.src_pseudonym.clone(),
+        v.dst_pseudonym.clone(),
+        v.dst_port,
+        v.proto.clone(),
+    )
+}
+
+/// Project + deduplicate a list of raw `Violation`s into pseudonymized
+/// `ViolationRef`s. A `ConformanceResult` can carry multiple `Violation` rows
+/// per flow (e.g. `NoMatchingConduit` plus an additive `IdmzBypass`), and the
+/// scrubbed key can collapse distinct flows, so we dedup on the key.
+fn violation_refs(
+    violations: &[zonewarden::types::Violation],
+    map: &ScrubMap,
+) -> Vec<ViolationRef> {
+    let mut seen: HashSet<ViolationKey> = HashSet::new();
+    let mut out: Vec<ViolationRef> = Vec::new();
+    for v in violations {
+        let vref = violation_to_ref(v, map);
+        if seen.insert(violation_ref_key(&vref)) {
+            out.push(vref);
+        }
+    }
+    out
+}
+
+/// Pseudonymize a single `Violation` into a `ViolationRef` (PRIVACY-CRITICAL —
+/// resolves the raw `src_ip` / `dst_ip` through `map`, never storing them).
+fn violation_to_ref(v: &zonewarden::types::Violation, map: &ScrubMap) -> ViolationRef {
+    let src = v.src_ip.to_string();
+    let dst = v.dst_ip.to_string();
+    ViolationRef {
+        kind: violation_kind_id(&v.kind).to_string(),
+        src_pseudonym: resolve_ip_to_pseudonym(&src, map).unwrap_or_else(|| unmapped_label(&src)),
+        dst_pseudonym: resolve_ip_to_pseudonym(&dst, map).unwrap_or_else(|| unmapped_label(&dst)),
+        dst_port: v.dst_port.unwrap_or(0),
+        proto: violation_proto_label(&v.proto),
+        severity: violation_severity_id(&v.severity).to_string(),
+    }
+}
+
+/// Map a `ViolationKind` to the matching `zonewarden.*` finding-id-style string.
+fn violation_kind_id(kind: &zonewarden::types::ViolationKind) -> &'static str {
+    use zonewarden::types::ViolationKind::*;
+    match kind {
+        IdmzBypass => "idmz_bypass",
+        WrongDirection => "wrong_direction",
+        NoMatchingConduit => "deny_by_default",
+    }
+}
+
+/// Map a `Severity` to its lowercase id.
+fn violation_severity_id(sev: &zonewarden::types::Severity) -> &'static str {
+    use zonewarden::types::Severity::*;
+    match sev {
+        Established => "established",
+        Attempted => "attempted",
+    }
+}
+
+/// Lowercase transport label for a zonewarden `Proto` (distinct from
+/// `proto_label`, which takes the IP-protocol `u8` off a `FlowKey`).
+fn violation_proto_label(proto: &zonewarden::types::Proto) -> String {
+    use zonewarden::types::Proto::*;
+    match proto {
+        Tcp => "tcp".to_string(),
+        Udp => "udp".to_string(),
+        Icmp => "icmp".to_string(),
+        Other(_) => "other".to_string(),
+    }
+}
+
+/// Deterministic sort for a `ViolationRef` vector by its scrubbed key.
+fn sort_violation_refs(refs: &mut [ViolationRef]) {
+    refs.sort_by(|a, b| {
+        a.kind
+            .cmp(&b.kind)
+            .then_with(|| a.src_pseudonym.cmp(&b.src_pseudonym))
+            .then_with(|| a.dst_pseudonym.cmp(&b.dst_pseudonym))
+            .then_with(|| a.dst_port.cmp(&b.dst_port))
+            .then_with(|| a.proto.cmp(&b.proto))
+    });
 }
 
 /// F-W2-003: pseudonymize a Finding's evidence + summary using `map`.
@@ -881,5 +1132,297 @@ mod tests {
             out.starts_with("unmapped_"),
             "map-miss must yield an unmapped_<hash> label, got {out}"
         );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // P1-13: segmentation drift
+    // ──────────────────────────────────────────────────────────────────────
+
+    use zonewarden::types as zw;
+
+    /// Build a zonewarden `Violation` for tests. `flow_index` is varied
+    /// independently of the endpoints to prove it is NOT a match key.
+    fn violation(
+        flow_index: u64,
+        kind: zw::ViolationKind,
+        src_ip: &str,
+        dst_ip: &str,
+        dst_port: Option<u16>,
+        proto: zw::Proto,
+        severity: zw::Severity,
+    ) -> zw::Violation {
+        zw::Violation {
+            flow_index,
+            src_zone: zw::ZoneId("a".into()),
+            dst_zone: zw::ZoneId("b".into()),
+            kind,
+            severity,
+            idmz_bypass: false,
+            explanation: String::new(),
+            ts: zw::Timestamp(0),
+            src_ip: src_ip.parse().unwrap(),
+            dst_ip: dst_ip.parse().unwrap(),
+            src_port: Some(40000),
+            dst_port,
+            proto,
+            service: None,
+            service_source: zw::ServiceSource::Unknown,
+            conn_state: None,
+        }
+    }
+
+    fn conf(violations: Vec<zw::Violation>) -> zw::ConformanceResult {
+        zw::ConformanceResult {
+            violations,
+            policy_digest: "digest123".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn drift_violation_kind_severity_proto_mappings() {
+        assert_eq!(
+            violation_kind_id(&zw::ViolationKind::IdmzBypass),
+            "idmz_bypass"
+        );
+        assert_eq!(
+            violation_kind_id(&zw::ViolationKind::WrongDirection),
+            "wrong_direction"
+        );
+        assert_eq!(
+            violation_kind_id(&zw::ViolationKind::NoMatchingConduit),
+            "deny_by_default"
+        );
+        assert_eq!(
+            violation_severity_id(&zw::Severity::Established),
+            "established"
+        );
+        assert_eq!(violation_severity_id(&zw::Severity::Attempted), "attempted");
+        assert_eq!(violation_proto_label(&zw::Proto::Tcp), "tcp");
+        assert_eq!(violation_proto_label(&zw::Proto::Udp), "udp");
+        assert_eq!(violation_proto_label(&zw::Proto::Icmp), "icmp");
+        assert_eq!(violation_proto_label(&zw::Proto::Other(99)), "other");
+    }
+
+    #[test]
+    fn drift_tally_values_and_fixed_order() {
+        let base = zw::ConformanceResult {
+            allowed: 10,
+            intra_zone: 5,
+            distinct_violating_flows: 2,
+            idmz_bypasses: 1,
+            no_matching_conduit: 2,
+            wrong_direction: 0,
+            multicast_exempt: 3,
+            external_endpoints: 4,
+            policy_digest: "d".into(),
+            ..Default::default()
+        };
+        let curr = zw::ConformanceResult {
+            allowed: 11,
+            intra_zone: 5,
+            distinct_violating_flows: 3,
+            idmz_bypasses: 2,
+            no_matching_conduit: 1,
+            wrong_direction: 1,
+            multicast_exempt: 3,
+            external_endpoints: 4,
+            policy_digest: "d".into(),
+            ..Default::default()
+        };
+        let map = scrub_map(&[]);
+        let drift = build_segmentation_drift(&base, &curr, &map, &map);
+
+        let metrics: Vec<&str> = drift.tally.iter().map(|t| t.metric.as_str()).collect();
+        assert_eq!(
+            metrics,
+            vec![
+                "allowed",
+                "intra_zone",
+                "distinct_violating_flows",
+                "idmz_bypasses",
+                "no_matching_conduit",
+                "wrong_direction",
+                "multicast_exempt",
+                "external_endpoints",
+            ],
+            "tally must be in the fixed spec order"
+        );
+        // Spot-check a couple of (baseline, current) pairs.
+        assert_eq!((drift.tally[0].baseline, drift.tally[0].current), (10, 11));
+        assert_eq!((drift.tally[3].baseline, drift.tally[3].current), (1, 2));
+        // policy_digest taken from current.
+        assert_eq!(drift.policy_digest, "d");
+    }
+
+    #[test]
+    fn drift_matches_new_resolved_persisting() {
+        let map = scrub_map(&[
+            ("host_001", "10.0.0.1"),
+            ("host_002", "10.0.0.2"),
+            ("host_003", "10.0.0.3"),
+        ]);
+        // Baseline: V1 (host_001->host_002) + V2 (host_002->host_003)
+        let base = conf(vec![
+            violation(
+                0,
+                zw::ViolationKind::NoMatchingConduit,
+                "10.0.0.1",
+                "10.0.0.2",
+                Some(502),
+                zw::Proto::Tcp,
+                zw::Severity::Established,
+            ),
+            violation(
+                1,
+                zw::ViolationKind::WrongDirection,
+                "10.0.0.2",
+                "10.0.0.3",
+                Some(102),
+                zw::Proto::Tcp,
+                zw::Severity::Attempted,
+            ),
+        ]);
+        // Current: V1 (persisting) + V3 (host_001->host_003, new)
+        let curr = conf(vec![
+            violation(
+                7, // different flow_index — must not affect matching
+                zw::ViolationKind::NoMatchingConduit,
+                "10.0.0.1",
+                "10.0.0.2",
+                Some(502),
+                zw::Proto::Tcp,
+                zw::Severity::Established,
+            ),
+            violation(
+                8,
+                zw::ViolationKind::IdmzBypass,
+                "10.0.0.1",
+                "10.0.0.3",
+                Some(44818),
+                zw::Proto::Tcp,
+                zw::Severity::Established,
+            ),
+        ]);
+        let drift = build_segmentation_drift(&base, &curr, &map, &map);
+
+        assert_eq!(drift.violations_new.len(), 1, "V3 is new");
+        assert_eq!(drift.violations_new[0].kind, "idmz_bypass");
+        assert_eq!(drift.violations_new[0].dst_pseudonym, "host_003");
+
+        assert_eq!(drift.violations_resolved.len(), 1, "V2 resolved");
+        assert_eq!(drift.violations_resolved[0].kind, "wrong_direction");
+
+        assert_eq!(drift.violations_persisting.len(), 1, "V1 persists");
+        assert_eq!(drift.violations_persisting[0].kind, "deny_by_default");
+        assert_eq!(drift.violations_persisting[0].dst_port, 502);
+    }
+
+    #[test]
+    fn drift_flow_index_is_not_a_match_key() {
+        // Two captures with the SAME endpoints/kind/port/proto but DIFFERENT
+        // flow_index must match as persisting — proving flow_index is not keyed.
+        let map = scrub_map(&[("host_001", "10.0.0.1"), ("host_002", "10.0.0.2")]);
+        let base = conf(vec![violation(
+            0,
+            zw::ViolationKind::NoMatchingConduit,
+            "10.0.0.1",
+            "10.0.0.2",
+            Some(502),
+            zw::Proto::Tcp,
+            zw::Severity::Established,
+        )]);
+        let curr = conf(vec![violation(
+            999,
+            zw::ViolationKind::NoMatchingConduit,
+            "10.0.0.1",
+            "10.0.0.2",
+            Some(502),
+            zw::Proto::Tcp,
+            zw::Severity::Established,
+        )]);
+        let drift = build_segmentation_drift(&base, &curr, &map, &map);
+        assert!(drift.violations_new.is_empty());
+        assert!(drift.violations_resolved.is_empty());
+        assert_eq!(
+            drift.violations_persisting.len(),
+            1,
+            "same endpoints, differing flow_index, must still match as persisting"
+        );
+    }
+
+    #[test]
+    fn drift_dedups_multiple_violation_rows_per_flow() {
+        // A flow can yield multiple Violation rows (e.g. NoMatchingConduit +
+        // additive IdmzBypass). Distinct kinds stay distinct, but identical
+        // scrubbed keys collapse to one row.
+        let map = scrub_map(&[("host_001", "10.0.0.1"), ("host_002", "10.0.0.2")]);
+        let dup = || {
+            violation(
+                0,
+                zw::ViolationKind::NoMatchingConduit,
+                "10.0.0.1",
+                "10.0.0.2",
+                Some(502),
+                zw::Proto::Tcp,
+                zw::Severity::Established,
+            )
+        };
+        let refs = violation_refs(&[dup(), dup()], &map);
+        assert_eq!(refs.len(), 1, "identical violation keys must dedup");
+    }
+
+    #[test]
+    fn drift_is_order_independent() {
+        let map = scrub_map(&[
+            ("host_001", "10.0.0.1"),
+            ("host_002", "10.0.0.2"),
+            ("host_003", "10.0.0.3"),
+        ]);
+        let v_a = violation(
+            0,
+            zw::ViolationKind::NoMatchingConduit,
+            "10.0.0.1",
+            "10.0.0.2",
+            Some(502),
+            zw::Proto::Tcp,
+            zw::Severity::Established,
+        );
+        let v_b = violation(
+            1,
+            zw::ViolationKind::IdmzBypass,
+            "10.0.0.1",
+            "10.0.0.3",
+            Some(80),
+            zw::Proto::Tcp,
+            zw::Severity::Attempted,
+        );
+        let base = conf(vec![]);
+        let curr1 = conf(vec![v_a.clone(), v_b.clone()]);
+        let curr2 = conf(vec![v_b, v_a]);
+        let d1 = build_segmentation_drift(&base, &curr1, &map, &map);
+        let d2 = build_segmentation_drift(&base, &curr2, &map, &map);
+        assert_eq!(d1, d2, "swapped violation order must yield identical drift");
+    }
+
+    #[test]
+    fn drift_pseudonymizes_endpoints_no_raw_ip() {
+        // PRIVACY: a violation carrying a raw canary IP must project to a
+        // pseudonym (mapped) — and on a map miss to an opaque label, never raw.
+        let map = scrub_map(&[("host_001", "10.0.0.1")]);
+        let v = violation(
+            0,
+            zw::ViolationKind::NoMatchingConduit,
+            "10.0.0.1",
+            "203.0.113.45", // canary, not in map
+            Some(502),
+            zw::Proto::Tcp,
+            zw::Severity::Established,
+        );
+        let drift = build_segmentation_drift(&conf(vec![]), &conf(vec![v]), &map, &map);
+        let vref = &drift.violations_new[0];
+        assert_eq!(vref.src_pseudonym, "host_001");
+        assert_ne!(vref.dst_pseudonym, "203.0.113.45");
+        assert!(vref.dst_pseudonym.starts_with("unmapped_"));
     }
 }
