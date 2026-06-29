@@ -1,4 +1,4 @@
-//! Minimal NetBIOS Name Service parser stub (S-8.01).
+//! Minimal NetBIOS Name Service parser (S-8.01).
 //!
 //! Extracts the workstation name from NBNS Registration Requests (UDP/137).
 //! See BC-1.02.011 and story S-8.01 AC-002 for the behavioral contract.
@@ -16,8 +16,74 @@ pub struct NetBiosHostname {
 /// Parse a NetBIOS-NS payload as an NBNS Registration Request and return the
 /// decoded workstation name. Returns `None` for any non-registration payload,
 /// malformed input, or empty decoded name; never panics.
-pub fn parse_registration(_payload: &[u8]) -> Option<NetBiosHostname> {
-    None
+pub fn parse_registration(payload: &[u8]) -> Option<NetBiosHostname> {
+    // Minimum 13 bytes: 12-byte NBNS header + 1-byte QNAME label length.
+    if payload.len() < 13 {
+        return None;
+    }
+
+    // Flags field at bytes 2–3 (big-endian u16).
+    let flags = u16::from_be_bytes([payload[2], payload[3]]);
+
+    // QR bit (bit 15) must be 0 (query direction).
+    if (flags >> 15) & 1 != 0 {
+        return None;
+    }
+
+    // OPCODE bits (bits 14–11, 4-bit field) must be 5 (Name Registration).
+    let opcode = (flags >> 11) & 0xF;
+    if opcode != 5 {
+        return None;
+    }
+
+    // QNAME label length at byte 12 must be 32 (first-level encoded).
+    // EC-002: any other length → None.
+    if payload[12] != 32 {
+        return None;
+    }
+
+    // Need bytes 13..45 (32 encoded bytes).
+    if payload.len() < 45 {
+        return None;
+    }
+
+    let encoded = &payload[13..45];
+
+    // First-level decode: 32 → 16 bytes.
+    // Each pair (H, L) decodes to: ((H - 'A') << 4) | (L - 'A').
+    // EC-004: any byte outside 'A'–'P' (0x41–0x50) → None.
+    let mut decoded = [0u8; 16];
+    for i in 0..16 {
+        let h = encoded[2 * i];
+        let l = encoded[2 * i + 1];
+        if !(b'A'..=b'P').contains(&h) || !(b'A'..=b'P').contains(&l) {
+            return None;
+        }
+        decoded[i] = ((h - b'A') << 4) | (l - b'A');
+    }
+
+    // Name is bytes 0..15; byte 15 is the suffix byte (always dropped).
+    // Trim trailing 0x20 (space) from the 15-byte name portion.
+    let name_bytes = &decoded[..15];
+    let trimmed_len = name_bytes
+        .iter()
+        .rposition(|&b| b != 0x20)
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let trimmed = &name_bytes[..trimmed_len];
+
+    // EC-003: empty after trim → None.
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Discard names that are entirely null bytes (0x00).
+    if trimmed.iter().all(|&b| b == 0x00) {
+        return None;
+    }
+
+    let name = String::from_utf8_lossy(trimmed).into_owned();
+    Some(NetBiosHostname { name })
 }
 
 #[cfg(test)]
@@ -31,8 +97,8 @@ mod tests {
     fn nbns_encode(decoded: &[u8; 16]) -> [u8; 32] {
         let mut out = [0u8; 32];
         for (i, &b) in decoded.iter().enumerate() {
-            out[2 * i]     = ((b >> 4) & 0xF) + b'A';
-            out[2 * i + 1] = (b & 0xF)        + b'A';
+            out[2 * i] = ((b >> 4) & 0xF) + b'A';
+            out[2 * i + 1] = (b & 0xF) + b'A';
         }
         out
     }
@@ -53,9 +119,9 @@ mod tests {
         buf.extend_from_slice(&[0x00, 0x00]); // ANCOUNT = 0
         buf.extend_from_slice(&[0x00, 0x00]); // NSCOUNT = 0
         buf.extend_from_slice(&[0x00, 0x00]); // ARCOUNT = 0
-        buf.push(label_len);                  // QNAME label length (byte 12)
-        buf.extend_from_slice(encoded);        // encoded name bytes
-        buf.push(0x00);                        // end of QNAME
+        buf.push(label_len); // QNAME label length (byte 12)
+        buf.extend_from_slice(encoded); // encoded name bytes
+        buf.push(0x00); // end of QNAME
         buf.extend_from_slice(&[0x00, 0x20, 0x00, 0x01]); // QTYPE=NB, QCLASS=IN
         buf
     }
