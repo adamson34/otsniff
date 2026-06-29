@@ -1,0 +1,30 @@
+---
+source: tests/snapshot.rs
+expression: html
+---
+<h2>Segmentation drift</h2>
+<p class="muted" style="font-size:0.8rem;">Policy digest: <code>abc123def456</code> — one policy scored both captures; identical on each side by construction.</p>
+<h3>Conformance tally</h3>
+<table>
+<thead>
+<tr><th>Metric</th><th style="text-align:right">Baseline</th><th style="text-align:right">Current</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td>allowed</td><td style="text-align:right">10</td><td style="text-align:right">12</td><td>▲</td></tr>
+<tr><td>idmz_bypasses</td><td style="text-align:right">1</td><td style="text-align:right">3</td><td class="host-gone">▲</td></tr>
+<tr><td>no_matching_conduit</td><td style="text-align:right">4</td><td style="text-align:right">2</td><td class="host-new">▼</td></tr>
+<tr><td>wrong_direction</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td>—</td></tr>
+</tbody>
+</table>
+<h3>New violations — NEW since baseline (1)</h3>
+<ul>
+<li><code class="host-new">idmz_bypass</code> · <code>host_001</code> → <code>host_009:44818/tcp</code> · established</li>
+</ul>
+<h3>Resolved violations (1)</h3>
+<ul>
+<li><code class="host-gone">wrong_direction</code> · <code>host_002</code> → <code>host_003:102/tcp</code> · attempted</li>
+</ul>
+<h3>Persisting violations (1)</h3>
+<ul>
+<li><code>deny_by_default</code> · <code>host_001</code> → <code>host_002:502/tcp</code> · established</li>
+</ul>
