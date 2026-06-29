@@ -4,6 +4,11 @@
 
 use assert_cmd::Command;
 
+/// Absolute path to a committed fixture — robust to the test process's cwd
+/// (which differs between `cargo test -p` locally and `cargo test --workspace`
+/// in CI).
+const MODBUS_PCAP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/Modbus.pcap");
+
 #[test]
 fn analyze_with_policy_emits_conformance_section() {
     let dir = tempfile::tempdir().unwrap();
@@ -18,7 +23,7 @@ fn analyze_with_policy_emits_conformance_section() {
     Command::cargo_bin("otsniff")
         .unwrap()
         .arg("analyze")
-        .arg("tests/fixtures/Modbus.pcap")
+        .arg(MODBUS_PCAP)
         .arg("--policy")
         .arg(&policy)
         .arg("-o")
@@ -44,7 +49,7 @@ fn analyze_without_policy_has_no_conformance_section() {
     Command::cargo_bin("otsniff")
         .unwrap()
         .arg("analyze")
-        .arg("tests/fixtures/Modbus.pcap")
+        .arg(MODBUS_PCAP)
         .arg("-o")
         .arg(&out)
         .assert()
