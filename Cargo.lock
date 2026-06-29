@@ -852,6 +852,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "zonewarden",
 ]
 
 [[package]]

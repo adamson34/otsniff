@@ -15,6 +15,7 @@ pub mod report;
 pub mod report_md;
 pub mod rule_catalog;
 pub mod scrub;
+pub mod segmentation;
 
 #[cfg(kani)]
 mod kani_proofs;
