@@ -178,6 +178,11 @@ fn decode_ethernet(ts: DateTime<Utc>, frame: &[u8]) -> Option<Packet> {
                 IpAddr::V6(h.destination_addr()),
             )
         }
+        // etherparse 0.20 added an ARP variant to NetSlice. ARP frames carry
+        // no IP layer, so there's nothing to build a Packet from — skip them,
+        // consistent with how non-Ethernet2 links and non-TCP/UDP transports
+        // are dropped below.
+        NetSlice::Arp(_) => return None,
     };
 
     let (transport, src_port, dst_port, payload) = match sliced.transport.as_ref() {
@@ -207,4 +212,55 @@ fn decode_ethernet(ts: DateTime<Utc>, frame: &[u8]) -> Option<Packet> {
         dst_port,
         payload,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use etherparse::PacketBuilder;
+
+    fn epoch() -> DateTime<Utc> {
+        Utc.timestamp_opt(0, 0).single().unwrap()
+    }
+
+    #[test]
+    fn arp_frame_is_skipped() {
+        // Ethernet II frame carrying an ARP request (the classic 42-byte
+        // layout). etherparse 0.20 surfaces this as NetSlice::Arp; otsniff has
+        // no IP layer to build a Packet from, so decode_ethernet must drop it.
+        let frame: [u8; 42] = [
+            // dst MAC (broadcast) / src MAC
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+            // ethertype = ARP (0x0806)
+            0x08, 0x06, // htype=1, ptype=0x0800, hlen=6, plen=4, oper=1 (request)
+            0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, // sender MAC
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, // sender IP 192.168.1.1
+            0xc0, 0xa8, 0x01, 0x01, // target MAC (unknown)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // target IP 192.168.1.2
+            0xc0, 0xa8, 0x01, 0x02,
+        ];
+        assert!(decode_ethernet(epoch(), &frame).is_none());
+    }
+
+    #[test]
+    fn ipv4_tcp_frame_decodes() {
+        // Guards the IP/TCP happy path across the etherparse 0.15 -> 0.20 bump.
+        let payload = [0xde, 0xad, 0xbe, 0xef];
+        let builder = PacketBuilder::ethernet2(
+            [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+            [0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb],
+        )
+        .ipv4([192, 168, 1, 10], [192, 168, 1, 20], 64)
+        .tcp(40000, 502, 0, 1024);
+        let mut frame = Vec::with_capacity(builder.size(payload.len()));
+        builder.write(&mut frame, &payload).unwrap();
+
+        let pkt = decode_ethernet(epoch(), &frame).expect("ipv4/tcp frame should decode");
+        assert_eq!(pkt.transport, Transport::Tcp);
+        assert_eq!(pkt.src_port, 40000);
+        assert_eq!(pkt.dst_port, 502);
+        assert_eq!(pkt.src_ip, IpAddr::V4([192, 168, 1, 10].into()));
+        assert_eq!(pkt.dst_ip, IpAddr::V4([192, 168, 1, 20].into()));
+        assert_eq!(pkt.payload, payload);
+    }
 }
