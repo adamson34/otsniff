@@ -83,18 +83,19 @@ pub fn parse(payload: &[u8]) -> Vec<LlmnrHostname> {
                 payload[pos + 2],
                 payload[pos + 3],
             ]);
-            // BC-1.02.013 precondition: strip trailing dot only.
-            let normalized = name.trim_end_matches('.');
-            // F-001: sanitize to printable ASCII (mirror dhcp.rs) before the
-            // empty-check, so control bytes / NULs do not survive into reports.
-            let sanitized: String = normalized
+            // F-101: sanitize to printable ASCII FIRST, then normalize.
+            // Running sanitization after normalization allowed a crafted control
+            // byte after the trailing dot to defeat dot trimming.
+            let sanitized: String = name
                 .bytes()
                 .filter(|&b| (0x20..0x7F).contains(&b))
                 .map(|b| b as char)
                 .collect();
-            if !sanitized.is_empty() {
+            // BC-1.02.013 precondition: strip trailing dot only.
+            let normalized = sanitized.trim_end_matches('.');
+            if !normalized.is_empty() {
                 results.push(LlmnrHostname {
-                    name: sanitized,
+                    name: normalized.to_string(),
                     ip,
                 });
             }
@@ -340,6 +341,34 @@ mod tests {
         assert!(
             results.is_empty(),
             "F-001 LLMNR: name consisting entirely of control bytes must be discarded"
+        );
+    }
+
+    // ── F-101: sanitize BEFORE normalize ─────────────────────────────────────
+
+    /// F-101 / BC-1.02.012: a control byte that follows the trailing dot
+    /// defeats dot-trimming when sanitisation runs AFTER normalisation.
+    /// Labels `["DEVICE", "\x07"]` join to `"DEVICE.\x07"`.  With the wrong
+    /// order, `trim_end_matches('.')` sees `\x07` as the last char so no dot is
+    /// removed; sanitise then strips the control byte, leaving `"DEVICE."` in
+    /// the output.  With the correct order (sanitise first), `"DEVICE.\x07"` →
+    /// `"DEVICE."` → trim trailing dot → `"DEVICE"`.
+    #[test]
+    fn test_f101_sanitize_before_normalize_llmnr() {
+        // Second label is a single BEL byte (0x07, control char below 0x20).
+        let name = dns_name(&[b"DEVICE", b"\x07"]);
+        let ans = a_record(&name, [10, 0, 1, 40]);
+        let mut msg = llmnr_header(true, 1);
+        msg.extend_from_slice(&ans);
+        let results = parse(&msg);
+        assert_eq!(
+            results.len(),
+            1,
+            "F-101 LLMNR: 'DEVICE.\\x07' must yield one record after sanitize-first normalization"
+        );
+        assert_eq!(
+            results[0].name, "DEVICE",
+            "F-101 LLMNR: control byte after trailing dot must not defeat dot trimming"
         );
     }
 

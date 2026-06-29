@@ -63,31 +63,27 @@ pub fn parse_registration(payload: &[u8]) -> Option<NetBiosHostname> {
     }
 
     // Name is bytes 0..15; byte 15 is the suffix byte (always dropped).
-    // Trim trailing 0x20 (space) from the 15-byte name portion.
     let name_bytes = &decoded[..15];
-    let trimmed_len = name_bytes
-        .iter()
-        .rposition(|&b| b != 0x20)
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    let trimmed = &name_bytes[..trimmed_len];
 
-    // F-001: sanitize to printable ASCII (mirror dhcp.rs) before the
-    // empty-check.  This strips embedded NULs (0x00) and any other control
-    // bytes that survived the space-trim, and supersedes the previous "all NULs"
-    // guard (NUL is not in 0x20..0x7F so it is filtered here).
-    let sanitized: String = trimmed
+    // F-101: sanitize to printable ASCII FIRST, then trim trailing 0x20 spaces.
+    // Running sanitization after space-trimming allowed an embedded NUL (0x00)
+    // in the space-padding to act as a trim anchor, retaining the spaces before
+    // it and leaving trailing spaces in the output after the NUL was sanitized.
+    let sanitized: String = name_bytes
         .iter()
         .filter(|&&b| (0x20..0x7F).contains(&b))
         .map(|&b| b as char)
         .collect();
+    let trimmed = sanitized.trim_end_matches(' ');
 
     // EC-003: empty after sanitize → None.
-    if sanitized.is_empty() {
+    if trimmed.is_empty() {
         return None;
     }
 
-    Some(NetBiosHostname { name: sanitized })
+    Some(NetBiosHostname {
+        name: trimmed.to_string(),
+    })
 }
 
 #[cfg(test)]
@@ -309,6 +305,43 @@ mod tests {
         assert!(
             result.is_none(),
             "F-001 NetBIOS: name consisting entirely of control bytes must be discarded → None"
+        );
+    }
+
+    // ── F-101: sanitize BEFORE normalize ─────────────────────────────────────
+
+    /// F-101 / BC-1.02.011: an embedded NUL byte in the middle of space-
+    /// padding defeats trailing-space trimming when sanitisation runs AFTER
+    /// the trim.  `rposition(|&b| b != 0x20)` stops at the NUL (which is not
+    /// 0x20), so the trim retains the NUL and the spaces preceding it — then
+    /// sanitise drops the NUL but keeps the two spaces, producing `"AB  "`.
+    /// With the correct order (sanitise first), the NUL is removed before the
+    /// trim so `rposition` only sees the trailing spaces, which are then
+    /// correctly stripped, producing `"AB"`.
+    ///
+    /// Fixture: decoded name bytes `A B <sp> <sp> NUL <sp>×10` padded to 15
+    /// bytes (suffix byte at index 15 is 0x00).
+    #[test]
+    fn test_f101_sanitize_before_normalize_netbios() {
+        // decoded[0..1] = "AB", decoded[2..3] = 0x20, decoded[4] = 0x00 (NUL),
+        // decoded[5..14] = 0x20 (space), decoded[15] = 0x00 (suffix, always dropped).
+        let mut decoded = [0x20u8; 16];
+        decoded[0] = b'A';
+        decoded[1] = b'B';
+        decoded[4] = 0x00; // NUL embedded in the space-padding
+        decoded[15] = 0x00; // suffix byte (always dropped by the parser)
+        let encoded = nbns_encode(&decoded);
+        let (fh, fl) = reg_flags();
+        let pkt = make_nbns_reg(fh, fl, 32, &encoded);
+        let result = parse_registration(&pkt);
+        assert!(
+            result.is_some(),
+            "F-101 NetBIOS: 'AB' with mid-padding NUL must yield Some(NetBiosHostname)"
+        );
+        assert_eq!(
+            result.unwrap().name,
+            "AB",
+            "F-101 NetBIOS: NUL embedded in space-padding must not leave trailing spaces in the name"
         );
     }
 }

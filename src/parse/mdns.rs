@@ -74,25 +74,26 @@ pub fn parse(payload: &[u8]) -> Vec<MdnsHostname> {
                 payload[pos + 2],
                 payload[pos + 3],
             ]);
-            // BC-1.02.013 precondition: strip `.local` suffix (case-insensitive),
-            // then any trailing dot.
-            const LOCAL_SUFFIX: &str = ".local";
-            let stripped = if name.to_ascii_lowercase().ends_with(LOCAL_SUFFIX) {
-                &name[..name.len() - LOCAL_SUFFIX.len()]
-            } else {
-                &name
-            };
-            let normalized = stripped.trim_end_matches('.');
-            // F-001: sanitize to printable ASCII (mirror dhcp.rs) before the
-            // empty-check, so control bytes / NULs do not survive into reports.
-            let sanitized: String = normalized
+            // F-101: sanitize to printable ASCII FIRST, then normalize.
+            // Running sanitization after normalization allowed a crafted control
+            // byte adjacent to the `.local` suffix to defeat suffix stripping.
+            let sanitized: String = name
                 .bytes()
                 .filter(|&b| (0x20..0x7F).contains(&b))
                 .map(|b| b as char)
                 .collect();
-            if !sanitized.is_empty() {
+            // BC-1.02.013 precondition: strip `.local` suffix (case-insensitive),
+            // then any trailing dot.
+            const LOCAL_SUFFIX: &str = ".local";
+            let stripped = if sanitized.to_ascii_lowercase().ends_with(LOCAL_SUFFIX) {
+                &sanitized[..sanitized.len() - LOCAL_SUFFIX.len()]
+            } else {
+                &sanitized
+            };
+            let normalized = stripped.trim_end_matches('.');
+            if !normalized.is_empty() {
                 results.push(MdnsHostname {
-                    name: sanitized,
+                    name: normalized.to_string(),
                     ip,
                 });
             }
@@ -528,6 +529,34 @@ mod tests {
         assert!(
             results.is_empty(),
             "F-001 mDNS: name consisting entirely of control bytes must be discarded (sanitizes to empty)"
+        );
+    }
+
+    // ── F-101: sanitize BEFORE normalize ─────────────────────────────────────
+
+    /// F-101 / BC-1.02.010: a control byte adjacent to the `.local` suffix
+    /// defeats suffix stripping when sanitisation runs AFTER normalisation.
+    /// The `0x7F` (DEL) byte is appended to the `local` label, so the joined
+    /// name is `"HMI.local\x7f"`.  With the wrong order, `.local` is not found
+    /// because the name ends with `\x7f`, not with `.local`; the sanitiser then
+    /// removes the DEL byte, leaving `"HMI.local"` in the output.
+    /// With the correct order (sanitise first), `"HMI.local\x7f"` → `"HMI.local"`
+    /// → strip `.local` → `"HMI"`.
+    #[test]
+    fn test_f101_sanitize_before_normalize_mdns() {
+        // Second label is b"local\x7f" — 6 bytes: l, o, c, a, l, DEL (0x7F).
+        let name = dns_name(&[b"HMI", b"local\x7f"]);
+        let ans = a_record(&name, [10, 0, 0, 40]);
+        let msg = build_mdns(&[ans]);
+        let results = parse(&msg);
+        assert_eq!(
+            results.len(),
+            1,
+            "F-101 mDNS: 'HMI.local\\x7f' must yield one record after sanitize-first normalization"
+        );
+        assert_eq!(
+            results[0].name, "HMI",
+            "F-101 mDNS: control byte adjacent to .local suffix must not defeat suffix stripping"
         );
     }
 }
