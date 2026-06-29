@@ -7,8 +7,8 @@
 
 cycle: v0.6.0-feature
 current_wave: 0
-total_waves: null  # to be determined at phase-2 wave planning
-total_stories: 2   # backfill records only at cycle open; new stories added as cycle progresses
+total_waves: 1  # wave plan established with S-8.01 in wave 1
+total_stories: 3   # 2 backfill records + S-8.01 (first active v0.6.0 story)
 wave_1_status: not_started
 
 stories:
@@ -37,5 +37,17 @@ stories:
     semantics: backfill (delivered outside VSDD pipeline — no red-gate, no per-story adversarial review)
     notes: "P1-13 segmentation drift. diff --policy: SegmentationDrift + TallyDelta + ViolationRef (pseudonymized at construction) + tally deltas + per-violation new/resolved/persisting + policy_digest anchor + HTML/MD/JSON renderers. Privacy invariant: canary-IP no-leak test. Part of v0.5.0 release."
 
-  # ===== v0.6.0-feature stories — to be added as phase-2 wave planning proceeds =====
-  # First story will be P0-9 hostname extraction (added in a subsequent step).
+  # ===== v0.6.0-feature stories =====
+
+  S-8.01:
+    status: ready
+    wave: 1
+    branch: null      # not yet started
+    worktree: null
+    merge_sha: null
+    pr: null
+    points: 5
+    epic: E-8
+    bcs: [BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013]
+    traces_to: P0-9
+    notes: "mDNS/NetBIOS-NS/LLMNR hostname extraction; completes the deferred half of P0-3 (DHCP only). Three new src/parse/ modules; observe.rs wiring; zero display or privacy changes needed."

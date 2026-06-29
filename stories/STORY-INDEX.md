@@ -6,9 +6,9 @@ phase: 2
 generated: 2026-05-11T20:40:00Z
 producer: phase-2-story-decomposition (inline)
 updated: 2026-06-29T00:00:00Z
-updater: state-manager (v0.5.0 backfill + v0.6.0-feature cycle open)
-total_stories: 40
-total_epics: 7
+updater: story-writer (S-8.01 mDNS/NetBIOS-NS/LLMNR hostname extraction)
+total_stories: 41
+total_epics: 8
 status: active
 ---
 
@@ -57,13 +57,15 @@ status: active
 
 | S-7.01 | Zonewarden segmentation-conformance module | E-7 | — | — | completed-backfill (#123–#130; v0.5.0) | S-6.01 conceptually | S.1, S.3, S.4, S.8, S.9 |
 | S-7.02 | Segmentation drift — `diff --policy` | E-7 | — | — | completed-backfill (#136; v0.5.0) | S-7.01, S-6.02, S-6.03 | S.4, S.8, S.9 |
+| S-8.01 | mDNS / NetBIOS-NS / LLMNR hostname extraction | E-8 | 1 | 5 | ready | — | S.1 |
 
 **Total points (v0.4.0-feature):** 125 (Wave 1: ~88, Wave 2: ~24, Wave 3: ~13)
 **Total stories (v0.4.0-feature):** 38 (Wave 1: 30, Wave 2: 6, Wave 3: 2)
 **Math check:** E-1=14, E-2=32, E-3=22, E-4=18, E-5=24, E-6=15 → 125.
 **Story-count check (v0.4.0-feature):** E-1=6, E-2=12, E-3=6, E-4=4, E-5=7, E-6=3 → 38.
 **v0.5.0 backfill:** E-7=2 stories (delivered outside VSDD pipeline — see story files).
-**Cumulative story count:** 40. **E-7** stories have no point values (not tracked through the pipeline).
+**v0.6.0-feature:** E-8=1 story (S-8.01, P0-9 mDNS/NetBIOS-NS/LLMNR hostname extraction, 5 points, Wave 1).
+**Cumulative story count:** 41. **E-7** stories have no point values (not tracked through the pipeline).
 
 ## Epic rollup
 
@@ -76,11 +78,13 @@ status: active
 | E-5 UX + AI hardening | 7 | 24 | Progress feedback + heartbeat + AI second-pass + invocation hardening + report visual polish + brand application + collapsible finding cards | v0.4.0-feature |
 | E-6 diff | 3 | 15 | Map merge + diff core + renderer | v0.4.0-feature |
 | E-7 v0.5.0 backfill | 2 | — | Zonewarden segmentation-conformance (ADR-0013) + segmentation drift (P1-13); delivered outside VSDD pipeline | v0.5.0-backfill |
+| E-8 v0.6.0 feature | 1 | 5 | P0-9 mDNS/NetBIOS-NS/LLMNR hostname extraction; completes deferred half of P0-3 | v0.6.0-feature |
 
 ## BC coverage map
 
 | BC (or BC-AUDIT) | Story |
 |---|---|
+| BC-1.02.010 + BC-1.02.011 + BC-1.02.012 + BC-1.02.013 (mDNS/NetBIOS-NS/LLMNR hostname) | S-8.01 |
 | BC-3.05.002 (unexpected_protocols trigger) | S-1.04 |
 | BC-AUDIT-001..015 (formalize) | S-1.05 |
 | BC-AUDIT-009 (port-to-label) | S-2.01 |

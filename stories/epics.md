@@ -3,6 +3,8 @@ document_type: epic-index
 project: otsniff
 phase: 2
 generated: 2026-05-11
+updated: 2026-06-29
+updater: story-writer (E-8 added for v0.6.0-feature cycle)
 producer: phase-2-story-decomposition (inline)
 scope: backlog + ROADMAP (Phase 0 P0/P1/P2 lessons + Phase 1 ASR-001..007 + docs/ROADMAP.md unshipped items)
 traces_to:
@@ -12,7 +14,7 @@ traces_to:
   - .factory/semport/otsniff/otsniff-pass-8-deep-synthesis.md
   - docs/ROADMAP.md
 status: draft
-total_epics: 6
+total_epics: 8
 ---
 
 # Epics — otsniff Phase 2
@@ -148,6 +150,38 @@ or add behavior.
 
 ---
 
+## Epic E-7: v0.5.0 backfill
+
+- **Goal:** Record v0.5.0 work (ADR-0013 Zonewarden segmentation module +
+  P1-13 segmentation drift diff) that was delivered outside the VSDD pipeline.
+  These stories are NOT in the v0.6.0-feature wave structure.
+- **BCs touched:** none (backfill records; no BC authoring performed
+  during delivery).
+- **Subsystems touched:** S.1, S.3, S.4, S.8, S.9
+- **Estimated stories:** 2 (S-7.01, S-7.02)
+- **Source items:** ADR-0013, ROADMAP P1-13
+
+---
+
+## Epic E-8: v0.6.0 feature work — passive hostname enrichment
+
+- **Goal:** Complete the deferred half of P0-3 (DHCP hostnames shipped v0.3).
+  Add three passive hostname sources — mDNS, NetBIOS Name Service, and LLMNR —
+  so assets gain human-readable labels on OT captures that have no DHCP
+  coverage. Zero display or privacy changes: all infrastructure
+  (`obs.hostnames`, `name_NNN` pseudonym class, map-value leak check) already
+  exists; this epic wires three small pure-core parsers into it.
+- **BCs touched (add new):**
+  - BC-1.02.010 — mDNS A-record hostname extraction
+  - BC-1.02.011 — NetBIOS-NS workstation-name extraction
+  - BC-1.02.012 — LLMNR A-record hostname extraction
+  - BC-1.02.013 — Hostname multi-source precedence + normalization (last-write-wins, temporal)
+- **Subsystems touched:** S.1 (parse/observe)
+- **Estimated stories:** 1 (S-8.01)
+- **Source items:** ROADMAP P0-9
+
+---
+
 ## Coverage rollup
 
 | Source backlog item | Status in epics | Epic |
@@ -177,6 +211,7 @@ or add behavior.
 | ROADMAP P1-1 DNP3 parser | covered | E-2 |
 | ROADMAP P1-2 progress feedback | covered | E-5 |
 | ROADMAP P1-3 cross-capture diff | covered | E-6 |
+| ROADMAP P0-9 mDNS/NetBIOS-NS/LLMNR hostname extraction | covered | E-8 |
 | ROADMAP P1-4 prompt eval harness | covered | E-3 |
 | Near-term creds.ldap_simple_bind | covered | E-2 |
 | Near-term compat.ntlmv1 | covered | E-2 |

@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 104  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004
+total_bcs: 108  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004; S-8.01 added BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -46,6 +46,10 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-1.02.007 DHCP IP resolution is three-tier: yiaddr → ciaddr → option 50 "Requested IP Address" (HIGH, promoted from BC-AUDIT-006 in S-1.05 — shifted from suggested .006 cascade)
 - BC-1.02.008 S7Comm header sizing depends on ROSCTR: 10 bytes for Job/UserData, 12 bytes for Ack/Ack_Data (HIGH, promoted from BC-AUDIT-007 in S-1.05 — shifted from suggested .007 cascade)
 - BC-1.02.009 Modbus per-(src, dst) unit-id aggregation: observer accumulates pdu.unit_id into modbus_flow_summary keyed by (src, dst); BTreeSet dedupes within flow; unit IDs 0 (broadcast) and 0xFF (gateway) are counted (HIGH, added S-2.11 v0.4.0)
+- BC-1.02.010 mDNS A-record hostname extraction: UDP/5353 DNS message answer section A records (type 0x0001, class 0x0001) yield the owner name stripped of trailing `.local` or `.local.` suffix, mapped to the RDATA IPv4 address; names containing DNS compression pointer labels (0xC0 prefix byte) are rejected and yield no insertion; empty names after stripping are discarded (HIGH, added S-8.01 v0.6.0)
+- BC-1.02.011 NetBIOS-NS workstation-name extraction: UDP/137 NBNS Registration Request (QR=0, OPCODE=5, flags byte-2 upper nibble) QNAME first-label 32 bytes first-level-decoded to 16 bytes (consecutive pairs H,L: decoded = ((H-'A')<<4)|(L-'A')); trailing space bytes (0x20) stripped from the first 15 decoded bytes; 16th (suffix) byte dropped; result associated with the packet src_ip; empty names after stripping are discarded; truncated or malformed messages yield None (HIGH, added S-8.01 v0.6.0)
+- BC-1.02.012 LLMNR A-record hostname extraction: UDP/5355 datagram where QR bit (bit 15 of the 16-bit flags field, big-endian) is 1 (response); answer section A records yield owner name with trailing dot stripped; names containing DNS compression pointer labels rejected; empty names discarded; RDATA provides the IPv4 address (HIGH, added S-8.01 v0.6.0)
+- BC-1.02.013 Hostname multi-source precedence and normalization: all passive hostname sources (DHCP option-12, mDNS A-record, NetBIOS-NS Registration, LLMNR A-record) insert into `obs.hostnames` via last-write-wins ordered by packet arrival time; no source-priority ordering is applied; each source applies its own normalization (`.local` strip for mDNS, space-pad strip + suffix-byte drop for NetBIOS-NS, trailing-dot strip for LLMNR) before insertion; the precedence rule is temporal, not authoritative (HIGH, added S-8.01 v0.6.0)
 - BC-1.03.001 FTP credential observation (HIGH)
 - BC-1.03.002 Telnet session observation (HIGH)
 - BC-1.03.003 HTTP Basic credential observation (HIGH)
@@ -196,16 +200,16 @@ numbered space (their HIGH tags are now inline).
 
 | Bucket | Count |
 |---|---:|
-| Numbered BCs, HIGH    | 95 |
+| Numbered BCs, HIGH    | 99 |
 | Numbered BCs, MEDIUM  | 2 |
 | Numbered BCs, LOW     | 0 |
-| **Grand total**       | **97** |
+| **Grand total**       | **101** |
 
-**Verification:** `grep -cE '\(HIGH[,)]' BC-INDEX.md` must equal 95;
+**Verification:** `grep -cE '\(HIGH[,)]' BC-INDEX.md` must equal 99;
 `grep -cE '\(MEDIUM[,)]' BC-INDEX.md` must equal 2;
 `grep -c '^- BC-AUDIT-' BC-INDEX.md` must equal 0 (legacy IDs live
 in the alias table, never as numbered-list bullets);
-`grep -cE '^- BC-[0-9]\.' BC-INDEX.md` must equal 97.
+`grep -cE '^- BC-[0-9]\.' BC-INDEX.md` must equal 101.
 
 ## Open Question BCs (coverage gaps, not yet specified)
 
