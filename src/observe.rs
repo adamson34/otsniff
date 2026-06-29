@@ -2083,7 +2083,9 @@ mod modbus_unit_id_tests {
     }
 
     /// BC-1.02.013 / EC-010: last-write-wins — two successive mDNS packets
-    /// naming the same IP must leave only the later name in obs.hostnames.
+    /// naming the same IP must leave only the name from the later packet
+    /// in obs.hostnames (last-write-wins by packet/processing order, not by
+    /// reading `pkt.ts`).
     #[test]
     fn test_bc_1_02_013_last_write_wins_same_ip() {
         let payload1 = make_mdns_payload(&[b"PLC-A", b"local"], [10, 0, 0, 1]);
@@ -2155,7 +2157,7 @@ mod modbus_unit_id_tests {
             make_llmnr_payload(&[b"SCADA-SRV"], [10, 0, 0, 4]),
         ));
 
-        // Step 5: second mDNS for 10.0.0.1 → "PLC-A-NEW" (later, overwrites step 1)
+        // Step 5: second mDNS for 10.0.0.1 → "PLC-A-NEW" (later in packet/processing order, last-write-wins)
         observer.observe(&make_udp_pkt(
             "10.0.0.1",
             "224.0.0.251",
