@@ -416,6 +416,11 @@
 </div>
 </details>
 
+{% match conformance_section %}{% when Some with (html) %}
+<div class="zonewarden-section">{{ html|safe }}</div>
+{% when None %}
+{% endmatch %}
+
 {% match ai_section %}{% when Some with (html) %}
 <h2>AI analysis</h2>
 <div class="ai-banner">

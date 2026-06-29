@@ -26,6 +26,22 @@ pub fn run_conformance(
     obs: &[FlowObs],
 ) -> Result<ConformanceResult, ZonewardenError> {
     let parsed = policy::load_str(policy_yaml)?;
+    run_validated(parsed, obs)
+}
+
+/// Same as [`run_conformance`], reading the policy from a YAML file on disk.
+pub fn run_conformance_path(
+    policy_path: &std::path::Path,
+    obs: &[FlowObs],
+) -> Result<ConformanceResult, ZonewardenError> {
+    let parsed = policy::load(policy_path)?;
+    run_validated(parsed, obs)
+}
+
+fn run_validated(
+    parsed: zonewarden::types::Policy,
+    obs: &[FlowObs],
+) -> Result<ConformanceResult, ZonewardenError> {
     let validated = validator::validate(parsed)?;
     let flows = bridge::flows_from_observations(obs);
     Ok(engine::run(&validated, &flows)?)
