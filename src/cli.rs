@@ -134,6 +134,23 @@ pub enum Command {
         #[arg(long, default_value_t = crate::diff::DEFAULT_FLOW_SHIFT_MULTIPLIER)]
         flow_shift_multiplier: f64,
     },
+    /// Zonewarden segmentation-conformance tools (ADR-0013).
+    #[command(subcommand)]
+    Zonewarden(ZonewardenCmd),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ZonewardenCmd {
+    /// Draft a segmentation policy (zones + inferred Purdue levels) from a
+    /// capture's asset inventory. Prints YAML to stdout — review it, add
+    /// conduits, then pass it to `analyze --policy`.
+    Suggest {
+        /// Path to input PCAP/PCAPNG.
+        input: PathBuf,
+        /// CIDR ranges to treat as OT zones (repeatable). Default: RFC1918.
+        #[arg(long = "ot-subnet", value_name = "CIDR")]
+        ot_subnets: Vec<IpNet>,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -280,7 +297,19 @@ pub fn run() -> Result<()> {
             ot_subnets,
             flow_shift_multiplier,
         ),
+        Command::Zonewarden(ZonewardenCmd::Suggest { input, ot_subnets }) => {
+            run_zonewarden_suggest(input, ot_subnets)
+        }
     }
+}
+
+/// `otsniff zonewarden suggest` — draft a policy from the asset inventory.
+fn run_zonewarden_suggest(input: PathBuf, ot_subnets: Vec<IpNet>) -> Result<()> {
+    let ot_subnets = ot_or_default(&ot_subnets);
+    let obs = analyze(&input, &ot_subnets, false, None)?;
+    let inventory = crate::inventory::build(&obs);
+    print!("{}", crate::segmentation::suggest::draft_policy(&inventory));
+    Ok(())
 }
 
 /// Run the `diff` subcommand (AC-001 / BC-9.05.001).
