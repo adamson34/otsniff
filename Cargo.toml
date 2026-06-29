@@ -22,7 +22,7 @@ sha2 = "0.11"
 
 [dev-dependencies]
 proptest = "1"
-criterion = "0.5"
+criterion = "0.8"
 
 # Performance budgets (NFR-PERF). The classify hot path is the pure core's
 # throughput-critical loop; the bench establishes a baseline and guards against
