@@ -369,6 +369,46 @@ fn fmt_multiplier(m: f64) -> String {
 
 /// Render a cross-capture diff as markdown (S-6.03 AC-002).
 ///
+/// Render the "Zonewarden — Segmentation Conformance" markdown section from a
+/// conformance result (ADR-0013). Returned as a standalone fragment so the
+/// caller injects it only when a `--policy` was supplied.
+pub fn render_conformance_section_md(r: &zonewarden::types::ConformanceResult) -> String {
+    let mut out = String::new();
+    writeln!(out, "## Zonewarden — Segmentation Conformance").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "Observed flows classified against the declared IEC 62443 zone/conduit policy."
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "| Metric | Count |").unwrap();
+    writeln!(out, "|--------|------:|").unwrap();
+    let rows = [
+        ("Total flows", r.total_flows),
+        ("Intra-zone (implicitly allowed)", r.intra_zone),
+        ("Allowed by a conduit", r.allowed),
+        ("No matching conduit", r.no_matching_conduit),
+        ("Wrong direction", r.wrong_direction),
+        ("Multicast/broadcast exempt", r.multicast_exempt),
+        ("IDMZ bypasses", r.idmz_bypasses),
+        ("Distinct violating flows", r.distinct_violating_flows),
+        ("External endpoints", r.external_endpoints),
+    ];
+    for (label, n) in rows {
+        writeln!(out, "| {label} | {n} |").unwrap();
+    }
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "Policy digest: `{}` — deterministic; identical inputs reproduce it byte-for-byte.",
+        r.policy_digest
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+    out
+}
+
 /// Produces an LLM-friendly markdown report with the same sections as the HTML
 /// diff renderer. All sections sort deterministically; each section defensively
 /// re-sorts its local clone before rendering so the output is self-sufficiently
@@ -768,6 +808,33 @@ fn sort_findings_total_md(findings: &mut [crate::findings::Finding]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_conformance() -> zonewarden::types::ConformanceResult {
+        zonewarden::types::ConformanceResult {
+            total_flows: 3,
+            no_matching_conduit: 2,
+            idmz_bypasses: 1,
+            distinct_violating_flows: 2,
+            policy_digest: "deadbeef".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn conformance_md_section_has_tallies_and_digest() {
+        let md = render_conformance_section_md(&sample_conformance());
+        assert!(md.contains("Zonewarden — Segmentation Conformance"));
+        assert!(md.contains("| IDMZ bypasses | 1 |"));
+        assert!(md.contains("`deadbeef`"));
+    }
+
+    #[test]
+    fn conformance_html_section_has_heading_and_digest() {
+        let html = crate::report::render_conformance_section(&sample_conformance());
+        assert!(html.contains("Zonewarden — Segmentation Conformance"));
+        assert!(html.contains("<code>deadbeef</code>"));
+        assert!(html.contains("IDMZ bypasses"));
+    }
 
     // ── F-1: make_fence produces a fence longer than embedded backtick runs ──
 

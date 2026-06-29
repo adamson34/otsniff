@@ -254,6 +254,44 @@ pub fn render_augmented_section(findings: &[AugmentedFinding]) -> String {
     out
 }
 
+/// Render the "Zonewarden — Segmentation Conformance" HTML section from a
+/// conformance result (ADR-0013), as a self-contained fragment for injection
+/// into the report (mirrors [`render_augmented_section`]). The text here is all
+/// tool-controlled (numbers + a hex digest), so plain HTML is safe.
+pub fn render_conformance_section(r: &zonewarden::types::ConformanceResult) -> String {
+    let mut out = String::new();
+    out.push_str(
+        "<h2 class=\"zonewarden-heading\">Zonewarden — Segmentation Conformance</h2>\n\
+         <p class=\"zonewarden-note muted\" style=\"font-size:0.85rem;margin-bottom:1rem;\">\
+         Observed flows classified against the declared IEC 62443 zone/conduit policy.</p>\n\
+         <table class=\"zonewarden-summary\">\n<tbody>\n",
+    );
+    let rows = [
+        ("Total flows", r.total_flows),
+        ("Intra-zone (implicitly allowed)", r.intra_zone),
+        ("Allowed by a conduit", r.allowed),
+        ("No matching conduit", r.no_matching_conduit),
+        ("Wrong direction", r.wrong_direction),
+        ("Multicast/broadcast exempt", r.multicast_exempt),
+        ("IDMZ bypasses", r.idmz_bypasses),
+        ("Distinct violating flows", r.distinct_violating_flows),
+        ("External endpoints", r.external_endpoints),
+    ];
+    for (label, n) in rows {
+        out.push_str(&format!(
+            "<tr><td>{label}</td><td style=\"text-align:right\">{n}</td></tr>\n"
+        ));
+    }
+    out.push_str("</tbody>\n</table>\n");
+    out.push_str(&format!(
+        "<p class=\"zonewarden-digest muted\" style=\"font-size:0.8rem;\">\
+         Policy digest: <code>{}</code> — deterministic; identical inputs reproduce it \
+         byte-for-byte.</p>\n",
+        r.policy_digest
+    ));
+    out
+}
+
 /// Render a cross-capture diff as a self-contained HTML report (S-6.03 AC-001).
 ///
 /// Produces a self-contained HTML document with sections for new, recurring,
