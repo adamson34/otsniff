@@ -93,7 +93,7 @@ pub fn parse(payload: &[u8]) -> Vec<LlmnrHostname> {
                 .collect();
             // BC-1.02.013 precondition: strip trailing dot only.
             let normalized = sanitized.trim_end_matches('.');
-            if !normalized.is_empty() {
+            if !normalized.trim().is_empty() {
                 results.push(LlmnrHostname {
                     name: normalized.to_string(),
                     ip,
@@ -409,6 +409,32 @@ mod tests {
         assert_eq!(
             results[0].name, "DEVICE",
             "F-101 LLMNR: control byte after trailing dot must not defeat dot trimming"
+        );
+    }
+
+    // ── F-202: discard whitespace-only hostnames ──────────────────────────────
+
+    /// F-202 / BC-1.02.012: a wire owner-name label consisting entirely of
+    /// space bytes (0x20) must be discarded — it survives the printable-ASCII
+    /// filter (0x20 is in range) but must be rejected by the whitespace-trim
+    /// check before insertion.
+    ///
+    /// Fixture: label `0x03 0x20 0x20 0x20` (length 3, three spaces).
+    /// After sanitize: "   ". After trim_end_matches('.'): "   ".
+    /// `"   ".trim().is_empty()` == true → discarded.
+    #[test]
+    fn test_f202_llmnr_all_spaces_label_discarded() {
+        // All-spaces label: three 0x20 bytes.
+        let label: &[u8] = b"   ";
+        let name = dns_name(&[label]);
+        let ans = a_record(&name, [10, 0, 1, 50]);
+        let mut msg = llmnr_header(true, 1);
+        msg.extend_from_slice(&ans);
+        let results = parse(&msg);
+        assert!(
+            results.is_empty(),
+            "F-202 LLMNR: all-spaces owner-name label must be discarded; got: {:?}",
+            results
         );
     }
 

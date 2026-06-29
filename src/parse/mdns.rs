@@ -91,7 +91,7 @@ pub fn parse(payload: &[u8]) -> Vec<MdnsHostname> {
                 &sanitized
             };
             let normalized = stripped.trim_end_matches('.');
-            if !normalized.is_empty() {
+            if !normalized.trim().is_empty() {
                 results.push(MdnsHostname {
                     name: normalized.to_string(),
                     ip,
@@ -594,6 +594,32 @@ mod tests {
         assert_eq!(
             results[0].name, "HMI",
             "F-101 mDNS: control byte adjacent to .local suffix must not defeat suffix stripping"
+        );
+    }
+
+    // ── F-202: discard whitespace-only hostnames ──────────────────────────────
+
+    /// F-202 / BC-1.02.010: a wire owner-name label consisting entirely of
+    /// space bytes (0x20) must be discarded — it survives the printable-ASCII
+    /// filter (0x20 is in range) but must be rejected by the whitespace-trim
+    /// check before insertion.
+    ///
+    /// Fixture: label `0x03 0x20 0x20 0x20` (length 3, three spaces).
+    /// After sanitize: "   ". After strip `.local`: "   " (no suffix).
+    /// After trim_end_matches('.'): "   ". `"   ".trim().is_empty()` == true
+    /// → discarded.
+    #[test]
+    fn test_f202_mdns_all_spaces_label_discarded() {
+        // All-spaces label: three 0x20 bytes.
+        let label: &[u8] = b"   ";
+        let name = dns_name(&[label]);
+        let ans = a_record(&name, [10, 0, 0, 50]);
+        let msg = build_mdns(&[ans]);
+        let results = parse(&msg);
+        assert!(
+            results.is_empty(),
+            "F-202 mDNS: all-spaces owner-name label must be discarded; got: {:?}",
+            results
         );
     }
 }
