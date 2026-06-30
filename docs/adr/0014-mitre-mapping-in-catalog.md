@@ -1,11 +1,14 @@
 # ADR-0014: MITRE ATT&CK for ICS mapping lives in the rule catalog
 
 ## Status
-Accepted — implemented (S-12.01). All seven previously-unmapped detection rules
-(`creds.*`, `creds.ldap_simple_bind`, `compat.smbv1`, `compat.stale_tls`,
+Accepted — implemented (S-12.01). The seven previously-unmapped detector
+*modules* (`plaintext_creds` — which backs the four `creds.{ftp,telnet,http_basic,snmp}`
+rule entries — plus `creds.ldap_simple_bind`, `compat.smbv1`, `compat.stale_tls`,
 `compat.weak_tls_cipher`, `boundary.dns_resolver`, `boundary.ntp_external`) now
-carry a `ReferenceKind::MitreIcsAttack` reference, and every finding surfaces its
-technique(s) in the HTML / markdown / JSON report by id-lookup from the catalog.
+carry a `ReferenceKind::MitreIcsAttack` reference (≈10 catalog rule entries in
+total), and every finding surfaces its technique(s) in the HTML / markdown / JSON
+report by id-lookup from the catalog. The three policy-gated `zonewarden.*`
+conformance verdicts are exempt (see Decision).
 
 ## Context
 otsniff already modelled external references on each rule via
