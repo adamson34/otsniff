@@ -221,3 +221,114 @@ pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     out.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(b.id)));
     out
 }
+
+/// A MITRE ATT&CK for ICS technique surfaced for a finding: a display-ready
+/// `label` (e.g. `"T0859 — Valid Accounts"`) and the canonical
+/// `attack.mitre.org` URL. Looked up from the rule catalog by finding id —
+/// the single source of truth (ADR-0014), never duplicated onto `Finding`.
+#[derive(Debug, Clone, Serialize)]
+pub struct MitreTechnique {
+    pub label: &'static str,
+    pub url: &'static str,
+}
+
+/// MITRE ATT&CK for ICS techniques for a finding id, looked up from the
+/// catalog (ADR-0014). Filters `references` to `MitreIcsAttack` entries that
+/// carry a url, in `references` order. Empty when the id isn't in the catalog
+/// (EC-001) — the same guard the `trigger` enrichment uses.
+pub fn mitre_techniques_for(id: &str) -> Vec<MitreTechnique> {
+    metadata_for(id)
+        .map(|m| {
+            m.references
+                .iter()
+                .filter(|r| r.kind == ReferenceKind::MitreIcsAttack)
+                .filter_map(|r| r.url.map(|url| MitreTechnique { label: r.label, url }))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Serialize a findings slice to JSON, enriching each finding object with a
+/// `mitre_techniques` array (AC-004). The MITRE data is looked up from the
+/// catalog by id — not stored on `Finding` — so the runtime finding and the
+/// catalog can't drift (ADR-0014). All existing finding fields are preserved.
+pub fn findings_json(findings: &[Finding]) -> Vec<serde_json::Value> {
+    findings
+        .iter()
+        .map(|f| {
+            let mut value = serde_json::to_value(f).expect("Finding serializes");
+            if let serde_json::Value::Object(map) = &mut value {
+                map.insert(
+                    "mitre_techniques".to_string(),
+                    serde_json::to_value(mitre_techniques_for(f.id))
+                        .expect("MitreTechnique serializes"),
+                );
+            }
+            value
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod mitre_tests {
+    use super::*;
+
+    /// A well-formed ATT&CK-for-ICS technique URL is exactly
+    /// `https://attack.mitre.org/techniques/T0<digits>/` — matching the
+    /// `^https://attack\.mitre\.org/techniques/T0\d+/$` shape from AC-001.
+    fn is_valid_ics_technique_url(url: &str) -> bool {
+        let Some(rest) = url.strip_prefix("https://attack.mitre.org/techniques/T0") else {
+            return false;
+        };
+        let Some(digits) = rest.strip_suffix('/') else {
+            return false;
+        };
+        !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+    }
+
+    /// AC-001: every detection rule in the catalog must carry at least one MITRE
+    /// ATT&CK for ICS reference, and every such reference must have a well-formed
+    /// `attack.mitre.org/techniques/T0XXX/` URL. This stops a future detection
+    /// rule from silently shipping without a technique mapping.
+    ///
+    /// Deviation from the spec's literal "every rule in `catalog()`": the three
+    /// policy-gated `zonewarden.*` rules (ADR-0013) are exempt. They are IEC
+    /// 62443 segmentation-*conformance* verdicts, not adversary-behavior
+    /// detections — and ATT&CK for ICS models adversary techniques, while
+    /// network segmentation is a *mitigation* (M0930), not a technique. The
+    /// spec's AC-001 mapping table covers exactly the seven detection modules
+    /// and never names the zonewarden verdicts in the MITRE context; forcing a
+    /// technique onto them would be semantically wrong and require an
+    /// unverifiable ID. They keep their IEC 62443 `Spec` references instead.
+    #[test]
+    fn every_rule_has_a_well_formed_mitre_reference() {
+        for rule in catalog() {
+            // Policy-gated segmentation-conformance verdicts are MITRE-exempt
+            // (see doc comment): they map to IEC 62443 controls, not ATT&CK.
+            if rule.id.starts_with("zonewarden.") {
+                continue;
+            }
+            let mitre: Vec<&Reference> = rule
+                .references
+                .iter()
+                .filter(|r| r.kind == ReferenceKind::MitreIcsAttack)
+                .collect();
+            assert!(
+                !mitre.is_empty(),
+                "rule {} has no MITRE ATT&CK for ICS reference (AC-001)",
+                rule.id
+            );
+            for r in mitre {
+                let url = r
+                    .url
+                    .unwrap_or_else(|| panic!("rule {} MITRE reference '{}' has no url", rule.id, r.label));
+                assert!(
+                    is_valid_ics_technique_url(url),
+                    "rule {} MITRE url {url} is not a well-formed \
+                     attack.mitre.org/techniques/T0XXX/ URL",
+                    rule.id
+                );
+            }
+        }
+    }
+}
