@@ -10,6 +10,9 @@ current_wave: 1
 total_waves: 1  # wave plan established with S-8.01 in wave 1
 total_stories: 3   # 2 backfill records + S-8.01 (first active v0.6.0 story)
 wave_1_status: completed  # S-8.01 delivered via full per-story pipeline (PR #138, merge 6334e36)
+wave_1_gate: passed
+wave_1_gate_passed_at: 2026-06-30T00:00:00Z
+wave_1_gate_notes: "Full suite 514/0 on develop 6334e36; per-story adversary CONVERGED (6 passes); HS-003 holdout PASS 1.00 (privacy invariant survives new mDNS/NetBIOS/LLMNR extractors); consistency via pass-6 anchoring + CI rule-catalog test; demos present. See holdout-scenarios/evaluations/wave-1-v0.6.0-2026-06-30.md."
 
 stories:
   # ===== v0.5.0 Backfill (delivered outside VSDD pipeline) =====
