@@ -481,7 +481,7 @@ recurring discipline — the `release/v0.X.Y` branch + `develop → main`
 PR + tag flow runs after every meaningful develop accumulation. See
 `.claude/commands/release.md` for the current playbook.
 
-### P1-6: MITRE ATT&CK for ICS technique mapping (M)
+### P1-6: MITRE ATT&CK for ICS technique mapping (M) — ✅ shipped (#147, S-12.01)
 
 Every `Finding` gains a `technique_ids: Vec<MitreId>` field
 referencing the [ATT&CK for ICS](https://attack.mitre.org/matrices/ics/)
