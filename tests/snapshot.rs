@@ -591,11 +591,11 @@ fn audit_log_rendered_for_an_analyze_run_carries_no_real_identifiers() {
         schema_version: audit::SCHEMA_VERSION,
         otsniff_version: "0.3.0-test".to_string(),
         timestamp: fixed_ts(),
-        input_pcap: audit::InputDescriptor {
-            path: "tests/fixtures/synthetic.pcap".to_string(),
+        input_pcaps: vec![audit::InputDescriptor {
+            path: "synthetic.pcap".to_string(),
             size_bytes: 1024,
             sha256: audit::sha256_hex("synthetic-pcap-bytes"),
-        },
+        }],
         scrub: audit::ScrubSummary {
             ip_pseudonyms: map.ips.len(),
             mac_pseudonyms: map.macs.len(),
@@ -3248,11 +3248,11 @@ fn audit_log_records_augment_pass_hashes_separately() {
         schema_version: audit::SCHEMA_VERSION,
         otsniff_version: "test".to_string(),
         timestamp: fixed_ts(),
-        input_pcap: otsniff::audit::InputDescriptor {
+        input_pcaps: vec![otsniff::audit::InputDescriptor {
             path: "test.pcap".to_string(),
             size_bytes: 0,
             sha256: audit::sha256_hex(""),
-        },
+        }],
         scrub: otsniff::audit::ScrubSummary::default(),
         leak_check: otsniff::audit::LeakCheckSummary {
             regex: otsniff::audit::LeakCheckResult {

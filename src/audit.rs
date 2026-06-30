@@ -29,14 +29,21 @@ use crate::error::{OtError, Result};
 
 /// Bump when the on-disk schema changes in a way external tooling
 /// would care about.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// v2 (S-9.01): `input_pcap: InputDescriptor` became
+/// `input_pcaps: Vec<InputDescriptor>` to attribute a multi-file
+/// (rotated-capture) analyze run to each source file.
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AuditLog {
     pub schema_version: u32,
     pub otsniff_version: String,
     pub timestamp: DateTime<Utc>,
-    pub input_pcap: InputDescriptor,
+    /// One descriptor per input PCAP, in command-line order (S-9.01).
+    /// Each `path` is a basename only (F-ADV-P2-009); each `sha256` still
+    /// pins the exact bytes ingested from that file (BC-7.01.002).
+    pub input_pcaps: Vec<InputDescriptor>,
     pub scrub: ScrubSummary,
     pub leak_check: LeakCheckSummary,
     pub ai_provider: AiInvocationSummary,
@@ -182,11 +189,11 @@ mod tests {
             schema_version: SCHEMA_VERSION,
             otsniff_version: "0.3.0-test".to_string(),
             timestamp: Utc::now(),
-            input_pcap: InputDescriptor {
-                path: "/tmp/x.pcap".to_string(),
+            input_pcaps: vec![InputDescriptor {
+                path: "x.pcap".to_string(),
                 size_bytes: 42,
                 sha256: sha256_hex(""),
-            },
+            }],
             scrub: ScrubSummary {
                 ip_pseudonyms: 12,
                 mac_pseudonyms: 8,
@@ -224,6 +231,69 @@ mod tests {
         // is what really enforces this; here we just sanity check that
         // a plain log doesn't carry any obvious leak.
         assert!(crate::ai::leak_detector::scan(&json).is_none());
+    }
+
+    #[test]
+    fn input_pcaps_serializes_as_array_with_schema_v2() {
+        // S-9.01 AC-004: a two-input run serializes `input_pcaps` as a
+        // 2-element array (basename + size + sha256 each), and the schema
+        // bumps to 2 to signal the shape change.
+        let log = AuditLog {
+            schema_version: SCHEMA_VERSION,
+            otsniff_version: "0.6.0-test".to_string(),
+            timestamp: Utc::now(),
+            input_pcaps: vec![
+                InputDescriptor {
+                    path: "capture-01.pcap".to_string(),
+                    size_bytes: 100,
+                    sha256: sha256_hex("a"),
+                },
+                InputDescriptor {
+                    path: "capture-02.pcap".to_string(),
+                    size_bytes: 200,
+                    sha256: sha256_hex("b"),
+                },
+            ],
+            scrub: ScrubSummary::default(),
+            leak_check: LeakCheckSummary {
+                regex: LeakCheckResult {
+                    passed: true,
+                    items_checked: 3,
+                },
+                map_value: LeakCheckResult {
+                    passed: true,
+                    items_checked: 0,
+                },
+            },
+            ai_provider: AiInvocationSummary {
+                command: "claude -p".to_string(),
+                model: "default".to_string(),
+                system_prompt_bytes: 0,
+                system_prompt_sha256: sha256_hex(""),
+                user_message_bytes: 0,
+                user_message_sha256: sha256_hex(""),
+                response_bytes: 0,
+                response_sha256: sha256_hex(""),
+                elapsed_seconds: 0.0,
+            },
+            unscrub: UnscrubSummary::default(),
+            augment_pass: None,
+        };
+
+        assert_eq!(log.schema_version, 2, "schema_version must bump to 2");
+        assert_eq!(log.input_pcaps.len(), 2);
+        assert_eq!(log.input_pcaps[0].path, "capture-01.pcap");
+        assert_eq!(log.input_pcaps[1].path, "capture-02.pcap");
+
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&log).unwrap()).unwrap();
+        let arr = value["input_pcaps"]
+            .as_array()
+            .expect("input_pcaps must serialize as a JSON array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["path"], "capture-01.pcap");
+        assert_eq!(arr[1]["size_bytes"], 200);
+        assert_eq!(value["schema_version"], 2);
     }
 
     #[test]

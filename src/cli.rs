@@ -54,7 +54,7 @@ impl From<SourceTypeArg> for DeclaredSource {
     }
 }
 use crate::observe::Observer;
-use crate::pcap::iter_packets;
+use crate::pcap::iter_packets_multi;
 use crate::progress::ProgressReporter;
 use crate::report::render_html;
 use crate::report_md::render_markdown;
@@ -197,8 +197,12 @@ pub struct ScrubArgs {
 
 #[derive(Args, Debug)]
 pub struct AnalyzeArgs {
-    /// Path to input PCAP/PCAPNG.
-    pub input: PathBuf,
+    /// One or more input PCAP/PCAPNG files. Multiple files (e.g. a set of
+    /// rotated captures) are ingested in command-line order and treated as
+    /// one logical capture — append semantics, no timestamp re-sort
+    /// (S-9.01). All files must share the same link-layer type.
+    #[arg(value_name = "PCAP", num_args = 1.., required = true)]
+    pub inputs: Vec<PathBuf>,
     /// Output HTML report path.
     #[arg(short = 'o', long = "output", default_value = "report.html")]
     pub output: PathBuf,
@@ -300,7 +304,7 @@ pub fn run() -> Result<()> {
 /// `otsniff zonewarden suggest` — draft a policy from the asset inventory.
 fn run_zonewarden_suggest(input: PathBuf, ot_subnets: Vec<IpNet>) -> Result<()> {
     let ot_subnets = ot_or_default(&ot_subnets);
-    let obs = analyze(&input, &ot_subnets, false, None)?;
+    let obs = analyze(std::slice::from_ref(&input), &ot_subnets, false, None)?;
     let inventory = crate::inventory::build(&obs);
     print!("{}", crate::segmentation::suggest::draft_policy(&inventory));
     Ok(())
@@ -353,9 +357,10 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     let curr_map: ScrubMap = serde_json::from_slice(&curr_map_bytes)?;
     curr_map.validate()?;
 
-    // Parse both PCAPs.
-    let base_obs = analyze(&baseline_pcap, &ot_subnets, false, None)?;
-    let curr_obs = analyze(&current_pcap, &ot_subnets, false, None)?;
+    // Parse both PCAPs. `diff` stays single-file per side (S-9.01 is
+    // analyze-only); pass a 1-element slice to the generalized helper.
+    let base_obs = analyze(std::slice::from_ref(&baseline_pcap), &ot_subnets, false, None)?;
+    let curr_obs = analyze(std::slice::from_ref(&current_pcap), &ot_subnets, false, None)?;
 
     // F-ADV-P4-010: validate map coverage of observed hosts. If the operator
     // swapped --baseline-map and --current-map, or supplied a stale map from
@@ -501,14 +506,14 @@ fn classify_with_guard(
 /// reporter can emit periodic progress lines.  The caller is responsible
 /// for calling `reporter.finish()` after this function returns.
 fn analyze(
-    input: &std::path::Path,
+    inputs: &[PathBuf],
     ot_subnets: &[IpNet],
     verbose: bool,
     mut progress: Option<&mut ProgressReporter<std::io::Stderr>>,
 ) -> Result<crate::observe::Observations> {
     let mut observer = Observer::new(ot_subnets.to_vec());
     let mut packet_count: u64 = 0;
-    for pkt_result in iter_packets(input)? {
+    for pkt_result in iter_packets_multi(inputs)? {
         let pkt = pkt_result?;
         if let Some(reporter) = progress.as_deref_mut() {
             reporter.record_packet(pkt.payload.len());
@@ -526,6 +531,50 @@ fn analyze(
         );
     }
     Ok(obs)
+}
+
+/// Basename (final path component) of a file, falling back to `<unknown>`.
+/// F-ADV-P2-009: never emit a full path into a report/label/audit field.
+fn basename_of(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "<unknown>".to_string())
+}
+
+/// Combined basename-only source label for a multi-file run (S-9.01 AC-005 /
+/// F-ADV-P2-009). Comma-joins basenames, capped at the first 3 then
+/// `… (+N more)` to keep large rotated sets readable in the report header.
+fn multi_basename_label(inputs: &[PathBuf]) -> String {
+    let names: Vec<String> = inputs.iter().map(|p| basename_of(p)).collect();
+    if names.len() <= 3 {
+        names.join(", ")
+    } else {
+        let head = names[..3].join(", ");
+        format!("{head} … (+{} more)", names.len() - 3)
+    }
+}
+
+/// Source string for the HTML report and JSON sidecar (S-9.01 AC-005).
+///
+/// **Single file:** the full path display — byte-identical to pre-S-9.01,
+/// so existing single-file output never churns. **Multiple files:** the
+/// basename-only combined label (no full path leaks).
+fn html_source_label(inputs: &[PathBuf]) -> String {
+    match inputs {
+        [single] => single.display().to_string(),
+        _ => multi_basename_label(inputs),
+    }
+}
+
+/// Source label for the markdown report (S-9.01 AC-005).
+///
+/// **Single file:** the basename via `file_name()` — byte-identical to
+/// pre-S-9.01. **Multiple files:** the basename-only combined label.
+fn md_source_label(inputs: &[PathBuf]) -> String {
+    match inputs {
+        [single] => basename_of(single),
+        _ => multi_basename_label(inputs),
+    }
 }
 
 /// Derive the default audit-log path from the report output path:
@@ -547,7 +596,12 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
         );
     }
     let mut reporter = ProgressReporter::new(std::io::stderr(), args.verbose);
-    let obs = analyze(&args.input, &ot_subnets, args.verbose, Some(&mut reporter))?;
+    let obs = analyze(
+        std::slice::from_ref(&args.input),
+        &ot_subnets,
+        args.verbose,
+        Some(&mut reporter),
+    )?;
     reporter.finish();
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
@@ -645,11 +699,11 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         eprintln!(
             "otsniff {} — analyzing {}",
             crate::VERSION,
-            args.input.display()
+            html_source_label(&args.inputs)
         );
     }
     let mut reporter = ProgressReporter::new(std::io::stderr(), args.verbose);
-    let obs = analyze(&args.input, &ot_subnets, args.verbose, Some(&mut reporter))?;
+    let obs = analyze(&args.inputs, &ot_subnets, args.verbose, Some(&mut reporter))?;
     reporter.finish();
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
@@ -683,14 +737,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     // full path can leak the operator's username, the plant name, embedded
     // IPs, and other privacy-sensitive identifiers — none of which the
     // scrub layer knows about because they're outside the parsed PCAP
-    // bytes. The audit log (cli.rs:730-735) carries the SHA-256 for
-    // chain-of-custody; the markdown only needs an identifier the
-    // analyst recognises.
-    let source_label = args
-        .input
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "<unknown>".to_string());
+    // bytes. The audit log carries each file's SHA-256 for chain-of-custody;
+    // the markdown only needs an identifier the analyst recognises. For a
+    // multi-file run this is the capped basename-only combined label (S-9.01).
+    let source_label = md_source_label(&args.inputs);
     let raw_md = render_markdown(
         &inventory,
         &findings,
@@ -711,7 +761,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             &inventory,
             &findings,
             &obs,
-            &args.input.display().to_string(),
+            &html_source_label(&args.inputs),
             generated_at,
             Some(&classification),
             None,
@@ -878,7 +928,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         &inventory,
         &findings,
         &obs,
-        &args.input.display().to_string(),
+        &html_source_label(&args.inputs),
         generated_at,
         Some(&classification),
         Some(ai_html),
@@ -911,7 +961,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     if let Some(json_path) = &args.json {
         let payload = serde_json::json!({
             "version": crate::VERSION,
-            "input": args.input.display().to_string(),
+            "input": html_source_label(&args.inputs),
             "inventory": inventory,
             "findings": findings,
         });
@@ -941,16 +991,23 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         .audit_log
         .clone()
         .unwrap_or_else(|| default_audit_log_path(&args.output));
-    let (size_bytes, sha256) = audit::sha256_file_hex(&args.input)?;
+    // S-9.01 AC-004: one descriptor per input file, in CLI order. Each
+    // `path` is a basename only (F-ADV-P2-009) and each `sha256` pins the
+    // exact bytes ingested from that file (BC-7.01.002).
+    let mut input_pcaps = Vec::with_capacity(args.inputs.len());
+    for path in &args.inputs {
+        let (size_bytes, sha256) = audit::sha256_file_hex(path)?;
+        input_pcaps.push(InputDescriptor {
+            path: basename_of(path),
+            size_bytes,
+            sha256,
+        });
+    }
     let log = AuditLog {
         schema_version: audit::SCHEMA_VERSION,
         otsniff_version: crate::VERSION.to_string(),
         timestamp: generated_at,
-        input_pcap: InputDescriptor {
-            path: args.input.display().to_string(),
-            size_bytes,
-            sha256,
-        },
+        input_pcaps,
         scrub: scrub_summary,
         leak_check,
         ai_provider: AiInvocationSummary {
@@ -1024,7 +1081,7 @@ fn write_optional_sidecars(
     if let Some(json_path) = &args.json {
         let payload = serde_json::json!({
             "version": crate::VERSION,
-            "input": args.input.display().to_string(),
+            "input": html_source_label(&args.inputs),
             "inventory": inventory,
             "findings": findings,
         });
