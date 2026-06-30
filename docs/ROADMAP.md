@@ -82,9 +82,10 @@ outputs in a way an OT defender would notice.
 
 **Track 1 emphasis (next priority).** P0-7 (investigation playbooks)
 shipped in v0.3; P0-8 (AI-augmented detection) shipped in the v0.5 dev
-cycle (S-5.03). The remaining open P0 items are P0-6 (OUI refresh),
-P0-9 (mDNS/NetBIOS hostnames), and P0-10 (multi-PCAP) — all sized **S**.
-The biggest *new* opportunity is **segmentation drift** (P1-13 below),
+cycle (S-5.03). P0-6 (OUI refresh) shipped in #48 (S-2.03) and P0-9
+(mDNS/NetBIOS hostnames) shipped in #138 (S-8.01); the only remaining
+open P0 item is P0-10 (multi-PCAP), sized **S**. The biggest *new*
+opportunity is **segmentation drift** (P1-13 below),
 which pairs the now-shipped cross-capture diff with the Zonewarden
 engine.
 
@@ -217,7 +218,7 @@ SPAN but it isn't" mistake.
 **Touches:** `cli.rs` (flag), `capture_source.rs` (warning emission
 when user-declared and heuristic disagree). **Deps:** none.
 
-### P0-6: OUI table refresh (S)
+### P0-6: OUI table refresh (S) — ✅ shipped (#48, S-2.03)
 
 The 4SICS captures had Siemens devices we mostly identified, but real plant
 captures will have many vendors we don't. Curated subset of the IEEE OUI
@@ -322,7 +323,7 @@ hostname extraction mean richer anchors for the LLM's reasoning.
 Doable in parallel with P0-7 since the entry points are different
 detectors.
 
-### P0-9: mDNS / NetBIOS / LLMNR hostname extraction (S)
+### P0-9: mDNS / NetBIOS / LLMNR hostname extraction (S) — ✅ shipped (#138, S-8.01)
 
 Completes the deferred half of P0-3. Today we extract hostnames from
 DHCP `Option 12 / Hostname` only. Mid-shop OT networks frequently have
