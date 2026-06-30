@@ -9,8 +9,10 @@ cycle: v0.6.0-feature
 current_wave: 3
 total_waves: 3  # wave 1 = S-8.01; wave 2 = S-9.01; wave 3 = S-10.01 (capture sanity)
 total_stories: 5   # 2 backfill records + S-8.01 + S-9.01 + S-10.01
-wave_3_status: in-progress  # S-10.01 dispatched to phase-3 per-story delivery
-wave_3_gate: pending
+wave_3_status: completed  # S-10.01 delivered via full per-story pipeline (PR #143, merge 668d704)
+wave_3_gate: passed
+wave_3_gate_passed_at: 2026-06-30T00:00:00Z
+wave_3_gate_notes: "Full suite 659/0 on develop 668d704; per-story adversary CONVERGED (3 passes, all clean, novelty LOW); HS-011 holdout PASS 1.00 (each degenerate class — epoch / sub-second / non-monotonic — warns on stderr + HTML/MD banner; sane capture provably silent + structurally unchanged); demo present (degenerate vs sane VHS). See holdout-scenarios/evaluations/wave-3-v0.6.0-2026-06-30.md."
 wave_2_status: completed  # S-9.01 delivered via full per-story pipeline (PR #140, merge 030a279)
 wave_2_gate: passed
 wave_2_gate_passed_at: 2026-06-30T00:00:00Z
@@ -81,17 +83,17 @@ stories:
     notes: "Multi-PCAP / rotated-capture analyze: `analyze a.pcap b.pcap …` concatenates captures in CLI order (append semantics, no timestamp sort), one report over the union window. iter_packets_multi + peek_link_type link-layer guard (OtError::MixedLinkTypes); audit log input_pcap→input_pcaps (SCHEMA_VERSION 1→2); single-file output byte-identical (zero snapshot churn). analyze-only; scrub/diff unchanged."
 
   S-10.01:
-    status: ready  # phase-2 decomposition complete; awaiting phase-3 delivery
+    status: completed
     wave: 3
-    branch: null
-    worktree: null
-    merge_sha: null
-    pr: null
-    completed_at: null
+    branch: feature/S-10.01-capture-sanity-warning  # merged + deleted
+    worktree: removed
+    merge_sha: 668d704
+    pr: 143
+    completed_at: 2026-06-30T00:00:00Z
     points: 5
     epic: E-10
-    adversary_convergence: pending
-    red_gate: pending
+    adversary_convergence: met (3 passes; cycles/v0.6.0-feature/S-10.01/adversary-convergence-state.json; all CONVERGED, novelty LOW, no blocker/major)
+    red_gate: verified (cycles/v0.6.0-feature/S-10.01/implementation/red-gate-log.md)
     bcs: [BC-4.01.004, BC-4.01.005]
     traces_to: P1-9
     notes: "Capture-window sanity warning: pure capture_sanity::assess(obs) detects EpochZeroTimestamps / SubSecondWindow / NonMonotonicTimestamps from observer-tracked min_ts/max_ts/monotonic; surfaced as an HTML+MD report banner and stderr WARNING (mirrors Classification::guard_warning). Rendered ONLY when degenerate → sane captures byte-identical (zero snapshot churn). Also explains the TD-S901-002 out-of-order multi-file window inversion."
