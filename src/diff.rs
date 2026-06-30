@@ -594,7 +594,7 @@ fn resolve_ip_to_pseudonym(ip: &str, map: &ScrubMap) -> Option<String> {
 ///   `(rule_id, src_pseudo, dst_pseudo, dst_port)`. Endpoint extraction
 ///   handles the three real evidence formats; falls back to `(rule_id, "", "", 0)`
 ///   for findings without endpoint-shaped evidence (documented limitation).
-/// - **AC-004 (BC-3.08.003):** role-inference changes and flow-volume shifts.
+/// - **AC-004 (BC-3.08.003):** role-inference changes and flow volume/rate shifts.
 ///   Flows existing in only one capture are now in `flows_new`/`flows_gone`
 ///   (F-W2-002 split); `flow_shifts` is reserved for both-sides shifts at
 ///   or above the multiplier threshold.
