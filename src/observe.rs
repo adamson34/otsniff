@@ -443,8 +443,26 @@ impl Observer {
         if is_broadcast_or_multicast(&pkt.dst_mac) {
             self.obs.broadcast_frames += 1;
         }
+        // Capture-window sanity tracking (S-10.01 AC-001). Compare against the
+        // immediately preceding packet's ts (the current `last_ts`, before it is
+        // overwritten below) to detect a strictly-backward step. `first_ts` /
+        // `last_ts` keep their existing first/last-processed semantics — do NOT
+        // repoint them at the min/max extremes.
+        if let Some(prev) = self.obs.last_ts {
+            if pkt.ts < prev {
+                self.obs.timestamps_monotonic = false;
+            }
+        }
         self.obs.first_ts.get_or_insert(pkt.ts);
         self.obs.last_ts = Some(pkt.ts);
+        self.obs.min_ts = Some(match self.obs.min_ts {
+            Some(m) => m.min(pkt.ts),
+            None => pkt.ts,
+        });
+        self.obs.max_ts = Some(match self.obs.max_ts {
+            Some(m) => m.max(pkt.ts),
+            None => pkt.ts,
+        });
 
         self.update_host(pkt.src_ip, pkt.src_mac, pkt, bytes);
         self.update_host(pkt.dst_ip, pkt.dst_mac, pkt, bytes);

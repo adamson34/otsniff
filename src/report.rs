@@ -170,9 +170,13 @@ pub fn render_html(
         total_packets: obs.total_packets.to_string(),
         total_bytes: human_bytes(obs.total_bytes),
         span,
-        // STUB (red gate): always empty so no banner renders. The green step
-        // computes `capture_sanity::assess(obs)` here.
-        capture_warnings: Vec::new(),
+        // S-10.01 AC-003: pre-format the capture-window sanity warnings
+        // (ADR-0003). Empty for a sane capture, so the template emits no banner
+        // and clean-capture HTML stays byte-identical.
+        capture_warnings: crate::capture_sanity::assess(obs)
+            .iter()
+            .map(|w| w.message().to_string())
+            .collect(),
         capture_source: capture_source.map(|c| c.report_line()),
         finding_count: findings.len(),
         asset_count: inventory.len(),

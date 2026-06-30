@@ -734,7 +734,7 @@ fn eth_ipv4_udp_frame() -> Vec<u8> {
     f.extend_from_slice(&[0x45, 0x00, 0x00, 0x1c, 0, 0, 0, 0, 0x40, 0x11, 0, 0]);
     f.extend_from_slice(&[10, 10, 0, 1]); // src
     f.extend_from_slice(&[10, 10, 0, 2]); // dst
-    // UDP header (8 bytes), length 8.
+                                          // UDP header (8 bytes), length 8.
     f.extend_from_slice(&[0x00, 0x35, 0x00, 0x35, 0x00, 0x08, 0x00, 0x00]);
     f
 }
@@ -777,7 +777,9 @@ fn s_10_01_analyze_epoch_zero_pcap_warns_on_stderr() {
         .arg(&out)
         .assert()
         .success()
-        .stderr(predicate::str::contains("WARNING: capture has no real timestamps"));
+        .stderr(predicate::str::contains(
+            "WARNING: capture has no real timestamps",
+        ));
 }
 
 /// AC-004 / AC-005: `analyze` on a sane (multi-second, monotonic, post-epoch)
@@ -788,11 +790,7 @@ fn s_10_01_analyze_sane_pcap_emits_no_capture_warning() {
     let pcap = tmp.path().join("sane.pcap");
     std::fs::write(
         &pcap,
-        legacy_pcap(
-            &eth_ipv4_udp_frame(),
-            2,
-            &[1_700_000_000, 1_700_000_010],
-        ),
+        legacy_pcap(&eth_ipv4_udp_frame(), 2, &[1_700_000_000, 1_700_000_010]),
     )
     .unwrap();
     let out = tmp.path().join("report.html");

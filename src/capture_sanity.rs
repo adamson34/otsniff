@@ -34,17 +34,54 @@ impl CaptureWarning {
     /// Stable, human-readable description of the condition. Constant English —
     /// no observed identifiers — so it is safe to render anywhere.
     pub fn message(&self) -> &'static str {
-        // STUB (red gate) — real strings land in the green step.
-        ""
+        match self {
+            Self::EpochZeroTimestamps => {
+                "capture has no real timestamps (all at/before the Unix epoch); \
+                 time-based findings are unreliable"
+            }
+            Self::SubSecondWindow => {
+                "capture spans less than one second; per-second rates and \
+                 time-window findings are unreliable"
+            }
+            Self::NonMonotonicTimestamps => {
+                "capture timestamps are not monotonically increasing (packets \
+                 out of order or clock skew); the capture window and \
+                 time-ordered findings may be misleading"
+            }
+        }
     }
 }
 
 /// Inspect the capture's time base and return every degenerate-timestamp
 /// condition, in a fixed order. Empty when the time base is sane (multi-second,
 /// monotonic, post-epoch) or when there are no timestamps at all.
-pub fn assess(_obs: &Observations) -> Vec<CaptureWarning> {
-    // STUB (red gate) — real logic lands in the green step.
-    Vec::new()
+pub fn assess(obs: &Observations) -> Vec<CaptureWarning> {
+    let mut out = Vec::new();
+
+    // No decodable timestamps at all (EC-008): the report already shows
+    // "(no timestamps)" — emit no second signal. This also makes a never-
+    // observed `Observations` inert.
+    let (min_ts, max_ts) = match (obs.min_ts, obs.max_ts) {
+        (Some(min), Some(max)) => (min, max),
+        _ => return out,
+    };
+
+    // Rule 1 (epoch-zero) and Rule 2 (sub-second) are mutually exclusive: a
+    // capture sitting entirely at/before epoch second 0 has no real time base,
+    // so the sub-second observation would be noise.
+    if obs.total_packets >= 1 && max_ts.timestamp() <= 0 {
+        out.push(CaptureWarning::EpochZeroTimestamps);
+    } else if obs.total_packets >= 2 && (max_ts - min_ts) < chrono::Duration::seconds(1) {
+        out.push(CaptureWarning::SubSecondWindow);
+    }
+
+    // Rule 3 (non-monotonic) is independent — it can accompany a sub-second
+    // window (see the combo test).
+    if !obs.timestamps_monotonic {
+        out.push(CaptureWarning::NonMonotonicTimestamps);
+    }
+
+    out
 }
 
 #[cfg(test)]
