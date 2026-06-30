@@ -568,7 +568,7 @@ src IPs, but reporting them as "hosts" misleads the analyst) and UX
 `report_md.rs` inventory section, snapshot tests.
 **Deps:** none.
 
-### P1-11: Diff capture-window normalization (S)
+### P1-11: Diff capture-window normalization (S) — ✅ shipped (#145, S-11.01)
 
 `otsniff diff` flow-shift detection currently compares raw byte
 counts. When the two captures cover different durations (e.g. 1h
