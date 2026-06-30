@@ -85,11 +85,17 @@ pub struct FlowSummary {
     pub bytes: u64,
 }
 
-/// A volume shift on a flow that exists in BOTH captures.
+/// A volume/rate shift on a flow that exists in BOTH captures.
 ///
-/// **F-W2-002:** `FlowDelta` is now reserved for flows whose `max/min` byte
-/// ratio meets or exceeds the configured `flow_shift_multiplier`. Flows that
-/// exist on only one side go into `Diff::flows_new` or `Diff::flows_gone`.
+/// **F-W2-002:** `FlowDelta` is reserved for flows whose `max/min` ratio meets
+/// or exceeds the configured `flow_shift_multiplier`. Flows that exist on only
+/// one side go into `Diff::flows_new` or `Diff::flows_gone`.
+///
+/// **S-11.01:** the ratio is computed on per-second *rates* when both captures
+/// have a usable window (`Diff::rate_normalized == true`), and on raw bytes
+/// otherwise. `baseline_bytes`/`current_bytes` are always the raw observed
+/// totals — so a rate-normalized entry can show equal byte columns with a ≥2×
+/// ratio (the report heading reads "rate change" + a rate-note to disambiguate).
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FlowDelta {
     pub src: String,
@@ -98,8 +104,8 @@ pub struct FlowDelta {
     pub proto: String,
     pub baseline_bytes: u64,
     pub current_bytes: u64,
-    /// `max / min` ratio. Always ≥ `flow_shift_multiplier` for entries
-    /// in `flow_shifts`.
+    /// `max / min` ratio (of rates when `Diff::rate_normalized`, else of raw
+    /// bytes). Always ≥ `flow_shift_multiplier` for entries in `flow_shifts`.
     pub ratio: f64,
 }
 
