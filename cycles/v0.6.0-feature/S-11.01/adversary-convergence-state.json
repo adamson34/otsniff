@@ -6,7 +6,21 @@
   "clean_streak": 0,
   "converged": false,
   "last_classification": "NOT-CONVERGED",
+  "production_code_frozen_at": "c78caa1 (pass-2 threshold fix); pending fresh clean passes",
   "passes": [
+    {
+      "pass": 2,
+      "classification": "NOT-CONVERGED",
+      "novelty": "MEDIUM",
+      "findings": {
+        "blocking": 0,
+        "major": ["M-1(p2): spec self-contradiction — the narrative's motivating 1h-vs-30min (exactly 2×) case was promised a warning by EC-002, but the strict > 2× threshold made exactly-2× silent (EC-008/AC-003/BC-3.08.005). Headline scenario produced no advisory."],
+        "minor": ["both advisory variants' surfacing text (degenerate window_warning/banner + mismatch banner) had no presence assertion (EC-003/EC-004 coverage gap)"],
+        "clean_areas": ["rate-normalization math", "rate/volume labeling fix from pass 1 (heading + rate-note consistency)", "window_warning/banner/advisory coupling + fmt_window_secs parity", "output scope", "privacy", "semantic anchoring (BC-INDEX titles match)"]
+      },
+      "resolution": "M-1 fixed: window-advisory threshold > 2.0 → >= 2.0 (inclusive), so the 1h-vs-30min case warns; matches the narrative + the flow-shift detector's >= multiplier. Updated boundary tests (within-2× no-banner M-1 lock + exactly-2×-now-warns), added both-variant advisory-text test (MINOR). Reworded AC-003/EC-008/BC-3.08.005 to >= 2×. Commit c78caa1. Full gate re-verified green (668 tests). Demo (3900s vs 1800s = 2.17×) still warns, unaffected.",
+      "verification_discipline_note": "M-1 confirmed a genuine spec self-contradiction (narrative/EC-002 vs EC-008/AC-003/BC); resolved by honoring the narrative intent (2× is material) with the inclusive threshold."
+    },
     {
       "pass": 1,
       "classification": "NOT-CONVERGED",
