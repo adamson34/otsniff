@@ -14,7 +14,7 @@ phase_0_status: complete
 phase_1_status: complete-converged
 phase_2_status: complete-approved
 phase_2_approval: human-approved 2026-05-11
-next_phase: idle — v0.6.0-feature waves 1 (S-8.01) + 2 (S-9.01) + 3 (S-10.01) delivered & gated; awaiting next story or release
+next_phase: idle — v0.6.0-feature waves 1 (S-8.01) + 2 (S-9.01) + 3 (S-10.01) + 4 (S-11.01) delivered & gated; awaiting next story or release
 ---
 
 # otsniff factory state

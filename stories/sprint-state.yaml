@@ -9,8 +9,10 @@ cycle: v0.6.0-feature
 current_wave: 4
 total_waves: 4  # w1 S-8.01; w2 S-9.01; w3 S-10.01; w4 S-11.01 (diff window normalization)
 total_stories: 6   # 2 backfill records + S-8.01 + S-9.01 + S-10.01 + S-11.01
-wave_4_status: in-progress  # S-11.01 dispatched to phase-3 per-story delivery
-wave_4_gate: pending
+wave_4_status: completed  # S-11.01 delivered via full per-story pipeline (PR #145, merge ad37626)
+wave_4_gate: passed
+wave_4_gate_passed_at: 2026-06-30T00:00:00Z
+wave_4_gate_notes: "Full suite 668/0 on develop ad37626; per-story adversary CONVERGED (5 passes, 2 fix rounds — rate-vs-volume labeling + >=2× threshold spec contradiction, then 3 clean); HS-012 holdout PASS 1.00 (duration artifact suppressed [identical 48→48 bytes NOT flagged], real rate doubling preserved [48→48 bytes flagged at 2.17×], window-mismatch + degenerate banners both correct, comparable windows quiet); demo present (artifact vs real-shift VHS). See holdout-scenarios/evaluations/wave-4-v0.6.0-2026-06-30.md."
 wave_3_status: completed  # S-10.01 delivered via full per-story pipeline (PR #143, merge 668d704)
 wave_3_gate: passed
 wave_3_gate_passed_at: 2026-06-30T00:00:00Z
@@ -101,17 +103,17 @@ stories:
     notes: "Capture-window sanity warning: pure capture_sanity::assess(obs) detects EpochZeroTimestamps / SubSecondWindow / NonMonotonicTimestamps from observer-tracked min_ts/max_ts/monotonic; surfaced as an HTML+MD report banner and stderr WARNING (mirrors Classification::guard_warning). Rendered ONLY when degenerate → sane captures byte-identical (zero snapshot churn). Also explains the TD-S901-002 out-of-order multi-file window inversion."
 
   S-11.01:
-    status: ready  # phase-2 decomposition complete; awaiting phase-3 delivery
+    status: completed
     wave: 4
-    branch: null
-    worktree: null
-    merge_sha: null
-    pr: null
-    completed_at: null
+    branch: feature/S-11.01-diff-window-normalization  # merged + deleted
+    worktree: removed
+    merge_sha: ad37626
+    pr: 145
+    completed_at: 2026-06-30T00:00:00Z
     points: 5
     epic: E-11
-    adversary_convergence: pending
-    red_gate: pending
+    adversary_convergence: met (5 passes, 2 fix rounds; cycles/v0.6.0-feature/S-11.01/adversary-convergence-state.json; pass-1 rate-vs-volume labeling + pass-2 >=2× threshold contradiction fixed, passes 3/4/5 CONVERGED)
+    red_gate: verified (cycles/v0.6.0-feature/S-11.01/implementation/red-gate-log.md)
     bcs: [BC-3.08.004, BC-3.08.005]
     traces_to: P1-11
     depends_on: [S-10.01]
