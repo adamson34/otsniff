@@ -1,11 +1,13 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 3756
+assertion_line: 3819
 expression: md
 ---
 # otsniff diff report
 
 _otsniff v0.6.0-dev.1_
+
+_Capture windows: baseline 3600s vs current 3600s_
 
 ## Summary
 
@@ -74,7 +76,9 @@ _id: `creds.telnet`_
 |-----------|----------|---|----------|
 | `host_003` | plc | → | hmi |
 
-## Flow shifts (≥2× volume change)
+## Flow shifts (≥2× rate change)
+
+_Ratios are per-second rates, normalized by each capture's window (baseline 3600s vs current 3600s); the byte columns are raw totals._
 
 | Source | Destination | Port | Proto | Baseline bytes | Current bytes | Ratio |
 |--------|-------------|------|-------|----------------|---------------|-------|

@@ -85,11 +85,17 @@ pub struct FlowSummary {
     pub bytes: u64,
 }
 
-/// A volume shift on a flow that exists in BOTH captures.
+/// A volume/rate shift on a flow that exists in BOTH captures.
 ///
-/// **F-W2-002:** `FlowDelta` is now reserved for flows whose `max/min` byte
-/// ratio meets or exceeds the configured `flow_shift_multiplier`. Flows that
-/// exist on only one side go into `Diff::flows_new` or `Diff::flows_gone`.
+/// **F-W2-002:** `FlowDelta` is reserved for flows whose `max/min` ratio meets
+/// or exceeds the configured `flow_shift_multiplier`. Flows that exist on only
+/// one side go into `Diff::flows_new` or `Diff::flows_gone`.
+///
+/// **S-11.01:** the ratio is computed on per-second *rates* when both captures
+/// have a usable window (`Diff::rate_normalized == true`), and on raw bytes
+/// otherwise. `baseline_bytes`/`current_bytes` are always the raw observed
+/// totals — so a rate-normalized entry can show equal byte columns with a ≥2×
+/// ratio (the report heading reads "rate change" + a rate-note to disambiguate).
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FlowDelta {
     pub src: String,
@@ -98,8 +104,8 @@ pub struct FlowDelta {
     pub proto: String,
     pub baseline_bytes: u64,
     pub current_bytes: u64,
-    /// `max / min` ratio. Always ≥ `flow_shift_multiplier` for entries
-    /// in `flow_shifts`.
+    /// `max / min` ratio (of rates when `Diff::rate_normalized`, else of raw
+    /// bytes). Always ≥ `flow_shift_multiplier` for entries in `flow_shifts`.
     pub ratio: f64,
 }
 
@@ -186,6 +192,17 @@ pub struct Diff {
     /// JSON output otherwise (`skip_serializing_if`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub segmentation: Option<SegmentationDrift>,
+    /// **S-11.01:** `true` iff the flow-shift ratios were computed on per-second
+    /// rates (bytes/sec) because BOTH capture windows were usable. `false` ⇒ a
+    /// degenerate (missing / sub-second) window on at least one side forced the
+    /// fallback to raw byte ratios (the pre-S-11.01 behavior).
+    pub rate_normalized: bool,
+    /// **S-11.01:** baseline capture-window duration in seconds. `None` when the
+    /// window is missing or sub-second (degenerate; see [`window_secs`]).
+    pub baseline_window_secs: Option<f64>,
+    /// **S-11.01:** current capture-window duration in seconds. `None` when the
+    /// window is missing or sub-second.
+    pub current_window_secs: Option<f64>,
 }
 
 impl Default for Diff {
@@ -202,6 +219,170 @@ impl Default for Diff {
             flows_gone: Vec::new(),
             flow_shift_multiplier: DEFAULT_FLOW_SHIFT_MULTIPLIER,
             segmentation: None,
+            rate_normalized: false,
+            baseline_window_secs: None,
+            current_window_secs: None,
+        }
+    }
+}
+
+/// **S-11.01:** the usable capture-window duration of a capture, in seconds.
+///
+/// Returns `Some(secs)` only when BOTH `min_ts`/`max_ts` are present AND the
+/// span is at least 1 second. A missing, zero, or sub-second window is the
+/// S-10.01 "degenerate" case — it cannot serve as a rate-normalization
+/// denominator, so it yields `None` and the caller falls back to raw byte
+/// ratios.
+fn window_secs(obs: &Observations) -> Option<f64> {
+    match (obs.min_ts, obs.max_ts) {
+        (Some(min), Some(max)) => {
+            let s = (max - min).num_milliseconds() as f64 / 1000.0;
+            if s >= 1.0 {
+                Some(s)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// **S-11.01:** format a capture-window duration for display (e.g. `1800` or
+/// `1800.5`). Whole-second windows render without a trailing `.0`.
+fn fmt_window_secs(s: f64) -> String {
+    if (s.fract()).abs() < 1e-9 {
+        format!("{s:.0}")
+    } else {
+        format!("{s:.1}")
+    }
+}
+
+/// **S-11.01:** the capture-window condition that drives both the `diff` stderr
+/// WARNING (AC-003) and the diff-report banner (AC-004). `None` ⇒ the two
+/// windows are comparable AND rate-normalized (no advisory: a normal diff).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WindowAdvisory {
+    /// A capture window was missing or sub-second on at least one side, so
+    /// flow-shift ratios fell back to raw byte counts (could not normalize).
+    Degenerate,
+    /// Both windows were usable but differ by 2× or more (inclusive); ratios
+    /// are rate-normalized. `factor` is the larger/smaller window ratio.
+    Mismatch { factor: f64 },
+}
+
+impl Diff {
+    /// **S-11.01:** the active [`WindowAdvisory`], or `None` when the windows are
+    /// comparable and normalized. The `>= 2.0` test means windows that differ by
+    /// 2× **or more** raise a mismatch — so the motivating 1h-vs-30min (exactly
+    /// 2×) case warns (EC-002), and the threshold matches the flow-shift
+    /// detector's own `>=` multiplier semantics.
+    pub fn window_advisory(&self) -> Option<WindowAdvisory> {
+        if !self.rate_normalized {
+            return Some(WindowAdvisory::Degenerate);
+        }
+        match (self.baseline_window_secs, self.current_window_secs) {
+            (Some(b), Some(c)) if b > 0.0 && c > 0.0 => {
+                let (hi, lo) = if b >= c { (b, c) } else { (c, b) };
+                if hi / lo >= 2.0 {
+                    Some(WindowAdvisory::Mismatch { factor: hi / lo })
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// **S-11.01:** pre-formatted informational line shown whenever both
+    /// per-side windows are known, e.g. `Capture windows: baseline 3600s vs
+    /// current 1800s`. `None` when either window is degenerate.
+    pub fn capture_windows_line(&self) -> Option<String> {
+        match (self.baseline_window_secs, self.current_window_secs) {
+            (Some(b), Some(c)) => Some(format!(
+                "Capture windows: baseline {}s vs current {}s",
+                fmt_window_secs(b),
+                fmt_window_secs(c)
+            )),
+            _ => None,
+        }
+    }
+
+    /// **S-11.01:** pre-formatted banner text for the diff report, present only
+    /// when a [`WindowAdvisory`] holds. The renderer emits no banner when this
+    /// is `None` (comparable + normalized).
+    pub fn window_banner(&self) -> Option<String> {
+        match self.window_advisory()? {
+            WindowAdvisory::Degenerate => Some(
+                "Capture-window mismatch: a capture window is missing or sub-second; \
+                 flow-shift ratios are raw byte counts (not rate-normalized) and may be \
+                 duration artifacts."
+                    .to_string(),
+            ),
+            WindowAdvisory::Mismatch { factor } => {
+                let b = self.baseline_window_secs.unwrap_or(0.0);
+                let c = self.current_window_secs.unwrap_or(0.0);
+                Some(format!(
+                    "Capture-window mismatch: windows differ {factor:.1}× (baseline {}s vs \
+                     current {}s); flow-shift ratios are rate-normalized (bytes/sec).",
+                    fmt_window_secs(b),
+                    fmt_window_secs(c)
+                ))
+            }
+        }
+    }
+
+    /// **S-11.01:** stderr WARNING text for the capture-window advisory, or
+    /// `None` when the windows are comparable and rate-normalized. Routes the
+    /// durations through `fmt_window_secs` so the stderr numbers match the
+    /// report banner exactly (the renderers and `run_diff` share this).
+    pub fn window_warning(&self) -> Option<String> {
+        match self.window_advisory()? {
+            WindowAdvisory::Degenerate => Some(
+                "a capture window is missing or sub-second; flow-shift ratios are raw \
+                 byte counts and may be duration artifacts"
+                    .to_string(),
+            ),
+            WindowAdvisory::Mismatch { factor } => {
+                let b = self.baseline_window_secs.unwrap_or(0.0);
+                let c = self.current_window_secs.unwrap_or(0.0);
+                Some(format!(
+                    "capture windows differ {factor:.1}× (baseline {}s vs current {}s); \
+                     flow-shift ratios are rate-normalized (bytes/sec)",
+                    fmt_window_secs(b),
+                    fmt_window_secs(c)
+                ))
+            }
+        }
+    }
+
+    /// **S-11.01:** the noun for the flow-shift heading — `"rate"` when ratios
+    /// are rate-normalized (bytes/sec), `"volume"` when raw byte counts were
+    /// used. So a normalized table reads "≥2× rate change", never the
+    /// misleading "volume change" with a rate ratio over raw byte columns.
+    pub fn flow_shift_basis(&self) -> &'static str {
+        if self.rate_normalized {
+            "rate"
+        } else {
+            "volume"
+        }
+    }
+
+    /// **S-11.01:** an explanatory note rendered above the flow-shift table
+    /// whenever ratios are rate-normalized — including the within-2× band where
+    /// no mismatch banner is shown — so the ratio column is never read as a raw
+    /// byte change. `None` when raw byte ratios were used (no note needed).
+    pub fn flow_shift_rate_note(&self) -> Option<String> {
+        if !self.rate_normalized {
+            return None;
+        }
+        match (self.baseline_window_secs, self.current_window_secs) {
+            (Some(b), Some(c)) => Some(format!(
+                "Ratios are per-second rates, normalized by each capture's window \
+                 (baseline {}s vs current {}s); the byte columns are raw totals.",
+                fmt_window_secs(b),
+                fmt_window_secs(c)
+            )),
+            _ => None,
         }
     }
 }
@@ -413,7 +594,7 @@ fn resolve_ip_to_pseudonym(ip: &str, map: &ScrubMap) -> Option<String> {
 ///   `(rule_id, src_pseudo, dst_pseudo, dst_port)`. Endpoint extraction
 ///   handles the three real evidence formats; falls back to `(rule_id, "", "", 0)`
 ///   for findings without endpoint-shaped evidence (documented limitation).
-/// - **AC-004 (BC-3.08.003):** role-inference changes and flow-volume shifts.
+/// - **AC-004 (BC-3.08.003):** role-inference changes and flow volume/rate shifts.
 ///   Flows existing in only one capture are now in `flows_new`/`flows_gone`
 ///   (F-W2-002 split); `flow_shifts` is reserved for both-sides shifts at
 ///   or above the multiplier threshold.
@@ -672,6 +853,11 @@ pub fn compute_with_multiplier(
     let all_flow_keys: HashSet<&FlowPseudoKey> =
         base_flows.keys().chain(curr_flows.keys()).collect();
 
+    // ---- S-11.01: per-side capture windows for rate normalization --------
+    let baseline_window_secs = window_secs(baseline.observations);
+    let current_window_secs = window_secs(current.observations);
+    let rate_normalized = baseline_window_secs.is_some() && current_window_secs.is_some();
+
     let multiplier = flow_shift_multiplier;
 
     let mut flows_new: Vec<FlowSummary> = Vec::new();
@@ -698,11 +884,23 @@ pub fn compute_with_multiplier(
                 bytes: bb,
             }),
             (Some(bb), Some(cb)) => {
-                let (hi, lo) = if cb >= bb { (cb, bb) } else { (bb, cb) };
-                if lo == 0 {
+                // S-11.01: compare per-second rates when BOTH windows are usable
+                // so a flow that is merely steady over unequal capture durations
+                // isn't reported as a duration-artifact shift. When either window
+                // is degenerate (`None`), fall back to the raw byte counts.
+                let (base_metric, curr_metric) = match (baseline_window_secs, current_window_secs) {
+                    (Some(bw), Some(cw)) => (bb as f64 / bw, cb as f64 / cw),
+                    _ => (bb as f64, cb as f64),
+                };
+                let (hi, lo) = if curr_metric >= base_metric {
+                    (curr_metric, base_metric)
+                } else {
+                    (base_metric, curr_metric)
+                };
+                if lo == 0.0 {
                     continue;
                 }
-                let ratio = hi as f64 / lo as f64;
+                let ratio = hi / lo;
                 if ratio >= multiplier {
                     flow_shifts.push(FlowDelta {
                         src: key.0.clone(),
@@ -764,6 +962,9 @@ pub fn compute_with_multiplier(
         flows_gone,
         flow_shift_multiplier,
         segmentation,
+        rate_normalized,
+        baseline_window_secs,
+        current_window_secs,
     }
 }
 
@@ -1424,5 +1625,308 @@ mod tests {
         assert_eq!(vref.src_pseudonym, "host_001");
         assert_ne!(vref.dst_pseudonym, "203.0.113.45");
         assert!(vref.dst_pseudonym.starts_with("unmapped_"));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // S-11.01: diff capture-window normalization
+    // ──────────────────────────────────────────────────────────────────────
+
+    use crate::observe::{FlowKey, FlowObs};
+    use std::collections::HashSet as StdHashSet;
+
+    /// Build an `Observations` carrying a single `10.9.0.1 -> 10.9.0.2:502/tcp`
+    /// flow of `bytes`, with the capture window set from `window` seconds
+    /// (`None` ⇒ leave `min_ts`/`max_ts` unset = degenerate).
+    fn obs_with_flow(bytes: u64, window: Option<f64>) -> Observations {
+        let src: std::net::IpAddr = "10.9.0.1".parse().unwrap();
+        let dst: std::net::IpAddr = "10.9.0.2".parse().unwrap();
+        let t0 = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let mut obs = Observations::default();
+        if let Some(w) = window {
+            obs.min_ts = Some(t0);
+            obs.max_ts = Some(t0 + chrono::Duration::milliseconds((w * 1000.0) as i64));
+        }
+        let key = FlowKey {
+            src,
+            dst,
+            dst_port: 502,
+            proto: 6,
+        };
+        obs.flows.insert(
+            "10.9.0.1->10.9.0.2:502/6".to_string(),
+            FlowObs {
+                key,
+                packets: 1,
+                bytes,
+                first_seen: t0,
+                last_seen: t0,
+                label: None,
+                unique_src_ports: StdHashSet::new(),
+            },
+        );
+        obs
+    }
+
+    fn map_910() -> ScrubMap {
+        scrub_map(&[("host_910", "10.9.0.1"), ("host_911", "10.9.0.2")])
+    }
+
+    /// AC-002 worked example: a steady flow with 2× bytes over a 2× window is a
+    /// pure duration artifact. The raw ratio (2.0) would flag it, but the
+    /// rate ratio is 1.0 → NOT flagged. `rate_normalized` is `true`.
+    #[test]
+    fn s_11_01_worked_example_steady_flow_not_flagged_when_rate_normalized() {
+        let base = obs_with_flow(2000, Some(3600.0)); // 2X bytes over 3600s
+        let curr = obs_with_flow(1000, Some(1800.0)); // X bytes over 1800s
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(
+            diff.rate_normalized,
+            "both windows usable ⇒ rate_normalized must be true"
+        );
+        assert!(
+            diff.flow_shifts.is_empty(),
+            "rate ratio is 1.0 (2X/3600 vs X/1800) ⇒ steady flow must NOT be flagged; \
+             got {:?}",
+            diff.flow_shifts
+        );
+        assert_eq!(diff.baseline_window_secs, Some(3600.0));
+        assert_eq!(diff.current_window_secs, Some(1800.0));
+    }
+
+    /// AC-002 / EC-005: a flow whose true *rate* doubled (same windows) is still
+    /// flagged — a real behavioral shift is preserved.
+    #[test]
+    fn s_11_01_real_rate_doubled_still_flagged() {
+        let base = obs_with_flow(1000, Some(1800.0));
+        let curr = obs_with_flow(2000, Some(1800.0)); // same window, 2× rate
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(
+            diff.rate_normalized,
+            "both windows usable ⇒ rate_normalized"
+        );
+        assert_eq!(
+            diff.flow_shifts.len(),
+            1,
+            "a genuine 2× rate increase must still be flagged"
+        );
+        assert!(
+            (diff.flow_shifts[0].ratio - 2.0).abs() < 1e-9,
+            "rate ratio for 2000/1800 vs 1000/1800 should be 2.0, got {}",
+            diff.flow_shifts[0].ratio
+        );
+    }
+
+    /// AC-002 / EC-003: a degenerate window on one side forces the raw-byte
+    /// fallback — `rate_normalized` is `false` and a 2× byte change is flagged.
+    #[test]
+    fn s_11_01_degenerate_window_falls_back_to_raw_ratio() {
+        let base = obs_with_flow(1000, None); // no timestamps ⇒ degenerate
+        let curr = obs_with_flow(2000, Some(1800.0));
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(
+            !diff.rate_normalized,
+            "a None window on one side ⇒ rate_normalized must be false"
+        );
+        assert_eq!(
+            diff.flow_shifts.len(),
+            1,
+            "raw fallback: a 2× byte change must still be flagged"
+        );
+        assert!(
+            (diff.flow_shifts[0].ratio - 2.0).abs() < 1e-9,
+            "raw ratio for 2000/1000 should be 2.0, got {}",
+            diff.flow_shifts[0].ratio
+        );
+        assert_eq!(diff.baseline_window_secs, None);
+        assert_eq!(diff.current_window_secs, Some(1800.0));
+    }
+
+    /// M-1 regression lock: windows differ < 2× (1.5×) so `window_advisory` is
+    /// `None` and NO mismatch banner is shown — yet a rate-normalized flow IS
+    /// flagged. The heading basis must read "rate" and the rate-note MUST still
+    /// be present, so a flagged flow isn't read as a raw "volume change".
+    #[test]
+    fn s_11_01_within_2x_no_banner_but_rate_note_present() {
+        let base = obs_with_flow(600, Some(1800.0)); // rate 600/1800 = 0.333
+        let curr = obs_with_flow(800, Some(1200.0)); // rate 800/1200 = 0.667 = 2× base; 1.5× window
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(diff.rate_normalized);
+        assert_eq!(
+            diff.window_advisory(),
+            None,
+            "1.5× windows (< 2×) must NOT raise an advisory"
+        );
+        assert!(
+            diff.window_banner().is_none() && diff.window_warning().is_none(),
+            "no banner/stderr warning below 2×"
+        );
+        assert_eq!(diff.flow_shifts.len(), 1, "the ~2× rate change is flagged");
+        assert_eq!(diff.flow_shift_basis(), "rate");
+        assert!(
+            diff.flow_shift_rate_note().is_some(),
+            "the rate-note MUST be present even when no banner is shown (within-2× band)"
+        );
+    }
+
+    /// EC-002 + EC-008 (adversary pass-2 M-1): windows differing EXACTLY 2× (the
+    /// motivating 1h-vs-30min case) DO raise a mismatch advisory — `>= 2×` is
+    /// inclusive — so the headline scenario warns (stderr + banner).
+    #[test]
+    fn s_11_01_exactly_2x_window_raises_mismatch() {
+        let base = obs_with_flow(1000, Some(3600.0)); // 1 hour
+        let curr = obs_with_flow(1000, Some(1800.0)); // 30 minutes
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(diff.rate_normalized);
+        match diff.window_advisory() {
+            Some(WindowAdvisory::Mismatch { factor }) => {
+                assert!(
+                    (factor - 2.0).abs() < 1e-9,
+                    "factor should be 2.0, got {factor}"
+                )
+            }
+            other => panic!("exactly 2× must raise Mismatch (>= 2×, EC-002), got {other:?}"),
+        }
+        assert!(diff.window_banner().is_some(), "exactly 2× ⇒ banner shown");
+        assert!(
+            diff.window_warning()
+                .is_some_and(|w| w.contains("windows differ")),
+            "exactly 2× ⇒ stderr warning"
+        );
+    }
+
+    /// MINOR (adversary pass 2): both advisory variants' surfacing text is
+    /// asserted — degenerate (raw fallback) and mismatch — for `window_warning`
+    /// and `window_banner` (EC-003/EC-004 surfacing claims).
+    #[test]
+    fn s_11_01_advisory_text_for_both_variants() {
+        // Degenerate: one window None ⇒ raw fallback.
+        let degen = Diff {
+            rate_normalized: false,
+            baseline_window_secs: None,
+            current_window_secs: Some(1800.0),
+            ..Default::default()
+        };
+        assert_eq!(degen.window_advisory(), Some(WindowAdvisory::Degenerate));
+        assert!(degen
+            .window_warning()
+            .is_some_and(|w| w.contains("missing or sub-second")));
+        assert!(degen
+            .window_banner()
+            .is_some_and(|b| b.contains("missing or sub-second") && b.contains("raw byte counts")));
+
+        // Mismatch: both windows usable, > 2×.
+        let mismatch = Diff {
+            rate_normalized: true,
+            baseline_window_secs: Some(3600.0),
+            current_window_secs: Some(900.0),
+            ..Default::default()
+        };
+        assert!(matches!(
+            mismatch.window_advisory(),
+            Some(WindowAdvisory::Mismatch { .. })
+        ));
+        assert!(mismatch
+            .window_warning()
+            .is_some_and(|w| w.contains("windows differ") && w.contains("rate-normalized")));
+        assert!(mismatch
+            .window_banner()
+            .is_some_and(|b| b.contains("windows differ")));
+    }
+
+    /// EC-001: equal windows ⇒ rate ratio ≡ byte ratio; a steady flow is not
+    /// flagged, `rate_normalized` is true, and there is no advisory.
+    #[test]
+    fn s_11_01_equal_windows_no_advisory_steady_not_flagged() {
+        let base = obs_with_flow(1000, Some(1800.0));
+        let curr = obs_with_flow(1000, Some(1800.0));
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(diff.rate_normalized);
+        assert_eq!(diff.window_advisory(), None);
+        assert!(diff.flow_shifts.is_empty(), "equal rate ⇒ no shift");
+        assert_eq!(diff.flow_shift_basis(), "rate");
     }
 }

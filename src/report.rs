@@ -622,6 +622,9 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
     let view = DiffReportView {
         version: crate::VERSION.to_string(),
         no_deltas,
+        // S-11.01: capture-window banner + informational line (empty ⇒ omitted).
+        window_banner: diff.window_banner().unwrap_or_default(),
+        capture_windows_line: diff.capture_windows_line().unwrap_or_default(),
         segmentation_section,
         findings_new_count: diff.findings_new.len(),
         findings_recurring_count: diff.findings_recurring.len(),
@@ -630,6 +633,10 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
         hosts_gone_count: diff.hosts_gone.len(),
         flow_shifts_count: diff.flow_shifts.len(),
         flow_shift_label: format!("≥{}", fmt_multiplier(diff.flow_shift_multiplier)),
+        // S-11.01: "rate" / "volume" so the heading matches the ratio basis;
+        // the note explains rate-normalization even in the no-banner band.
+        flow_shift_basis: diff.flow_shift_basis().to_string(),
+        flow_shift_rate_note: diff.flow_shift_rate_note().unwrap_or_default(),
         findings_new,
         findings_recurring,
         findings_resolved,
@@ -648,6 +655,12 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
 struct DiffReportView {
     version: String,
     no_deltas: bool,
+    /// **S-11.01:** capture-window advisory banner text, empty when the windows
+    /// are comparable and rate-normalized (no banner rendered).
+    window_banner: String,
+    /// **S-11.01:** informational `Capture windows: baseline {B}s vs current
+    /// {C}s` line, empty when either per-side window is degenerate.
+    capture_windows_line: String,
     /// Pre-rendered "Segmentation drift" HTML fragment (P1-13), empty when no
     /// `--policy` was supplied. Tool-controlled content (pseudonyms + integer
     /// tallies + a hex digest), so the template's `|safe` is sound.
@@ -662,6 +675,12 @@ struct DiffReportView {
     /// Computed from `Diff::flow_shift_multiplier` so the template stays logic-light
     /// per ADR-0003.
     flow_shift_label: String,
+    /// **S-11.01:** `"rate"` or `"volume"` — the noun in the flow-shift heading,
+    /// matching whether the ratio column is rate-normalized or raw bytes.
+    flow_shift_basis: String,
+    /// **S-11.01:** explanatory note above the flow-shift table when ratios are
+    /// rate-normalized; empty when raw byte ratios were used (no note rendered).
+    flow_shift_rate_note: String,
     findings_new: Vec<DiffFindingView>,
     findings_recurring: Vec<DiffFindingView>,
     findings_resolved: Vec<DiffFindingView>,

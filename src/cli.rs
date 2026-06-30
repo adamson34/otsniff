@@ -101,7 +101,7 @@ pub enum Command {
     /// reading Rust source.
     Rules(RulesArgs),
     /// Compare two captures and emit a delta report: new and gone hosts,
-    /// finding deltas, role inference shifts, and flow-volume shifts.
+    /// finding deltas, role inference shifts, and flow volume/rate shifts.
     /// Identification is by pseudonym from the merged scrub maps, so the
     /// comparison is stable across captures of the same network.
     //
@@ -148,7 +148,8 @@ pub struct DiffArgs {
     /// spurious findings_new/findings_resolved entries (F-ADV-P1-001).
     #[arg(long = "ot-subnet", value_name = "CIDR")]
     pub ot_subnets: Vec<IpNet>,
-    /// Ratio threshold for flow-volume shift detection (default 2.0).
+    /// Ratio threshold for flow-shift detection — on per-second rates when both
+    /// capture windows are usable, else raw bytes (default 2.0).
     /// A flow appearing in both captures is reported as a shift when
     /// the larger byte count is at least this multiple of the smaller.
     /// Values < 1.0 are rejected at parse time.
@@ -444,6 +445,15 @@ fn run_diff(args: DiffArgs) -> Result<()> {
         },
         flow_shift_multiplier,
     );
+
+    // S-11.01 (AC-003): surface a capture-window advisory on stderr. A
+    // degenerate (missing / sub-second) window means ratios are raw byte
+    // counts; a >= 2× (2×-or-more) mismatch means ratios are rate-normalized
+    // but the windows are materially different. Windows differing by < 2×
+    // print nothing.
+    if let Some(warning) = diff.window_warning() {
+        eprintln!("WARNING: {warning}");
+    }
 
     // Render output based on file extension.
     let ext = output
