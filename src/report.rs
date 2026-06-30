@@ -622,6 +622,9 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
     let view = DiffReportView {
         version: crate::VERSION.to_string(),
         no_deltas,
+        // S-11.01: capture-window banner + informational line (empty ⇒ omitted).
+        window_banner: diff.window_banner().unwrap_or_default(),
+        capture_windows_line: diff.capture_windows_line().unwrap_or_default(),
         segmentation_section,
         findings_new_count: diff.findings_new.len(),
         findings_recurring_count: diff.findings_recurring.len(),
@@ -648,6 +651,12 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
 struct DiffReportView {
     version: String,
     no_deltas: bool,
+    /// **S-11.01:** capture-window advisory banner text, empty when the windows
+    /// are comparable and rate-normalized (no banner rendered).
+    window_banner: String,
+    /// **S-11.01:** informational `Capture windows: baseline {B}s vs current
+    /// {C}s` line, empty when either per-side window is degenerate.
+    capture_windows_line: String,
     /// Pre-rendered "Segmentation drift" HTML fragment (P1-13), empty when no
     /// `--policy` was supplied. Tool-controlled content (pseudonyms + integer
     /// tallies + a hex digest), so the template's `|safe` is sound.

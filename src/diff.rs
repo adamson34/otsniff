@@ -241,6 +241,89 @@ fn window_secs(obs: &Observations) -> Option<f64> {
     }
 }
 
+/// **S-11.01:** format a capture-window duration for display (e.g. `1800` or
+/// `1800.5`). Whole-second windows render without a trailing `.0`.
+fn fmt_window_secs(s: f64) -> String {
+    if (s.fract()).abs() < 1e-9 {
+        format!("{s:.0}")
+    } else {
+        format!("{s:.1}")
+    }
+}
+
+/// **S-11.01:** the capture-window condition that drives both the `diff` stderr
+/// WARNING (AC-003) and the diff-report banner (AC-004). `None` ⇒ the two
+/// windows are comparable AND rate-normalized (no advisory: a normal diff).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WindowAdvisory {
+    /// A capture window was missing or sub-second on at least one side, so
+    /// flow-shift ratios fell back to raw byte counts (could not normalize).
+    Degenerate,
+    /// Both windows were usable but differ by more than 2×; ratios are
+    /// rate-normalized. `factor` is the larger/smaller window ratio.
+    Mismatch { factor: f64 },
+}
+
+impl Diff {
+    /// **S-11.01:** the active [`WindowAdvisory`], or `None` when the windows are
+    /// comparable and normalized. The strict `> 2.0` test means windows that
+    /// differ by exactly 2× do NOT raise a mismatch (EC-008).
+    pub fn window_advisory(&self) -> Option<WindowAdvisory> {
+        if !self.rate_normalized {
+            return Some(WindowAdvisory::Degenerate);
+        }
+        match (self.baseline_window_secs, self.current_window_secs) {
+            (Some(b), Some(c)) if b > 0.0 && c > 0.0 => {
+                let (hi, lo) = if b >= c { (b, c) } else { (c, b) };
+                if hi / lo > 2.0 {
+                    Some(WindowAdvisory::Mismatch { factor: hi / lo })
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// **S-11.01:** pre-formatted informational line shown whenever both
+    /// per-side windows are known, e.g. `Capture windows: baseline 3600s vs
+    /// current 1800s`. `None` when either window is degenerate.
+    pub fn capture_windows_line(&self) -> Option<String> {
+        match (self.baseline_window_secs, self.current_window_secs) {
+            (Some(b), Some(c)) => Some(format!(
+                "Capture windows: baseline {}s vs current {}s",
+                fmt_window_secs(b),
+                fmt_window_secs(c)
+            )),
+            _ => None,
+        }
+    }
+
+    /// **S-11.01:** pre-formatted banner text for the diff report, present only
+    /// when a [`WindowAdvisory`] holds. The renderer emits no banner when this
+    /// is `None` (comparable + normalized).
+    pub fn window_banner(&self) -> Option<String> {
+        match self.window_advisory()? {
+            WindowAdvisory::Degenerate => Some(
+                "Capture-window mismatch: a capture window is missing or sub-second; \
+                 flow-shift ratios are raw byte counts (not rate-normalized) and may be \
+                 duration artifacts."
+                    .to_string(),
+            ),
+            WindowAdvisory::Mismatch { factor } => {
+                let b = self.baseline_window_secs.unwrap_or(0.0);
+                let c = self.current_window_secs.unwrap_or(0.0);
+                Some(format!(
+                    "Capture-window mismatch: windows differ {factor:.1}× (baseline {}s vs \
+                     current {}s); flow-shift ratios are rate-normalized (bytes/sec).",
+                    fmt_window_secs(b),
+                    fmt_window_secs(c)
+                ))
+            }
+        }
+    }
+}
+
 /// Inputs to `compute`: each side carries its own observations + merged map
 /// plus the pre-computed findings for that capture (AC-003, BC-3.08.002).
 ///
@@ -738,11 +821,23 @@ pub fn compute_with_multiplier(
                 bytes: bb,
             }),
             (Some(bb), Some(cb)) => {
-                let (hi, lo) = if cb >= bb { (cb, bb) } else { (bb, cb) };
-                if lo == 0 {
+                // S-11.01: compare per-second rates when BOTH windows are usable
+                // so a flow that is merely steady over unequal capture durations
+                // isn't reported as a duration-artifact shift. When either window
+                // is degenerate (`None`), fall back to the raw byte counts.
+                let (base_metric, curr_metric) = match (baseline_window_secs, current_window_secs) {
+                    (Some(bw), Some(cw)) => (bb as f64 / bw, cb as f64 / cw),
+                    _ => (bb as f64, cb as f64),
+                };
+                let (hi, lo) = if curr_metric >= base_metric {
+                    (curr_metric, base_metric)
+                } else {
+                    (base_metric, curr_metric)
+                };
+                if lo == 0.0 {
                     continue;
                 }
-                let ratio = hi as f64 / lo as f64;
+                let ratio = hi / lo;
                 if ratio >= multiplier {
                     flow_shifts.push(FlowDelta {
                         src: key.0.clone(),
@@ -1570,7 +1665,10 @@ mod tests {
                 conformance: None,
             },
         );
-        assert!(diff.rate_normalized, "both windows usable ⇒ rate_normalized");
+        assert!(
+            diff.rate_normalized,
+            "both windows usable ⇒ rate_normalized"
+        );
         assert_eq!(
             diff.flow_shifts.len(),
             1,

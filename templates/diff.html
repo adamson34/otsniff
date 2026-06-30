@@ -83,6 +83,20 @@
     color: var(--ok);
     font-weight: 600;
   }
+  .window-mismatch-banner {
+    background: color-mix(in oklch, var(--med) 10%, var(--paper));
+    border: 1px solid var(--med);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+    color: var(--med);
+    font-weight: 600;
+  }
+  .capture-windows-line {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 1rem 0 0.25rem;
+  }
   .finding {
     border: 1px solid var(--line);
     border-left-width: 4px;
@@ -154,6 +168,13 @@
 </div>
 
 <div class="page-body">
+
+{% if !capture_windows_line.is_empty() %}
+<p class="capture-windows-line">{{ capture_windows_line }}</p>
+{% endif %}
+{% if !window_banner.is_empty() %}
+<div class="window-mismatch-banner">{{ window_banner }}</div>
+{% endif %}
 
 {% if no_deltas %}
 <div class="no-deltas-banner">No deltas detected — captures are identical by all tracked metrics.</div>
