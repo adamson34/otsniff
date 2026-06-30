@@ -242,7 +242,12 @@ pub fn mitre_techniques_for(id: &str) -> Vec<MitreTechnique> {
             m.references
                 .iter()
                 .filter(|r| r.kind == ReferenceKind::MitreIcsAttack)
-                .filter_map(|r| r.url.map(|url| MitreTechnique { label: r.label, url }))
+                .filter_map(|r| {
+                    r.url.map(|url| MitreTechnique {
+                        label: r.label,
+                        url,
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -319,9 +324,9 @@ mod mitre_tests {
                 rule.id
             );
             for r in mitre {
-                let url = r
-                    .url
-                    .unwrap_or_else(|| panic!("rule {} MITRE reference '{}' has no url", rule.id, r.label));
+                let url = r.url.unwrap_or_else(|| {
+                    panic!("rule {} MITRE reference '{}' has no url", rule.id, r.label)
+                });
                 assert!(
                     is_valid_ics_technique_url(url),
                     "rule {} MITRE url {url} is not a well-formed \

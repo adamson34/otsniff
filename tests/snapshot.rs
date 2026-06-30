@@ -345,7 +345,8 @@ fn scrubbed_markdown_snapshot_does_not_leak_real_values() {
     // finding; the constant technique strings survive scrubbing (EC-004).
     assert!(
         scrubbed.contains("**MITRE ATT&CK for ICS.**")
-            && scrubbed.contains("[T0859 — Valid Accounts](https://attack.mitre.org/techniques/T0859/)"),
+            && scrubbed
+                .contains("[T0859 — Valid Accounts](https://attack.mitre.org/techniques/T0859/)"),
         "markdown finding must carry the MITRE ATT&CK for ICS line"
     );
 

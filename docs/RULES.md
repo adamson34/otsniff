@@ -47,6 +47,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 - **RFC** — RFC 959 — File Transfer Protocol ([link](https://datatracker.ietf.org/doc/html/rfc959))
+- **MITRE ATT&CK for ICS** — T0859 — Valid Accounts ([link](https://attack.mitre.org/techniques/T0859/))
 
 ## `creds.telnet`
 
@@ -61,6 +62,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 - **RFC** — RFC 854 — Telnet Protocol Specification ([link](https://datatracker.ietf.org/doc/html/rfc854))
+- **MITRE ATT&CK for ICS** — T0859 — Valid Accounts ([link](https://attack.mitre.org/techniques/T0859/))
 
 ## `creds.http_basic`
 
@@ -75,6 +77,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 - **RFC** — RFC 7617 — The 'Basic' HTTP Authentication Scheme ([link](https://datatracker.ietf.org/doc/html/rfc7617))
+- **MITRE ATT&CK for ICS** — T0859 — Valid Accounts ([link](https://attack.mitre.org/techniques/T0859/))
 
 ## `creds.snmp`
 
@@ -89,6 +92,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 - **RFC** — RFC 3411 — Architecture for SNMPv3 (the secure replacement) ([link](https://datatracker.ietf.org/doc/html/rfc3411))
+- **MITRE ATT&CK for ICS** — T0859 — Valid Accounts ([link](https://attack.mitre.org/techniques/T0859/))
 
 ## `creds.ldap_simple_bind`
 
@@ -104,6 +108,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 - **RFC** — RFC 4511 — Lightweight Directory Access Protocol (LDAP): The Protocol ([link](https://datatracker.ietf.org/doc/html/rfc4511))
 - **RFC** — RFC 4513 — LDAP Authentication Methods and Security Mechanisms (STARTTLS) ([link](https://datatracker.ietf.org/doc/html/rfc4513))
+- **MITRE ATT&CK for ICS** — T0859 — Valid Accounts ([link](https://attack.mitre.org/techniques/T0859/))
 
 ## `compat.ntlmv1`
 
@@ -191,6 +196,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **CVE** — CVE-2017-0144 — MS17-010 / EternalBlue (SMBv1 RCE) ([link](https://nvd.nist.gov/vuln/detail/CVE-2017-0144))
 - **Vendor** — Microsoft — Stop using SMB1 ([link](https://learn.microsoft.com/en-us/windows-server/storage/file-server/troubleshoot/smbv1-not-installed-by-default-in-windows))
+- **MITRE ATT&CK for ICS** — T0866 — Exploitation of Remote Services (supporting) ([link](https://attack.mitre.org/techniques/T0866/))
 
 ## `compat.stale_tls`
 
@@ -205,6 +211,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **RFC** — RFC 8996 — Deprecating TLS 1.0 and TLS 1.1 ([link](https://datatracker.ietf.org/doc/html/rfc8996))
 - **CWE** — CWE-326 — Inadequate Encryption Strength ([link](https://cwe.mitre.org/data/definitions/326.html))
+- **MITRE ATT&CK for ICS** — T0830 — Adversary-in-the-Middle (supporting) ([link](https://attack.mitre.org/techniques/T0830/))
 
 ## `compat.weak_tls_cipher`
 
@@ -219,6 +226,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **RFC** — RFC 7465 — Prohibiting RC4 Cipher Suites ([link](https://datatracker.ietf.org/doc/html/rfc7465))
 - **CWE** — CWE-326 — Inadequate Encryption Strength ([link](https://cwe.mitre.org/data/definitions/326.html))
+- **MITRE ATT&CK for ICS** — T0830 — Adversary-in-the-Middle (supporting) ([link](https://attack.mitre.org/techniques/T0830/))
 
 ## `creds.rdp_no_nla`
 
@@ -277,6 +285,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Network segmentation
 - **Spec** — Purdue Reference Model — boundary services
+- **MITRE ATT&CK for ICS** — T0884 — Connection Proxy (supporting) ([link](https://attack.mitre.org/techniques/T0884/))
 
 ## `boundary.ntp_external`
 
@@ -291,6 +300,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Network segmentation
 - **Spec** — Purdue Reference Model — boundary services
+- **MITRE ATT&CK for ICS** — T0884 — Connection Proxy (supporting) ([link](https://attack.mitre.org/techniques/T0884/))
 
 ## `recon.port_scan`
 

@@ -1,6 +1,6 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 236
+assertion_line: 319
 expression: payload
 ---
 {
@@ -10,6 +10,12 @@ expression: payload
         "PLC-LINE3 (10.10.0.20):23 (1 packet(s))"
       ],
       "id": "creds.telnet",
+      "mitre_techniques": [
+        {
+          "label": "T0859 — Valid Accounts",
+          "url": "https://attack.mitre.org/techniques/T0859/"
+        }
+      ],
       "playbook": [
         "Treat any password used during the Telnet sessions to `10.10.0.20:23` as exposed. Plan a rotation with the on-shift engineer for those devices and any account whose credentials may be reused (a Telnet password on a switch is often the same engineer account used elsewhere).",
         "Migrate the listed devices to SSH where they support it. The asset inventory shows which hosts also speak the secure equivalent — use that as the starting list.",
@@ -26,6 +32,12 @@ expression: payload
         "ENG-WS-01 (10.10.0.5) -> 8.8.8.8:80 (tcp, 5 pkts, 600 bytes)"
       ],
       "id": "egress.ot_to_internet",
+      "mitre_techniques": [
+        {
+          "label": "T0883 — Internet Accessible Device",
+          "url": "https://attack.mitre.org/techniques/T0883/"
+        }
+      ],
       "playbook": [
         "Identify the IT/OT gateway physically. The flows below traverse it — look at the asset inventory for hosts whose MACs appear on both sides of the boundary (a single MAC showing up for an OT IP and a public IP is the gateway interface).",
         "Pull the running config / ruleset from the gateway (firewall, L3 switch, or whatever serves as the OT boundary). Look for an explicit deny-all-by-default with named exceptions. The expected answer for a plant boundary is \"deny everything; allow these specific update servers / vendor cloud endpoints / time sources.\"",
@@ -42,6 +54,12 @@ expression: payload
         "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20):445 (12 SMBv1 packet(s))"
       ],
       "id": "compat.smbv1",
+      "mitre_techniques": [
+        {
+          "label": "T0866 — Exploitation of Remote Services (supporting)",
+          "url": "https://attack.mitre.org/techniques/T0866/"
+        }
+      ],
       "playbook": [
         "Identify the hosts physically: `10.10.0.5` and `10.10.0.20`. Walk each MAC to a switch port using the asset inventory's MAC for that host.",
         "For Windows hosts: disable SMB1 via Group Policy (Computer Configuration → Policies → Windows Settings → Security Settings → ...) or PowerShell (`Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol`). After SMB1 is off, a host that legitimately needed it will fail loudly — better than failing silently.",
@@ -59,6 +77,12 @@ expression: payload
         "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20) : SendRRData / Stop"
       ],
       "id": "ics.cip_engineering",
+      "mitre_techniques": [
+        {
+          "label": "T0858 — Change Operating Mode",
+          "url": "https://attack.mitre.org/techniques/T0858/"
+        }
+      ],
       "playbook": [
         "Identify the source host(s) physically: `10.10.0.5`. Use the same MAC-table approach as for the Modbus playbook. Engineering workstations running Studio 5000 / RSLogix or Rockwell Connected Components Workbench are the usual culprits.",
         "Lock controller keyswitches to RUN or REMOTE-ONLY where possible. Allen-Bradley ControlLogix, CompactLogix, and Micro800-series controllers physically refuse program downloads in those positions.",
@@ -76,6 +100,16 @@ expression: payload
         "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20) : fc=0x05 (Write Single Coil)"
       ],
       "id": "ics.modbus_writes",
+      "mitre_techniques": [
+        {
+          "label": "T0836 — Modify Parameter",
+          "url": "https://attack.mitre.org/techniques/T0836/"
+        },
+        {
+          "label": "T0855 — Unauthorized Command Message",
+          "url": "https://attack.mitre.org/techniques/T0855/"
+        }
+      ],
       "playbook": [
         "Identify the source host(s) physically: `10.10.0.5`. Run `show mac address-table address <mac>` on the access switch (or your switch vendor's equivalent), then walk the cable. The asset inventory in this report has the MAC for each host.",
         "Ask the on-shift control engineer whether `10.10.0.5` is the authorized Modbus master for `10.10.0.20`. Common authorized masters: SCADA servers, Niagara N4 supervisors, RTUs polling downstream PLCs. If yes, the finding is expected — but the host hygiene (other ports open on the asset inventory) is worth a separate look.",
@@ -93,6 +127,16 @@ expression: payload
         "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20) : fc=0x1A (Request download)"
       ],
       "id": "ics.s7_engineering",
+      "mitre_techniques": [
+        {
+          "label": "T0858 — Change Operating Mode",
+          "url": "https://attack.mitre.org/techniques/T0858/"
+        },
+        {
+          "label": "T0843 — Program Download",
+          "url": "https://attack.mitre.org/techniques/T0843/"
+        }
+      ],
       "playbook": [
         "Identify the source host(s) physically: `10.10.0.5`. For TIA Portal / Step 7 Manager-class hosts, expect a Windows engineering laptop or a permanent PG.",
         "In TIA Portal, set the controller's access level on `10.10.0.20` to \"no access (complete protection)\" or \"read access\" — anything looser allows variable writes from anyone reaching tcp/102.",
@@ -110,6 +154,12 @@ expression: payload
         "ENG-WS-01 (10.10.0.5) -> 8.8.8.8:53 (UDP/TCP, 100 packet(s))"
       ],
       "id": "boundary.dns_resolver",
+      "mitre_techniques": [
+        {
+          "label": "T0884 — Connection Proxy (supporting)",
+          "url": "https://attack.mitre.org/techniques/T0884/"
+        }
+      ],
       "playbook": [
         "Identify each source host's configured DNS server: `10.10.0.5`. On Windows: `ipconfig /all` shows DNS Servers per interface. On Linux: `/etc/resolv.conf` (or `systemd-resolve --status` on systemd hosts). Don't change anything yet — read-only check.",
         "Verify whether an in-zone resolver exists. The asset inventory in this report shows which OT hosts speak DNS — a host running a DNS server on the OT side will show up with `dns` in its protocol list. If one exists, the listed clients should point at it.",
@@ -127,6 +177,12 @@ expression: payload
         "ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20):443 : TLS 1.0 (4 hello(s))"
       ],
       "id": "compat.stale_tls",
+      "mitre_techniques": [
+        {
+          "label": "T0830 — Adversary-in-the-Middle (supporting)",
+          "url": "https://attack.mitre.org/techniques/T0830/"
+        }
+      ],
       "playbook": [
         "Identify the source hosts and the services they're connecting to: `10.10.0.5`. A legacy TLS ClientHello almost always traces to one of: an older Java runtime, a Windows host with TLS 1.0/1.1 still enabled in Schannel, or an embedded device whose firmware predates TLS 1.2.",
         "For Windows clients: confirm TLS 1.2+ is enabled and TLS 1.0 / TLS 1.1 / SSL 3.0 are disabled in Schannel registry settings (HKLM\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols). Microsoft has a tested registry script for this — use that, don't hand-edit.",

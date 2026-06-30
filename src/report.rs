@@ -65,6 +65,17 @@ struct FindingView {
     /// finding id isn't in the catalog (shouldn't happen — guarded by
     /// `every_finding_id_appears_in_the_rule_catalog`).
     trigger: String,
+    /// MITRE ATT&CK for ICS techniques for this finding, looked up from the
+    /// catalog by id (S-12.01 / ADR-0014). Empty when the id carries no MITRE
+    /// reference; the template then omits the row.
+    mitre: Vec<MitreLinkView>,
+}
+
+/// A single MITRE ATT&CK for ICS technique anchor in a finding card: the
+/// display label (e.g. `T0859 — Valid Accounts`) and the attack.mitre.org URL.
+struct MitreLinkView {
+    label: String,
+    url: String,
 }
 
 struct AssetView {
@@ -141,6 +152,13 @@ pub fn render_html(
             trigger: crate::findings::metadata_for(f.id)
                 .map(|m| m.trigger.to_string())
                 .unwrap_or_default(),
+            mitre: crate::findings::mitre_techniques_for(f.id)
+                .into_iter()
+                .map(|t| MitreLinkView {
+                    label: t.label.to_string(),
+                    url: t.url.to_string(),
+                })
+                .collect(),
         })
         .collect();
 
