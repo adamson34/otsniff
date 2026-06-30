@@ -82,10 +82,11 @@ outputs in a way an OT defender would notice.
 
 **Track 1 emphasis (next priority).** P0-7 (investigation playbooks)
 shipped in v0.3; P0-8 (AI-augmented detection) shipped in the v0.5 dev
-cycle (S-5.03). P0-6 (OUI refresh) shipped in #48 (S-2.03) and P0-9
-(mDNS/NetBIOS hostnames) shipped in #138 (S-8.01); the only remaining
-open P0 item is P0-10 (multi-PCAP), sized **S**. The biggest *new*
-opportunity is **segmentation drift** (P1-13 below),
+cycle (S-5.03). P0-6 (OUI refresh, #48/S-2.03), P0-9 (mDNS/NetBIOS
+hostnames, #138/S-8.01), and P0-10 (multi-PCAP, #140/S-9.01) have all
+shipped — **the P0 track is now fully delivered**. The next priorities
+are the **P1** items below; the biggest *new* opportunity is
+**segmentation drift** (P1-13 below),
 which pairs the now-shipped cross-capture diff with the Zonewarden
 engine.
 
@@ -346,7 +347,7 @@ extended to captures that lacked DHCP entirely. **Touches:**
 already exists — just more code-paths populating it.
 **Deps:** none.
 
-### P0-10: Multi-PCAP / rotated-capture analyze (S)
+### P0-10: Multi-PCAP / rotated-capture analyze (S) — ✅ shipped (#140, S-9.01)
 
 `otsniff analyze a.pcap b.pcap c.pcap -o report.html` — concatenate
 captures in CLI order, treat them as one logical capture, emit a
