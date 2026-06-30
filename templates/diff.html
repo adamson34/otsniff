@@ -326,7 +326,8 @@
 {% endif %}
 
 {% if !flow_shifts.is_empty() %}
-<h2>Flow shifts ({{ flow_shift_label }} volume change)</h2>
+<h2>Flow shifts ({{ flow_shift_label }} {{ flow_shift_basis }} change)</h2>
+{% if flow_shift_rate_note.len() > 0 %}<p class="capture-windows-line">{{ flow_shift_rate_note }}</p>{% endif %}
 <table>
   <thead>
     <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Baseline</th><th>Current</th><th>Ratio</th></tr>

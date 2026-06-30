@@ -449,22 +449,8 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     // degenerate (missing / sub-second) window means ratios are raw byte
     // counts; a > 2× mismatch means ratios are rate-normalized but the windows
     // are materially different. Comparable + normalized windows print nothing.
-    match diff.window_advisory() {
-        Some(crate::diff::WindowAdvisory::Degenerate) => {
-            eprintln!(
-                "WARNING: a capture window is missing or sub-second; flow-shift ratios \
-                 are raw byte counts and may be duration artifacts"
-            );
-        }
-        Some(crate::diff::WindowAdvisory::Mismatch { factor }) => {
-            let b = diff.baseline_window_secs.unwrap_or(0.0);
-            let c = diff.current_window_secs.unwrap_or(0.0);
-            eprintln!(
-                "WARNING: capture windows differ {factor:.1}× (baseline {b:.0}s vs \
-                 current {c:.0}s); flow-shift ratios are rate-normalized (bytes/sec)"
-            );
-        }
-        None => {}
+    if let Some(warning) = diff.window_warning() {
+        eprintln!("WARNING: {warning}");
     }
 
     // Render output based on file extension.

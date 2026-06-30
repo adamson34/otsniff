@@ -327,7 +327,8 @@ expression: html
 
 
 
-<h2>Flow shifts (≥2× volume change)</h2>
+<h2>Flow shifts (≥2× rate change)</h2>
+<p class="capture-windows-line">Ratios are per-second rates, normalized by each capture&#x27;s window (baseline 3600s vs current 3600s); the byte columns are raw totals.</p>
 <table>
   <thead>
     <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Baseline</th><th>Current</th><th>Ratio</th></tr>

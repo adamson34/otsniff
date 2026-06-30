@@ -322,6 +322,61 @@ impl Diff {
             }
         }
     }
+
+    /// **S-11.01:** stderr WARNING text for the capture-window advisory, or
+    /// `None` when the windows are comparable and rate-normalized. Routes the
+    /// durations through `fmt_window_secs` so the stderr numbers match the
+    /// report banner exactly (the renderers and `run_diff` share this).
+    pub fn window_warning(&self) -> Option<String> {
+        match self.window_advisory()? {
+            WindowAdvisory::Degenerate => Some(
+                "a capture window is missing or sub-second; flow-shift ratios are raw \
+                 byte counts and may be duration artifacts"
+                    .to_string(),
+            ),
+            WindowAdvisory::Mismatch { factor } => {
+                let b = self.baseline_window_secs.unwrap_or(0.0);
+                let c = self.current_window_secs.unwrap_or(0.0);
+                Some(format!(
+                    "capture windows differ {factor:.1}× (baseline {}s vs current {}s); \
+                     flow-shift ratios are rate-normalized (bytes/sec)",
+                    fmt_window_secs(b),
+                    fmt_window_secs(c)
+                ))
+            }
+        }
+    }
+
+    /// **S-11.01:** the noun for the flow-shift heading — `"rate"` when ratios
+    /// are rate-normalized (bytes/sec), `"volume"` when raw byte counts were
+    /// used. So a normalized table reads "≥2× rate change", never the
+    /// misleading "volume change" with a rate ratio over raw byte columns.
+    pub fn flow_shift_basis(&self) -> &'static str {
+        if self.rate_normalized {
+            "rate"
+        } else {
+            "volume"
+        }
+    }
+
+    /// **S-11.01:** an explanatory note rendered above the flow-shift table
+    /// whenever ratios are rate-normalized — including the within-2× band where
+    /// no mismatch banner is shown — so the ratio column is never read as a raw
+    /// byte change. `None` when raw byte ratios were used (no note needed).
+    pub fn flow_shift_rate_note(&self) -> Option<String> {
+        if !self.rate_normalized {
+            return None;
+        }
+        match (self.baseline_window_secs, self.current_window_secs) {
+            (Some(b), Some(c)) => Some(format!(
+                "Ratios are per-second rates, normalized by each capture's window \
+                 (baseline {}s vs current {}s); the byte columns are raw totals.",
+                fmt_window_secs(b),
+                fmt_window_secs(c)
+            )),
+            _ => None,
+        }
+    }
 }
 
 /// Inputs to `compute`: each side carries its own observations + merged map
@@ -1718,5 +1773,74 @@ mod tests {
         );
         assert_eq!(diff.baseline_window_secs, None);
         assert_eq!(diff.current_window_secs, Some(1800.0));
+    }
+
+    /// EC-008 + adversary M-fix regression lock: windows differ EXACTLY 2× so
+    /// `window_advisory` is `None` (strict `> 2×`) and NO mismatch banner is
+    /// shown — yet the ratio is rate-normalized. The flow-shift heading basis
+    /// must read "rate" and the explanatory rate-note MUST still be present, so
+    /// a flagged flow with equal raw bytes isn't read as a "volume change".
+    #[test]
+    fn s_11_01_exact_2x_window_no_banner_but_rate_note_present() {
+        let base = obs_with_flow(1000, Some(1800.0)); // rate 1000/1800
+        let curr = obs_with_flow(1000, Some(900.0)); // rate 1000/900 = 2× base
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(diff.rate_normalized);
+        assert_eq!(
+            diff.window_advisory(),
+            None,
+            "exactly 2× windows must NOT raise an advisory (strict > 2×, EC-008)"
+        );
+        assert!(
+            diff.window_banner().is_none() && diff.window_warning().is_none(),
+            "no banner/stderr warning at exactly 2×"
+        );
+        assert_eq!(diff.flow_shifts.len(), 1, "the 2× rate change is flagged");
+        assert_eq!(diff.flow_shift_basis(), "rate");
+        assert!(
+            diff.flow_shift_rate_note().is_some(),
+            "the rate-note MUST be present even when no banner is shown (within-2× band)"
+        );
+    }
+
+    /// EC-001: equal windows ⇒ rate ratio ≡ byte ratio; a steady flow is not
+    /// flagged, `rate_normalized` is true, and there is no advisory.
+    #[test]
+    fn s_11_01_equal_windows_no_advisory_steady_not_flagged() {
+        let base = obs_with_flow(1000, Some(1800.0));
+        let curr = obs_with_flow(1000, Some(1800.0));
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(diff.rate_normalized);
+        assert_eq!(diff.window_advisory(), None);
+        assert!(diff.flow_shifts.is_empty(), "equal rate ⇒ no shift");
+        assert_eq!(diff.flow_shift_basis(), "rate");
     }
 }

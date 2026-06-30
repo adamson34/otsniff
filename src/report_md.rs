@@ -832,11 +832,19 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     if !flow_shifts.is_empty() {
         writeln!(
             out,
-            "## Flow shifts (≥{} volume change)",
-            fmt_multiplier(diff.flow_shift_multiplier)
+            "## Flow shifts (≥{} {} change)",
+            fmt_multiplier(diff.flow_shift_multiplier),
+            diff.flow_shift_basis()
         )
         .unwrap();
         writeln!(out).unwrap();
+        // S-11.01: when ratios are rate-normalized, say so above the table —
+        // including the within-2× band where no mismatch banner is shown — so
+        // the ratio column isn't misread as a raw-byte (volume) change.
+        if let Some(note) = diff.flow_shift_rate_note() {
+            writeln!(out, "_{note}_").unwrap();
+            writeln!(out).unwrap();
+        }
         writeln!(
             out,
             "| Source | Destination | Port | Proto | Baseline bytes | Current bytes | Ratio |"

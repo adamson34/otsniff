@@ -633,6 +633,10 @@ pub fn render_diff_html(diff: &Diff) -> Result<String> {
         hosts_gone_count: diff.hosts_gone.len(),
         flow_shifts_count: diff.flow_shifts.len(),
         flow_shift_label: format!("≥{}", fmt_multiplier(diff.flow_shift_multiplier)),
+        // S-11.01: "rate" / "volume" so the heading matches the ratio basis;
+        // the note explains rate-normalization even in the no-banner band.
+        flow_shift_basis: diff.flow_shift_basis().to_string(),
+        flow_shift_rate_note: diff.flow_shift_rate_note().unwrap_or_default(),
         findings_new,
         findings_recurring,
         findings_resolved,
@@ -671,6 +675,12 @@ struct DiffReportView {
     /// Computed from `Diff::flow_shift_multiplier` so the template stays logic-light
     /// per ADR-0003.
     flow_shift_label: String,
+    /// **S-11.01:** `"rate"` or `"volume"` — the noun in the flow-shift heading,
+    /// matching whether the ratio column is rate-normalized or raw bytes.
+    flow_shift_basis: String,
+    /// **S-11.01:** explanatory note above the flow-shift table when ratios are
+    /// rate-normalized; empty when raw byte ratios were used (no note rendered).
+    flow_shift_rate_note: String,
     findings_new: Vec<DiffFindingView>,
     findings_recurring: Vec<DiffFindingView>,
     findings_resolved: Vec<DiffFindingView>,
