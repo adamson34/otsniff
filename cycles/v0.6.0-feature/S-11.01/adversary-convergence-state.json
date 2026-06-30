@@ -1,0 +1,24 @@
+{
+  "story_id": "S-11.01",
+  "cycle": "v0.6.0-feature",
+  "wave": 4,
+  "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
+  "clean_streak": 0,
+  "converged": false,
+  "last_classification": "NOT-CONVERGED",
+  "passes": [
+    {
+      "pass": 1,
+      "classification": "NOT-CONVERGED",
+      "novelty": "MEDIUM",
+      "findings": {
+        "blocking": 0,
+        "major": ["M-1: rate-based FlowDelta.ratio rendered under a 'volume change' heading with raw byte columns and NO banner in the within-2×/exactly-2× band — a flagged flow with equal raw bytes reads as a 2× 'volume change' with nothing explaining the rate basis"],
+        "low": ["LOW-1: stderr window warning used {:.0} while banner used fmt_window_secs (numeric mismatch on fractional windows)", "LOW-2: whole-capture-window denominator can manufacture a shift for bursty non-steady flows (spec-sanctioned design)", "LOW-3: EC-001/007/008 boundaries not unit-tested"],
+        "clean_areas": ["rate-normalization math (no NaN/inf, negative window → None, lo==0 skip)", "rate_normalized/WindowAdvisory consistency", "privacy (constant strings + pseudonymized endpoints)", "non-diff output scope (only 2 diff snapshots)"]
+      },
+      "resolution": "M-1 fixed: Diff::flow_shift_basis() ('rate'|'volume') drives the heading noun; Diff::flow_shift_rate_note() renders an explanatory line above the flow-shift table whenever rate_normalized (incl. the no-banner band) in HTML + MD; regression-locked by s_11_01_exact_2x_window_no_banner_but_rate_note_present. LOW-1 fixed: centralized stderr text in Diff::window_warning() using fmt_window_secs. LOW-3 fixed: added exactly-2× + equal-windows boundary tests. LOW-2 documented as accepted (story Known-limitations + TD-S1101-001). Commit 56c9bd8. Orchestrator independently verified M-1 reachable (exactly-2× band) before fixing; re-ran full gate green (666 tests).",
+      "verification_discipline_note": "Every finding verified against code; M-1 confirmed reachable and user-facing (the renderer pairs raw byte columns + rate ratio under a 'volume' heading with no banner in the within-2× band)."
+    }
+  ]
+}
