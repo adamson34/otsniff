@@ -9,8 +9,10 @@ cycle: v0.6.0-feature
 current_wave: 5
 total_waves: 5  # w1 S-8.01; w2 S-9.01; w3 S-10.01; w4 S-11.01; w5 S-12.01 (MITRE ICS mapping)
 total_stories: 7   # 2 backfill records + S-8.01 + S-9.01 + S-10.01 + S-11.01 + S-12.01
-wave_5_status: in-progress  # S-12.01 dispatched to phase-3 per-story delivery
-wave_5_gate: pending
+wave_5_status: completed  # S-12.01 delivered via full per-story pipeline (PR #147, merge 5525b5c)
+wave_5_gate: passed
+wave_5_gate_passed_at: 2026-06-30T00:00:00Z
+wave_5_gate_notes: "Full suite 669/0 on develop 5525b5c; per-story adversary CONVERGED (3 passes, pass-1 zero findings, only doc-precision nits); HS-013 holdout PASS 1.00 (catalog coverage — 20 detection rules mapped, 3 zonewarden exempt; per-finding MITRE surfaced in HTML+MD+JSON; all 12 distinct technique URLs curl'd → HTTP 200, zero 404s); demo present (per-finding + coverage VHS). See holdout-scenarios/evaluations/wave-5-v0.6.0-2026-06-30.md."
 wave_4_status: completed  # S-11.01 delivered via full per-story pipeline (PR #145, merge ad37626)
 wave_4_gate: passed
 wave_4_gate_passed_at: 2026-06-30T00:00:00Z
@@ -122,17 +124,17 @@ stories:
     notes: "Diff capture-window normalization: compute_with_multiplier rate-normalizes the flow-shift ratio by each side's capture-window duration (from S-10.01 min_ts/max_ts) so equal-rate flows over unequal-duration captures aren't flagged; raw fallback when a window is degenerate (<1s). New Diff fields rate_normalized + baseline/current_window_secs; stderr WARNING + diff-report banner on >2x window mismatch or degenerate window. Intentionally changes diff snapshots (ratio now rate-based); analyze/scrub output unaffected."
 
   S-12.01:
-    status: ready  # phase-2 decomposition complete; awaiting phase-3 delivery
+    status: completed
     wave: 5
-    branch: null
-    worktree: null
-    merge_sha: null
-    pr: null
-    completed_at: null
+    branch: feature/S-12.01-mitre-ics-mapping  # merged + deleted
+    worktree: removed
+    merge_sha: 5525b5c
+    pr: 147
+    completed_at: 2026-06-30T00:00:00Z
     points: 8
     epic: E-12
-    adversary_convergence: pending
-    red_gate: pending
+    adversary_convergence: met (3 passes; cycles/v0.6.0-feature/S-12.01/adversary-convergence-state.json; all CONVERGED, pass-1 zero findings, only doc-precision nits)
+    red_gate: verified (cycles/v0.6.0-feature/S-12.01/implementation/red-gate-log.md)
     bcs: [BC-3.06.006, BC-8.05.001]
     traces_to: P1-6
     notes: "MITRE ATT&CK for ICS technique mapping. Catalog already holds MITRE refs (MitreIcsAttack kind) for 8/15 rules; S-12.01 (a) maps the 7 unmapped rules (creds→T0859, smbv1→T0866, tls→T0830, dns/ntp→T0884, some 'supporting'), and (b) surfaces per-finding techniques in HTML/MD/JSON via metadata_for(id) catalog lookup (mirrors the trigger enrichment). ADR-0014: MITRE stays in the catalog (single source of truth), NOT duplicated onto Finding. Regenerates docs/RULES.md. M-sized (8 pts)."
