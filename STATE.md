@@ -14,7 +14,7 @@ phase_0_status: complete
 phase_1_status: complete-converged
 phase_2_status: complete-approved
 phase_2_approval: human-approved 2026-05-11
-next_phase: phase-3-tdd-implementation (v0.6.0-feature Wave 1 dispatch)
+next_phase: idle — v0.6.0-feature waves 1 (S-8.01) + 2 (S-9.01) delivered & gated; awaiting next story or release
 ---
 
 # otsniff factory state
