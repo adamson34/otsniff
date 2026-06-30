@@ -389,7 +389,7 @@ Data (15), Save Configuration (24), Disable/Enable Unsolicited (20/21).
 DNP3 fixture is a fuzz test — we'd need a real-traffic capture to validate
 quality. Worth verifying that one exists publicly before starting.
 
-### P1-2: Better progress feedback (S)
+### P1-2: Better progress feedback (S) — ✅ shipped (#73 S-5.01 parse progress, #74 S-5.02 claude heartbeat)
 
 Two related UX gaps in `-v` mode:
 
