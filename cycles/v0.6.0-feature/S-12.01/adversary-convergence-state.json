@@ -1,0 +1,41 @@
+{
+  "story_id": "S-12.01",
+  "cycle": "v0.6.0-feature",
+  "wave": 5,
+  "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
+  "clean_streak": 3,
+  "converged": true,
+  "converged_at_pass": 3,
+  "last_classification": "CLEAN",
+  "production_code_frozen_at": "8846dfa (implementation); only doc-only ADR clarification 852b102 + .factory spec edits since (no code change)",
+  "convergence_rationale": "Passes 1, 2, 3 all CONVERGED, novelty LOW, on frozen production code (the implementation was clean from the first pass — pass 1 found zero findings). The only items across all three passes were non-blocking doc-precision nits (ADR 'seven rules' vs modules; story EC-005 '15 rules' vs 20 entries), each cleaned proactively (852b102 + story edit). Mapping correctness (label/URL ID parity across all 20 rules, supporting-suffix placement), findings_json field preservation + panic safety, three-surface lookup parity, HTML escaping + markdown link integrity, the enforcing coverage test with narrow zonewarden exemption, scrub-inertness, and output scope are all clean. Orchestrator re-verified gate green (669 tests) + WebFetch-verified the 4 technique URLs + live output. The zonewarden-exempt judgment (conformance verdicts aren't ATT&CK techniques) is sound and recorded in test/ADR/BC/story.",
+  "passes": [
+    {
+      "pass": 3,
+      "classification": "CLEAN",
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "findings": {"blocking": 0, "major": 0, "minor": ["story EC-005 said 'all 15 rules' (counts detector modules) vs RULES.md's 20 catalog entries — loose wording in the .factory story only, not a shipped artifact; adversary said no change required"]},
+      "verification": "Final confirmation cleared every dimension: label/URL ID parity (all 20 rules), supporting-suffix exactness, findings_json field-preservation + panic safety + both --json sites, three-surface single-lookup parity, empty-guard, HTML escaping + markdown link integrity (otsniff never re-renders its own MD), enforcing coverage #[test] + correct URL validator both edges, scrub-inertness, output scope, ADR count consistency.",
+      "response": "Tidied the story EC-005 wording (.factory only). CONVERGED at streak 3."
+    },
+    {
+      "pass": 2,
+      "classification": "CLEAN",
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "findings": {"blocking": 0, "major": 0, "minor": ["ADR-0014 said 'seven rules' but creds.* is 4 rule entries (rule-vs-module conflation); doc wording only, non-blocking"]},
+      "verification": "Deep sweep: label/URL technique-ID consistency across all 20 detection rules; findings_json field preservation + panic safety + key-order parity (to_value→json, absent-id→[]); HTML escaping (ATT&amp;CK, no double-escape, well-formed href); markdown link integrity ((supporting) parens inside link text is valid CommonMark, snapshot-confirmed); coverage test is a real enforcing #[test] with narrow zonewarden skip; scrub-inert MITRE strings; snapshot scope (only render + RULES.md); ADR↔BC consistency.",
+      "response": "Fixed the ADR rule-vs-module wording (commit 852b102, doc-only) to preempt re-flag. No code change."
+    },
+    {
+      "pass": 1,
+      "classification": "CLEAN",
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "findings": {"blocking": 0, "major": 0, "minor": 0},
+      "verification": "Zero findings across all 6 attack areas: (1) all 7 mappings match the AC-001 table with consistent label/URL technique IDs (plaintext_creds all 4 entries got T0859; smbv1 T0866, TLS×2 T0830, dns/ntp T0884, supporting suffixes correct); (2) coverage test genuinely iterates catalog() + asserts ≥1 MITRE ref + url well-formedness (is_valid_ics_technique_url correct on both edges), zonewarden skip narrow; (3) HTML/MD/JSON all key off the same mitre_techniques_for(id) lookup, findings_json preserves all fields, both --json sites enriched, url:None filtered; (4) privacy — constant strings, scrub-inert (test-confirmed); (5) ADR-0014 substantive; (6) EC-001..005 implemented.",
+      "response": "No code change. Orchestrator independently verified gate green (669) + live output + the zonewarden exemption, and pre-aligned BC-3.06.006/story to the exemption (commit 59b2d5f, .factory only)."
+    }
+  ]
+}
