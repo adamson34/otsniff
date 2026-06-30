@@ -3,11 +3,40 @@
   "cycle": "v0.6.0-feature",
   "wave": 4,
   "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
-  "clean_streak": 0,
-  "converged": false,
-  "last_classification": "NOT-CONVERGED",
-  "production_code_frozen_at": "c78caa1 (pass-2 threshold fix); pending fresh clean passes",
+  "clean_streak": 3,
+  "converged": true,
+  "converged_at_pass": 5,
+  "last_classification": "CLEAN",
+  "production_code_frozen_at": "c78caa1 (pass-2 threshold fix); only doc/comment/help-text alignments aeb867a + de50d23 + 3525311 since (no logic/test/output change)",
+  "convergence_rationale": "Passes 3, 4, 5 all CONVERGED (no blocker/major), novelty LOW, on frozen production logic (last logic change c78caa1 at pass 2). The two NOT-CONVERGED rounds (pass 1 rate-vs-volume labeling, pass 2 the >=2× threshold spec self-contradiction) were both real and fixed + regression-locked. The clean-pass tail surfaced only progressively-discovered non-blocking DOC-staleness (stale '> 2×' / 'volume' references in comments + --help text), each cleaned proactively (aeb867a, de50d23, 3525311) to converge the documentation; none were defects or reset the streak. Full suite re-verified green (668 tests). Rate math, the >=2× boundary, the rate_normalized/basis/note triple, stderr/banner parity, output scope, EC-001..008, and privacy are all clean and mutually consistent.",
   "passes": [
+    {
+      "pass": 5,
+      "classification": "CLEAN",
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "findings": {"blocking": 0, "major": 0, "minor": ["two more doc-staleness spots: --flow-shift-multiplier --help text + compute() doc said 'flow-volume' (now rate-based when windows usable) — user-facing help, non-blocking"]},
+      "verification": "Final sweep confirmed rate math (no NaN/inf/panic), >=2.0 boundary locked both sides, triple consistency + note gating, stderr/banner parity via fmt_window_secs, EC-001..008 meaningful assertions, privacy, BC-3.08.004/005 anchoring.",
+      "response": "Refreshed the user-facing help/doc text to 'volume or rate' (commit 3525311, doc/help only, no test ref). Closes the doc-staleness class. CONVERGED at streak 3."
+    },
+    {
+      "pass": 4,
+      "classification": "CLEAN",
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "findings": {"blocking": 0, "major": 0, "minor": ["FlowDelta doc comments (diff.rs:88/:101) still said 'volume shift' / 'max/min byte ratio' — stale since the ratio is rate-based when normalized; adversary marked non-blocking (user-facing heading correct)"]},
+      "verification": "Final-confirmation sweep cleared every targeted area: chrono overflow/panic (timestamps bounded, max>=min), float boundary at >=2.0 (3600/1800 exact 2.0), rate_normalized/basis/note triple consistency (incl. a hand-constructed inconsistent Diff degrades gracefully, unreachable via compute), note gating, stderr/banner parity, no new dependency, BC-3.08.004/005 postconditions, test meaningfulness.",
+      "response": "Fixed the FlowDelta doc staleness (commit de50d23, comment-only) to close the doc-drift class proactively. No behavior/test/output change."
+    },
+    {
+      "pass": 3,
+      "classification": "CLEAN",
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "findings": {"blocking": 0, "major": 0, "minor": ["stale threshold-prose drift: two internal comments (diff.rs WindowAdvisory::Mismatch doc, cli.rs run_diff) still said 'more than 2×' / '> 2×' after the pass-2 inclusive-threshold fix — behavior/method-doc/spec/tests all correct; future-maintainer hazard only"]},
+      "verification": "Independent re-derivation cleared all 7 areas with cited lines: rate math (no NaN/inf, lo==0 skip, raw fallback), inclusive threshold single-source-of-truth + float-safe boundary, rate/volume labeling consistency, coupling + fmt_window_secs parity, output scope, EC-001..008 + boundary/variant tests, privacy.",
+      "response": "Comment-only alignment to '>= 2× (inclusive)' in both spots (commit aeb867a); no behavior/test/output change. Streak preserved (production logic frozen since c78caa1)."
+    },
     {
       "pass": 2,
       "classification": "NOT-CONVERGED",
