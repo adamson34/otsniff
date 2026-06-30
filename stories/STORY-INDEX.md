@@ -6,9 +6,9 @@ phase: 2
 generated: 2026-05-11T20:40:00Z
 producer: phase-2-story-decomposition (inline)
 updated: 2026-06-30T00:00:00Z
-updater: story-writer (S-11.01 diff capture-window normalization)
-total_stories: 44
-total_epics: 11
+updater: story-writer (S-12.01 MITRE ATT&CK for ICS technique mapping)
+total_stories: 45
+total_epics: 12
 status: active
 ---
 
@@ -88,6 +88,7 @@ status: active
 | BC-1.01.003 + BC-1.01.004 + BC-7.01.005 (multi-PCAP / rotated-capture analyze) | S-9.01 |
 | BC-4.01.004 + BC-4.01.005 (capture-window sanity warning) | S-10.01 |
 | BC-3.08.004 + BC-3.08.005 (diff capture-window normalization) | S-11.01 |
+| BC-3.06.006 + BC-8.05.001 (MITRE ATT&CK for ICS technique mapping) | S-12.01 |
 | BC-3.05.002 (unexpected_protocols trigger) | S-1.04 |
 | BC-AUDIT-001..015 (formalize) | S-1.05 |
 | BC-AUDIT-009 (port-to-label) | S-2.01 |

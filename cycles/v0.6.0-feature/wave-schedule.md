@@ -24,7 +24,22 @@ full per-story pipeline with its own wave gate.
 | 1 | S-8.01 — mDNS / NetBIOS-NS / LLMNR hostname extraction | P0-9 | 5 | BC-1.02.010..013 | ✅ gated (PR #138, merge 6334e36) |
 | 2 | S-9.01 — Multi-PCAP / rotated-capture analyze | P0-10 | 5 | BC-1.01.003, BC-1.01.004, BC-7.01.005 | ✅ gated (PR #140, merge 030a279) |
 | 3 | S-10.01 — Capture-window sanity warning | P1-9 | 5 | BC-4.01.004, BC-4.01.005 | ✅ gated (PR #143, merge 668d704) |
-| 4 | S-11.01 — Diff capture-window normalization | P1-11 | 5 | BC-3.08.004, BC-3.08.005 | in-progress (phase-3 delivery) |
+| 4 | S-11.01 — Diff capture-window normalization | P1-11 | 5 | BC-3.08.004, BC-3.08.005 | ✅ gated (PR #145, merge ad37626) |
+| 5 | S-12.01 — MITRE ATT&CK for ICS technique mapping | P1-6 | 8 | BC-3.06.006, BC-8.05.001 | in-progress (phase-3 delivery) |
+
+## Wave 5 — S-12.01
+
+**Scope.** Map every detector rule to MITRE ATT&CK for ICS techniques and surface
+them per finding in the report. The catalog already tags 8/15 rules; this maps
+the remaining 7 (creds→T0859, smbv1→T0866, stale/weak TLS→T0830, dns/ntp→T0884,
+some "supporting") and renders per-finding techniques as links to attack.mitre.org
+in HTML, markdown, and JSON — via the existing `metadata_for(id)` catalog lookup
+(the `trigger` enrichment pattern). MITRE data stays in the catalog
+(single source of truth, **ADR-0014**), not duplicated onto `Finding`.
+
+**Touches.** `src/findings/{7 modules}.rs` (data), `src/report.rs` +
+`templates/report.html` + `src/report_md.rs` (rendering), `src/cli.rs` (JSON),
+`docs/RULES.md` (regen), `docs/adr/0014-*.md`. M-sized (8 pts). No dep.
 
 ## Wave 4 — S-11.01
 

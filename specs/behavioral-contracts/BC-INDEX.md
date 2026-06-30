@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 115  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004; S-8.01 added BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013; S-9.01 added BC-1.01.003, BC-1.01.004, BC-7.01.005; S-10.01 added BC-4.01.004, BC-4.01.005; S-11.01 added BC-3.08.004, BC-3.08.005
+total_bcs: 117  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004; S-8.01 added BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013; S-9.01 added BC-1.01.003, BC-1.01.004, BC-7.01.005; S-10.01 added BC-4.01.004, BC-4.01.005; S-11.01 added BC-3.08.004, BC-3.08.005; S-12.01 added BC-3.06.006, BC-8.05.001
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -101,6 +101,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-3.06.003 Every fired finding carries non-empty playbook (HIGH)
 - BC-3.06.004 Hostname-aware evidence rendering (HIGH)
 - BC-3.06.005 Evidence cap defaults to 15 rows per finding (general invariant). Exception: `unexpected_protocols` caps at 5 per label-bucket (`src/findings/unexpected_protocols.rs` `bucket.len() < 5`), so its total evidence count can be up to `5 × labels_observed` rather than a flat 15 (HIGH, promoted from BC-AUDIT-008 in S-1.05)
+- BC-3.06.006 MITRE ATT&CK for ICS technique coverage: every detector rule in `catalog()` declares ≥1 `ReferenceKind::MitreIcsAttack` reference whose `url` is `Some` and matches `https://attack.mitre.org/techniques/T0\d+/`; the 7 previously-unmapped rules (dns_resolver→T0884, ldap_creds→T0859, ntp_external→T0884, plaintext_creds→T0859, smbv1→T0866, stale_tls→T0830, weak_tls_cipher→T0830) gain mappings; supporting (not fire-equals-technique) mappings carry a `(supporting)` suffix in the label. MITRE data lives ONLY in the catalog — the single source of truth (ADR-0014), never duplicated onto `Finding` (HIGH, added S-12.01 v0.6.0)
 
 ### S.4 — Capture-source (`src/capture_source.rs`)
 - BC-4.01.001 Host-side classification (HIGH)
@@ -150,6 +151,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-3.07.001 When augmented findings are present, `render_augmented_section` emits an `<h2 class="ai-augmented-heading">AI-augmented findings</h2>` section followed by `<details open class="finding ai-finding ...">` cards with severity badge, "AI" badge, title, evidence `<pre>`, and reasoning rendered via `render_safe` (markdown → HTML, raw-HTML events stripped); section absent when findings is empty; `render_augmented_section_md` emits a `## AI-augmented findings` markdown section with analogous structure (HIGH, added S-5.03 v0.5.0)
 - BC-8.02.001 rule_catalog::render_markdown matches committed RULES.md (HIGH)
 - BC-8.03.001 Scrubbed markdown contains no real identifiers (HIGH)
+- BC-8.05.001 Per-finding MITRE surfacing: the analyze report (HTML finding card, markdown `**MITRE ATT&CK for ICS.**` line) and the `--json` findings payload (`mitre_techniques: [{label,url}]`) surface each fired finding's MITRE ICS techniques, looked up from the catalog by `finding.id` (filtering `references` to `MitreIcsAttack`) — mirroring the existing `trigger` enrichment; each technique renders as a labeled link to `attack.mitre.org/techniques/T0XXX/`; rendered only when the finding's rule has ≥1 MITRE reference (HIGH, added S-12.01 v0.6.0)
 
 ### S.9 — CLI (`src/cli.rs`)
 - BC-9.01.001 `analyze` defaults output to HTML (HIGH)
