@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 111  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004; S-8.01 added BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013; S-9.01 added BC-1.01.003, BC-1.01.004, BC-7.01.005
+total_bcs: 113  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004; S-8.01 added BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013; S-9.01 added BC-1.01.003, BC-1.01.004, BC-7.01.005; S-10.01 added BC-4.01.004, BC-4.01.005
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -106,6 +106,8 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-4.01.001 Host-side classification (HIGH)
 - BC-4.01.002 TAP classification (HIGH)
 - BC-4.01.003 SPAN classification (HIGH)
+- BC-4.01.004 Capture-window sanity detection: pure `capture_sanity::assess(obs) -> Vec<CaptureWarning>` over observer-tracked `min_ts`/`max_ts`/`timestamps_monotonic`; emits `EpochZeroTimestamps` (≥1 packet and `max_ts <= UNIX_EPOCH`), `SubSecondWindow` (not epoch-zero, ≥2 packets, `max_ts - min_ts < 1s`), `NonMonotonicTimestamps` (a packet ts strictly precedes the prior packet's ts); deterministic order; empty `Vec` when the time base is sane or there are no timestamps; never panics (HIGH, added S-10.01 v0.6.0)
+- BC-4.01.005 Capture-sanity surfacing: when `assess` is non-empty the HTML report (banner after the capture-meta window line) and markdown report (a `> ⚠ Capture timestamp warning:` blockquote) render the warning messages, and `analyze`/`scrub` emit one `WARNING:` line per warning to stderr (mirroring the `Classification::guard_warning` pattern); when `assess` is empty NO banner/line/stderr is emitted, so sane-capture HTML/MD/JSON output is byte-identical to pre-S-10.01 (HIGH, added S-10.01 v0.6.0)
 - BC-4.02.001 Declared source overrides heuristic for rendering (HIGH)
 - BC-4.02.002 Guard warning on disagreement (HIGH)
 

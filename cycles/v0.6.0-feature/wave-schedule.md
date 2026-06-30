@@ -22,7 +22,21 @@ full per-story pipeline with its own wave gate.
 | Wave | Story | Traces to | Points | BCs | Status |
 |---|---|---|---|---|---|
 | 1 | S-8.01 — mDNS / NetBIOS-NS / LLMNR hostname extraction | P0-9 | 5 | BC-1.02.010..013 | ✅ gated (PR #138, merge 6334e36) |
-| 2 | S-9.01 — Multi-PCAP / rotated-capture analyze | P0-10 | 5 | BC-1.01.003, BC-1.01.004, BC-7.01.005 | in-progress (phase-3 delivery) |
+| 2 | S-9.01 — Multi-PCAP / rotated-capture analyze | P0-10 | 5 | BC-1.01.003, BC-1.01.004, BC-7.01.005 | ✅ gated (PR #140, merge 030a279) |
+| 3 | S-10.01 — Capture-window sanity warning | P1-9 | 5 | BC-4.01.004, BC-4.01.005 | in-progress (phase-3 delivery) |
+
+## Wave 3 — S-10.01
+
+**Scope.** Flag degenerate capture timestamps (all-epoch/1970, sub-second
+window, non-monotonic ordering) in the report header (HTML + MD banner) and on
+stderr, so time-dependent results aren't silently trusted. Pure detector
+`capture_sanity::assess` over observer-tracked `min_ts`/`max_ts`/monotonic;
+rendered **only when degenerate** → sane captures byte-identical (no churn).
+Also explains the TD-S901-002 out-of-order multi-file window inversion.
+
+**Touches.** `src/capture_sanity.rs` (new), `src/observe.rs` (ts tracking),
+`src/report.rs` + `templates/report.html` + `src/report_md.rs` (banner),
+`src/cli.rs` (stderr WARNING). Independent of waves 1–2 (capture-quality surface).
 
 ## Wave 2 — S-9.01
 

@@ -5,7 +5,7 @@ cycle: v0.4.0-feature
 phase: 2
 generated: 2026-05-11T20:50:00Z
 producer: phase-2-story-decomposition (inline)
-total_scenarios: 10
+total_scenarios: 11
 status: draft
 ---
 
@@ -30,6 +30,7 @@ status: draft
 | HS-008 | 3 | E-6 | behavioral-subtleties | yes | `otsniff diff` reports an unchanged host as unchanged |
 | HS-009 | 1 | E-5 | edge-case-combinations | should | Progress + heartbeat output never contains real identifiers |
 | HS-010 | 2 | E-9 | integration-boundaries | yes | Multi-PCAP analyze unions captures, guards link types, attributes per file (v0.6.0) |
+| HS-011 | 3 | E-10 | edge-case-combinations | yes | Capture-sanity warning fires on degenerate timestamps, silent on sane (v0.6.0) |
 
 ## Per-wave summary
 
@@ -52,6 +53,7 @@ status: draft
 | BC-9.04.001 / BC-6.04.001 (progress + heartbeat) | HS-009 |
 | BC-0.01.002 (reject non-PCAP) | HS-006 |
 | BC-1.01.003/004 + BC-7.01.005 (multi-PCAP ingest, link guard, audit attribution) | HS-010 |
+| BC-4.01.004/005 (capture-window sanity detection + surfacing) | HS-011 |
 
 ## Categorical distribution
 

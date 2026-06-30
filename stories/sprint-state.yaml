@@ -6,9 +6,11 @@
 # delivered outside the VSDD pipeline — see story files for evidence.
 
 cycle: v0.6.0-feature
-current_wave: 2
-total_waves: 2  # wave 1 = S-8.01 (gated); wave 2 = S-9.01 (multi-PCAP)
-total_stories: 4   # 2 backfill records + S-8.01 + S-9.01
+current_wave: 3
+total_waves: 3  # wave 1 = S-8.01; wave 2 = S-9.01; wave 3 = S-10.01 (capture sanity)
+total_stories: 5   # 2 backfill records + S-8.01 + S-9.01 + S-10.01
+wave_3_status: in-progress  # S-10.01 dispatched to phase-3 per-story delivery
+wave_3_gate: pending
 wave_2_status: completed  # S-9.01 delivered via full per-story pipeline (PR #140, merge 030a279)
 wave_2_gate: passed
 wave_2_gate_passed_at: 2026-06-30T00:00:00Z
@@ -77,3 +79,19 @@ stories:
     bcs: [BC-1.01.003, BC-1.01.004, BC-7.01.005]
     traces_to: P0-10
     notes: "Multi-PCAP / rotated-capture analyze: `analyze a.pcap b.pcap …` concatenates captures in CLI order (append semantics, no timestamp sort), one report over the union window. iter_packets_multi + peek_link_type link-layer guard (OtError::MixedLinkTypes); audit log input_pcap→input_pcaps (SCHEMA_VERSION 1→2); single-file output byte-identical (zero snapshot churn). analyze-only; scrub/diff unchanged."
+
+  S-10.01:
+    status: ready  # phase-2 decomposition complete; awaiting phase-3 delivery
+    wave: 3
+    branch: null
+    worktree: null
+    merge_sha: null
+    pr: null
+    completed_at: null
+    points: 5
+    epic: E-10
+    adversary_convergence: pending
+    red_gate: pending
+    bcs: [BC-4.01.004, BC-4.01.005]
+    traces_to: P1-9
+    notes: "Capture-window sanity warning: pure capture_sanity::assess(obs) detects EpochZeroTimestamps / SubSecondWindow / NonMonotonicTimestamps from observer-tracked min_ts/max_ts/monotonic; surfaced as an HTML+MD report banner and stderr WARNING (mirrors Classification::guard_warning). Rendered ONLY when degenerate → sane captures byte-identical (zero snapshot churn). Also explains the TD-S901-002 out-of-order multi-file window inversion."

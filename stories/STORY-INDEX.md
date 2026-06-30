@@ -6,9 +6,9 @@ phase: 2
 generated: 2026-05-11T20:40:00Z
 producer: phase-2-story-decomposition (inline)
 updated: 2026-06-30T00:00:00Z
-updater: story-writer (S-9.01 multi-PCAP / rotated-capture analyze)
-total_stories: 42
-total_epics: 9
+updater: story-writer (S-10.01 capture-window sanity warning)
+total_stories: 43
+total_epics: 10
 status: active
 ---
 
@@ -86,6 +86,7 @@ status: active
 |---|---|
 | BC-1.02.010 + BC-1.02.011 + BC-1.02.012 + BC-1.02.013 (mDNS/NetBIOS-NS/LLMNR hostname) | S-8.01 |
 | BC-1.01.003 + BC-1.01.004 + BC-7.01.005 (multi-PCAP / rotated-capture analyze) | S-9.01 |
+| BC-4.01.004 + BC-4.01.005 (capture-window sanity warning) | S-10.01 |
 | BC-3.05.002 (unexpected_protocols trigger) | S-1.04 |
 | BC-AUDIT-001..015 (formalize) | S-1.05 |
 | BC-AUDIT-009 (port-to-label) | S-2.01 |
