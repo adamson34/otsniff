@@ -5,10 +5,10 @@ cycle: v0.6.0-feature
 phase: 2
 generated: 2026-05-11T20:40:00Z
 producer: phase-2-story-decomposition (inline)
-updated: 2026-06-29T00:00:00Z
-updater: story-writer (S-8.01 mDNS/NetBIOS-NS/LLMNR hostname extraction)
-total_stories: 41
-total_epics: 8
+updated: 2026-06-30T00:00:00Z
+updater: story-writer (S-9.01 multi-PCAP / rotated-capture analyze)
+total_stories: 42
+total_epics: 9
 status: active
 ---
 
@@ -85,6 +85,7 @@ status: active
 | BC (or BC-AUDIT) | Story |
 |---|---|
 | BC-1.02.010 + BC-1.02.011 + BC-1.02.012 + BC-1.02.013 (mDNS/NetBIOS-NS/LLMNR hostname) | S-8.01 |
+| BC-1.01.003 + BC-1.01.004 + BC-7.01.005 (multi-PCAP / rotated-capture analyze) | S-9.01 |
 | BC-3.05.002 (unexpected_protocols trigger) | S-1.04 |
 | BC-AUDIT-001..015 (formalize) | S-1.05 |
 | BC-AUDIT-009 (port-to-label) | S-2.01 |

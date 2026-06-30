@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 108  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004; S-8.01 added BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013
+total_bcs: 111  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004; S-8.01 added BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013; S-9.01 added BC-1.01.003, BC-1.01.004, BC-7.01.005
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -37,6 +37,8 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 ### S.1 — Observation + protocol parsing (`src/observe.rs`, `src/parse/*`)
 - BC-1.01.001 Single-pass accumulator (HIGH)
 - BC-1.01.002 Logical flow keying drops src_port (HIGH)
+- BC-1.01.003 Multi-file ordered ingestion: `iter_packets_multi(paths)` yields every packet of `paths[0]` in file order, then `paths[1]`, etc. — concatenation is in command-line order (append semantics, NOT timestamp-sorted); per-packet timestamps are preserved so the observer's `first_ts`/`last_ts` span the union window when files are chronologically ordered; a per-file read error surfaces identifying that file (fail-fast, no partial report) (HIGH, added S-9.01 v0.6.0)
+- BC-1.01.004 Link-layer homogeneity guard: before streaming a multi-file set, each file's declared link type is peeked (legacy global-header `network` field; pcapng IDB); two files with different *determinate* link types yield `OtError::MixedLinkTypes` naming both files and types; indeterminate pcapng link types are treated as ETHERNET (matching `decode_block`'s default) and not rejected by the guard (HIGH, added S-9.01 v0.6.0)
 - BC-1.02.001 Modbus PDU recognition + engineering classification (HIGH, **B.6 corrected**)
 - BC-1.02.002 ENIP/CIP engineering service recognition (HIGH)
 - BC-1.02.003 S7Comm function code classification (HIGH, **B.6 corrected**)
@@ -134,6 +136,7 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-7.01.002 Audit log SHA-256s match the bytes sent to Claude (HIGH)
 - BC-7.01.003 Audit log contains no real identifiers (HIGH)
 - BC-7.01.004 `AuditLog.augment_pass` populated with `AugmentInvocationSummary` when `--ai` is set and augment pass succeeds; carries `system_prompt_sha256` / `user_message_sha256` / `response_sha256` (64-char SHA-256 hex), byte counts, elapsed seconds, `raw_finding_count` (before EC-003+dedup), `surviving_finding_count` (after); `None` when augment pass not run or fails (HIGH, added S-5.03 v0.5.0)
+- BC-7.01.005 Multi-input audit attribution: `AuditLog.input_pcaps: Vec<InputDescriptor>` carries one descriptor per input file in CLI order (basename-only `path` per F-ADV-P2-009, `size_bytes`, per-file `sha256` pinning that file's exact bytes per BC-7.01.002); `SCHEMA_VERSION` bumped 1→2 for the `input_pcap`→`input_pcaps` shape change; a single-file run yields a one-element vec (HIGH, added S-9.01 v0.6.0)
 - BC-7.02.001 CredEvent.note never leaks (HIGH)
 
 ### S.8 — Rendering (`src/report*.rs`, `src/rule_catalog.rs`, `src/ai/html_render.rs`)

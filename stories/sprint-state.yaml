@@ -6,9 +6,11 @@
 # delivered outside the VSDD pipeline — see story files for evidence.
 
 cycle: v0.6.0-feature
-current_wave: 1
-total_waves: 1  # wave plan established with S-8.01 in wave 1
-total_stories: 3   # 2 backfill records + S-8.01 (first active v0.6.0 story)
+current_wave: 2
+total_waves: 2  # wave 1 = S-8.01 (gated); wave 2 = S-9.01 (multi-PCAP)
+total_stories: 4   # 2 backfill records + S-8.01 + S-9.01
+wave_2_status: in-progress  # S-9.01 dispatched to phase-3 per-story delivery
+wave_2_gate: pending
 wave_1_status: completed  # S-8.01 delivered via full per-story pipeline (PR #138, merge 6334e36)
 wave_1_gate: passed
 wave_1_gate_passed_at: 2026-06-30T00:00:00Z
@@ -57,3 +59,19 @@ stories:
     bcs: [BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013]
     traces_to: P0-9
     notes: "mDNS/NetBIOS-NS/LLMNR hostname extraction; completes the deferred half of P0-3 (DHCP only). Three new src/parse/ modules; observe.rs wiring; zero display or privacy changes needed."
+
+  S-9.01:
+    status: ready  # phase-2 decomposition complete; awaiting phase-3 delivery
+    wave: 2
+    branch: null
+    worktree: null
+    merge_sha: null
+    pr: null
+    completed_at: null
+    points: 5
+    epic: E-9
+    adversary_convergence: pending
+    red_gate: pending
+    bcs: [BC-1.01.003, BC-1.01.004, BC-7.01.005]
+    traces_to: P0-10
+    notes: "Multi-PCAP / rotated-capture analyze: `analyze a.pcap b.pcap …` concatenates captures in CLI order (append semantics, no timestamp sort), one report over the union window. iter_packets_multi + peek_link_type link-layer guard (OtError::MixedLinkTypes); audit log input_pcap→input_pcaps (SCHEMA_VERSION 1→2); single-file output byte-identical (zero snapshot churn). analyze-only; scrub/diff unchanged."
