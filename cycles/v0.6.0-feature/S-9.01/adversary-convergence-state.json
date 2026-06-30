@@ -1,0 +1,24 @@
+{
+  "story_id": "S-9.01",
+  "cycle": "v0.6.0-feature",
+  "wave": 2,
+  "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
+  "clean_streak": 0,
+  "converged": false,
+  "last_classification": "SUBSTANTIVE",
+  "passes": [
+    {
+      "pass": 1,
+      "classification": "SUBSTANTIVE",
+      "base_sha": "develop 6334e36; branch tip pre-fix d8cc9d6",
+      "findings": {
+        "blocking": 0,
+        "substantive": ["M-1: a mid-stream decode/parse error on a truncated/corrupt file surfaced a path-less OtError::Parse / UnsupportedLinkType; MultiPacketIter passed it through unwrapped, so EC-004's 'fail-fast naming file N' was unmet for the truncated case (the killed-tcpdump-G rotation the story exists to serve); also untested"],
+        "minor": ["m-1: pcap::basename_of fell back to full path despite F-ADV-P2-009 comment", "m-2: story AC-003 exit-code wording self-contradictory (claimed 'same as BadInput' = 65, but BadInput maps to 2)", "m-3: guard masks a missing intermediate file when a later file also mismatches link type (both genuine error states)"],
+        "observations": ["multi-interface pcapng false-homogeneity (pre-existing decode_block limit)", "iter_packets_multi(&[]) returns Ok yielding zero packets (no live caller)", "MultiPacketIter did not latch terminal after an error (no live Vec<Result> collector)"]
+      },
+      "resolution": "M-1 fixed: added OtError::StreamInFile { path, inner } wrapping mid-stream errors with the source file, exit code delegated; MultiPacketIter now tracks current_path, wraps, and latches terminal (also closes the latching observation). m-1 fixed (basename_of -> '<unknown>'). m-2 corrected in the story spec (65/EX_DATAERR consistent with UnsupportedLinkType). m-3 + multi-interface pcapng documented as accepted limitations (story Known-limitations + TD-S901-001). Empty-slice observation: no live caller, left as latent. Commit f54cf66; regression test mid_stream_error_names_the_offending_file. Orchestrator independently verified M-1 against code (path-less Parse at pcap.rs:235/240/258, exit-70; UnsupportedLinkType exit-65) and confirmed no existing test pinned the single-file shape before changing it.",
+      "verification_discipline_note": "Every finding verified against code before acceptance: M-1 confirmed real (path-less streaming errors); m-2 confirmed a spec-wording defect, not an impl defect (impl's 65 is correct); m-3 + multi-interface judged accepted-by-design and documented rather than coded."
+    }
+  ]
+}

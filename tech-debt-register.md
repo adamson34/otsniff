@@ -22,6 +22,14 @@ Per-story Step 4.5 convergence loop (state in `.factory/cycles/v0.6.0-feature/S-
 | TD-S801-001 | LOW | ADV S-8.01 N-2 | OPEN | mDNS/LLMNR parsers reject the WHOLE message on any DNS compression pointer (spec-mandated by BC-1.02.010/012). Real multi-record mDNS responses routinely compress owner names, so many real captures extract zero hostnames. Implementation is spec-conformant; this is a coverage limitation, not a defect. | Future story: implement bounded, loop-guarded DNS name-compression resolution so A records with compressed owner names are extracted; update BC-1.02.010/012 accordingly. |
 | TD-S801-002 | MEDIUM | ADV S-8.01 (extends F-ADV-P5-008) | OPEN | S-8.01 sanitizes hostnames to printable ASCII (0x20..0x7F), removing control bytes/NUL/newline (the markdown-breakers) but still permitting metachars `\| < > & " '`. The new mDNS/NetBIOS/LLMNR sources thus join the existing F-ADV-P5-008 surface (attacker-controlled hostname → markdown-table / HTML / prompt-injection). Privacy intact (scrub keys on the whole string). | Apply the F-ADV-P5-008 fix once at the shared `host_label`/render boundary — restrict to RFC 952/1123 grammar `[A-Za-z0-9._-]` — covering all four hostname sources (DHCP + mDNS + NetBIOS + LLMNR) together. |
 
+### S-9.01 adversarial review (2026-06-30, v0.6.0-feature wave 2, develop base `6334e36`)
+
+Per-story convergence loop (state in `.factory/cycles/v0.6.0-feature/S-9.01/adversary-convergence-state.json`). The MAJOR finding (M-1: mid-stream error on a truncated/corrupt file surfaced a path-less error, breaking EC-004's "name file N" for the killed-`tcpdump -G` case) and minors m-1 (pcap `basename_of` full-path fallback) + m-2 (spec exit-code wording) were fixed/corrected in-story (`f54cf66`; regression `mid_stream_error_names_the_offending_file`). One deferral:
+
+| ID | Priority | Source | Status | Description | Suggested fix |
+|---|---|---|---|---|---|
+| TD-S901-001 | LOW | ADV S-9.01 (observation) | OPEN | Multi-interface pcapng false-homogeneity: a single pcapng with two IDBs of different link types passes the multi-file link guard (which peeks only the first IDB, per AC-003) and `decode_block` then treats every frame as Ethernet (pre-existing `decode_block` limitation, amplified by multi-file). Not introduced by S-9.01; single-IDB read is spec-conformant. | Future story: read per-interface link types from all IDBs and either reject heterogeneous-interface pcapng or decode each interface's frames by its own link type. Pairs with the existing pcapng link-type-default tech-debt. |
+
 ### ADV-P5 findings (2026-05-26, develop tip 50cab61, post-F-ADV-P4 fix burst)
 
 | ID | Priority | Source | Status | Description | Suggested fix |
