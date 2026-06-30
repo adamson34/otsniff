@@ -7,7 +7,7 @@
 
 use std::fs::File;
 use std::net::IpAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeZone, Utc};
 use etherparse::{NetSlice, SlicedPacket, TransportSlice};
@@ -59,6 +59,196 @@ pub fn iter_packets(path: &Path) -> Result<PacketIter> {
 pub struct PacketIter {
     reader: Box<dyn PcapReaderIterator>,
     link_type: Option<Linktype>,
+}
+
+/// Peek a capture's declared link-layer type without decoding its packets
+/// (S-9.01 / BC-1.01.004).
+///
+/// Returns `Ok(Some(lt))` when the type is determinate — a legacy pcap's
+/// 24-byte global header `network` field, or a pcapng's first Interface
+/// Description Block. Returns `Ok(None)` when the type is *indeterminate*
+/// (a pcapng whose first packet block precedes any IDB, or a header we
+/// couldn't read far enough to classify). Callers treat indeterminate
+/// captures as Ethernet downstream (matching `decode_block`'s default) and
+/// the homogeneity guard simply skips them — it only compares determinate
+/// types, so an indeterminate file is never the cause of a rejection.
+pub fn peek_link_type(path: &Path) -> Result<Option<Linktype>> {
+    use pcap_parser::pcapng::Block;
+
+    let file = File::open(path).map_err(|source| OtError::InputOpen {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut reader = create_reader(1 << 20, file).map_err(|e| OtError::BadInput {
+        path: path.to_path_buf(),
+        reason: format!("{e:?}"),
+    })?;
+    loop {
+        match reader.next() {
+            Ok((offset, block)) => {
+                // Determine the link type (or that it's not yet determinable)
+                // from this block, then consume it before returning.
+                let verdict: Option<Option<Linktype>> = match &block {
+                    // Legacy pcap: the global header always comes first and
+                    // carries the link type in `network`.
+                    PcapBlockOwned::LegacyHeader(hdr) => Some(Some(hdr.network)),
+                    PcapBlockOwned::NG(ng) => match ng {
+                        // pcapng: the IDB declares the link type.
+                        Block::InterfaceDescription(idb) => Some(Some(idb.linktype)),
+                        // A packet block before any IDB → indeterminate.
+                        Block::EnhancedPacket(_) | Block::SimplePacket(_) => Some(None),
+                        // Keep scanning past the section header (and anything
+                        // else) until we reach the IDB or a packet block.
+                        _ => None,
+                    },
+                    // A legacy record before its header shouldn't happen; if it
+                    // does, treat the type as indeterminate rather than panic.
+                    PcapBlockOwned::Legacy(_) => Some(None),
+                };
+                reader.consume(offset);
+                if let Some(result) = verdict {
+                    return Ok(result);
+                }
+            }
+            Err(PcapError::Eof) => return Ok(None),
+            Err(PcapError::Incomplete(_)) => {
+                // Couldn't read far enough to classify; treat as indeterminate.
+                if reader.refill().is_err() {
+                    return Ok(None);
+                }
+            }
+            // A genuine parse error here is deferred to the streaming path,
+            // which raises the authoritative error after earlier files'
+            // packets have been yielded. The guard is best-effort.
+            Err(_) => return Ok(None),
+        }
+    }
+}
+
+/// Link-layer homogeneity pre-flight (BC-1.01.004).
+///
+/// Compares only *determinate* link types. The first determinate type
+/// becomes the anchor; any later file whose determinate type differs is a
+/// hard error. Files we cannot peek here (missing/unreadable) or whose type
+/// is indeterminate are skipped — the streaming path raises the authoritative
+/// per-file error (after earlier files' packets have been yielded), and
+/// indeterminate pcapng captures are intentionally not rejected.
+fn check_link_homogeneity(paths: &[PathBuf]) -> Result<()> {
+    let mut anchor: Option<(PathBuf, Linktype)> = None;
+    for path in paths {
+        let lt = match peek_link_type(path) {
+            Ok(Some(lt)) => lt,
+            Ok(None) => continue, // indeterminate — not the guard's concern
+            Err(_) => continue,   // unreadable here — deferred to streaming
+        };
+        match &anchor {
+            None => anchor = Some((path.clone(), lt)),
+            Some((anchor_path, anchor_lt)) => {
+                if lt != *anchor_lt {
+                    return Err(OtError::MixedLinkTypes {
+                        first_file: basename_of(anchor_path),
+                        first_type: format!("{anchor_lt}"),
+                        second_file: basename_of(path),
+                        second_type: format!("{lt}"),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Basename of a path (F-ADV-P2-009 basename-only), falling back to
+/// `<unknown>` when there is no final component (e.g. a path ending in `..`).
+/// Never emits the full path — consistent with `cli::basename_of`.
+fn basename_of(path: &Path) -> String {
+    path.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "<unknown>".to_string())
+}
+
+/// Iterator that concatenates the packet streams of several captures in
+/// command-line order (S-9.01 / BC-1.01.003): every packet of `paths[0]`,
+/// then every packet of `paths[1]`, and so on. No timestamp re-sort — this
+/// is append (`mergecap -a`) semantics; the operator controls order.
+pub struct MultiPacketIter {
+    paths: std::vec::IntoIter<PathBuf>,
+    current: Option<PacketIter>,
+    /// Path of the file `current` is draining — used to attribute a
+    /// mid-stream error to the offending file (BC-1.01.003 / EC-004).
+    current_path: Option<PathBuf>,
+    /// Latches `true` once an error has been yielded so the iterator is
+    /// terminal (fail-fast is then a property of the iterator itself, not
+    /// just of callers that use `?`).
+    done: bool,
+}
+
+impl Iterator for MultiPacketIter {
+    type Item = Result<Packet>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        loop {
+            // Drain the current file first.
+            if let Some(iter) = self.current.as_mut() {
+                match iter.next() {
+                    Some(Ok(pkt)) => return Some(Ok(pkt)),
+                    // A mid-stream decode/parse error. `PacketIter`'s errors
+                    // (`Parse` / `UnsupportedLinkType`) carry no path, so name
+                    // the offending file here (EC-004) while preserving the
+                    // inner error's exit code. Latch shut: fail-fast.
+                    Some(Err(e)) => {
+                        self.done = true;
+                        let path = self.current_path.clone().unwrap_or_default();
+                        return Some(Err(OtError::StreamInFile {
+                            path,
+                            inner: Box::new(e),
+                        }));
+                    }
+                    None => {
+                        self.current = None;
+                        self.current_path = None;
+                    }
+                }
+            }
+            // Advance to the next file. A per-file open/header failure
+            // (`InputOpen` / `BadInput`) already carries the path, so surface
+            // it as-is. Earlier files' packets have already been yielded.
+            match self.paths.next() {
+                Some(path) => match iter_packets(&path) {
+                    Ok(iter) => {
+                        self.current = Some(iter);
+                        self.current_path = Some(path);
+                    }
+                    Err(e) => {
+                        self.done = true;
+                        return Some(Err(e));
+                    }
+                },
+                None => {
+                    self.done = true;
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// Build a [`MultiPacketIter`] over `paths` after a link-layer homogeneity
+/// pre-flight (S-9.01 / BC-1.01.003, BC-1.01.004).
+pub fn iter_packets_multi(paths: &[PathBuf]) -> Result<MultiPacketIter> {
+    // Pre-flight: reject a set with differing determinate link types before
+    // streaming any packets (BC-1.01.004). A single-file list has nothing to
+    // compare, so the guard is a no-op there.
+    check_link_homogeneity(paths)?;
+    Ok(MultiPacketIter {
+        paths: Vec::from(paths).into_iter(),
+        current: None,
+        current_path: None,
+        done: false,
+    })
 }
 
 impl Iterator for PacketIter {
@@ -221,6 +411,201 @@ mod tests {
 
     fn epoch() -> DateTime<Utc> {
         Utc.timestamp_opt(0, 0).single().unwrap()
+    }
+
+    /// Build a minimal Ethernet/IPv4/TCP frame for the synthetic fixtures.
+    fn eth_frame() -> Vec<u8> {
+        let payload = [0xde, 0xad];
+        let builder = PacketBuilder::ethernet2(
+            [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+            [0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb],
+        )
+        .ipv4([192, 168, 1, 10], [192, 168, 1, 20], 64)
+        .tcp(40000, 502, 0, 1024);
+        let mut frame = Vec::with_capacity(builder.size(payload.len()));
+        builder.write(&mut frame, &payload).unwrap();
+        frame
+    }
+
+    /// Synthesize a single-packet little-endian legacy pcap file (24-byte
+    /// global header + 16-byte record header + frame), with an explicit
+    /// `network` link type and packet timestamp.
+    fn legacy_pcap_bytes(network: u32, ts_sec: u32, frame: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        // Global header (little-endian, microsecond-precision magic).
+        out.extend_from_slice(&[0xd4, 0xc3, 0xb2, 0xa1]); // magic
+        out.extend_from_slice(&2u16.to_le_bytes()); // version major
+        out.extend_from_slice(&4u16.to_le_bytes()); // version minor
+        out.extend_from_slice(&0i32.to_le_bytes()); // thiszone
+        out.extend_from_slice(&0u32.to_le_bytes()); // sigfigs
+        out.extend_from_slice(&65535u32.to_le_bytes()); // snaplen
+        out.extend_from_slice(&network.to_le_bytes()); // network (link type)
+                                                       // Record header.
+        out.extend_from_slice(&ts_sec.to_le_bytes()); // ts_sec
+        out.extend_from_slice(&0u32.to_le_bytes()); // ts_usec
+        out.extend_from_slice(&(frame.len() as u32).to_le_bytes()); // incl_len
+        out.extend_from_slice(&(frame.len() as u32).to_le_bytes()); // orig_len
+        out.extend_from_slice(frame);
+        out
+    }
+
+    /// AC-002: two single-packet legacy fixtures chained yield exactly two
+    /// packets, in file (CLI) order, preserving per-packet timestamps.
+    #[test]
+    fn multi_iter_yields_packets_in_file_order() {
+        let frame = eth_frame();
+        let a = legacy_pcap_bytes(1, 100, &frame); // ts_sec = 100
+        let b = legacy_pcap_bytes(1, 200, &frame); // ts_sec = 200
+        let dir = tempfile::tempdir().unwrap();
+        let pa = dir.path().join("a.pcap");
+        let pb = dir.path().join("b.pcap");
+        std::fs::write(&pa, &a).unwrap();
+        std::fs::write(&pb, &b).unwrap();
+
+        let pkts: Vec<Packet> = iter_packets_multi(&[pa, pb])
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(pkts.len(), 2, "expected 2 packets across the two files");
+        // File order honored (no timestamp re-sort): a's packet (ts 100)
+        // precedes b's (ts 200).
+        assert!(
+            pkts[0].ts < pkts[1].ts,
+            "concatenation must preserve per-file timestamps in CLI order"
+        );
+    }
+
+    /// AC-003: peek_link_type reads the legacy global header's network field.
+    #[test]
+    fn peek_link_type_reads_legacy_network_field() {
+        let frame = eth_frame();
+        let bytes = legacy_pcap_bytes(1, 100, &frame);
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("eth.pcap");
+        std::fs::write(&p, &bytes).unwrap();
+        assert_eq!(peek_link_type(&p).unwrap(), Some(Linktype::ETHERNET));
+    }
+
+    /// AC-003: two ETHERNET fixtures pass the homogeneity guard.
+    #[test]
+    fn multi_iter_same_link_type_is_allowed() {
+        let frame = eth_frame();
+        let dir = tempfile::tempdir().unwrap();
+        let pa = dir.path().join("a.pcap");
+        let pb = dir.path().join("b.pcap");
+        std::fs::write(&pa, legacy_pcap_bytes(1, 100, &frame)).unwrap();
+        std::fs::write(&pb, legacy_pcap_bytes(1, 200, &frame)).unwrap();
+        assert!(iter_packets_multi(&[pa, pb]).is_ok());
+    }
+
+    /// AC-003: an ETHERNET fixture + a LINUX_SLL (113) header → MixedLinkTypes
+    /// naming both files and both type names.
+    #[test]
+    fn multi_iter_mixed_link_types_are_rejected() {
+        let frame = eth_frame();
+        let dir = tempfile::tempdir().unwrap();
+        let pe = dir.path().join("eth.pcap");
+        let ps = dir.path().join("sll.pcap");
+        std::fs::write(&pe, legacy_pcap_bytes(1, 100, &frame)).unwrap();
+        std::fs::write(&ps, legacy_pcap_bytes(113, 100, &frame)).unwrap();
+
+        let err = match iter_packets_multi(&[pe, ps]) {
+            Ok(_) => panic!("expected MixedLinkTypes, got Ok"),
+            Err(e) => e,
+        };
+        match err {
+            OtError::MixedLinkTypes {
+                first_file,
+                first_type,
+                second_file,
+                second_type,
+            } => {
+                let files = format!("{first_file} {second_file}");
+                assert!(files.contains("eth.pcap"), "files were: {files}");
+                assert!(files.contains("sll.pcap"), "files were: {files}");
+                let types = format!("{first_type} {second_type}");
+                assert!(types.contains("ETHERNET"), "types were: {types}");
+                assert!(types.contains("LINUX_SLL"), "types were: {types}");
+            }
+            other => panic!("expected MixedLinkTypes, got {other:?}"),
+        }
+    }
+
+    /// AC-003: a single-file list never triggers the guard.
+    #[test]
+    fn single_file_never_triggers_guard() {
+        let frame = eth_frame();
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("only.pcap");
+        std::fs::write(&p, legacy_pcap_bytes(113, 100, &frame)).unwrap();
+        // Even a lone non-ETHERNET file passes the guard (nothing to compare);
+        // it would only fail later in decode, not here.
+        assert!(iter_packets_multi(&[p]).is_ok());
+    }
+
+    /// AC-002: a path list whose second entry is missing → the iterator
+    /// surfaces an Err naming the missing file, after the first file's
+    /// packets have been yielded (no panic, fail-fast).
+    #[test]
+    fn missing_second_file_surfaces_error_after_first() {
+        let frame = eth_frame();
+        let dir = tempfile::tempdir().unwrap();
+        let pa = dir.path().join("a.pcap");
+        std::fs::write(&pa, legacy_pcap_bytes(1, 100, &frame)).unwrap();
+        let missing = dir.path().join("missing.pcap");
+
+        let mut iter = iter_packets_multi(&[pa, missing.clone()]).unwrap();
+        // First file's packet is yielded.
+        let first = iter.next().expect("expected first file's packet");
+        assert!(first.is_ok(), "first file's packet should decode cleanly");
+        // Advancing into the missing file surfaces a path-naming error.
+        match iter.next() {
+            Some(Err(OtError::InputOpen { path, .. })) => {
+                assert!(
+                    path.ends_with("missing.pcap"),
+                    "error must name the missing file, got {}",
+                    path.display()
+                );
+            }
+            other => panic!("expected InputOpen err for missing file, got {other:?}"),
+        }
+    }
+
+    /// M-1 (adversary): a mid-stream decode error must name the offending
+    /// file (EC-004 — the killed-`tcpdump -G` rotation case), not surface a
+    /// path-less error. Two homogeneous LINUX_SLL (113) files pass the
+    /// link-type guard, then fail at decode (only Ethernet decodes); the
+    /// error must be `StreamInFile` naming the first file, and its exit code
+    /// must delegate to the inner `UnsupportedLinkType` (65).
+    #[test]
+    fn mid_stream_error_names_the_offending_file() {
+        let frame = eth_frame();
+        let dir = tempfile::tempdir().unwrap();
+        let pa = dir.path().join("rotated-01.pcap");
+        let pb = dir.path().join("rotated-02.pcap");
+        // Both LINUX_SLL → homogeneous, so the guard passes and we reach the
+        // streaming decode, which rejects the non-Ethernet link type.
+        std::fs::write(&pa, legacy_pcap_bytes(113, 100, &frame)).unwrap();
+        std::fs::write(&pb, legacy_pcap_bytes(113, 200, &frame)).unwrap();
+
+        let mut iter = iter_packets_multi(&[pa, pb]).expect("guard allows homogeneous set");
+        match iter.next() {
+            Some(Err(e @ OtError::StreamInFile { .. })) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("rotated-01.pcap"),
+                    "mid-stream error must name the first file, got: {msg}"
+                );
+                // Exit code delegates to the wrapped UnsupportedLinkType (65).
+                assert_eq!(e.exit_code(), 65, "exit code must delegate to inner error");
+            }
+            other => panic!("expected StreamInFile naming the file, got {other:?}"),
+        }
+        // Latched terminal after the error (fail-fast is iterator-intrinsic).
+        assert!(
+            iter.next().is_none(),
+            "iterator must be terminal after a mid-stream error"
+        );
     }
 
     #[test]

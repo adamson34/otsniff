@@ -212,6 +212,105 @@ fn scrub_round_trip_via_pcap() {
     assert!(final_text.contains("host_999")); // unmapped pseudonym left as-is
 }
 
+// ── Group A1: S-9.01 multi-PCAP analyze (BC-1.01.003) ────────────────────────
+
+/// S-9.01 AC-001 / EC-002: `analyze` with zero positional inputs must fail with
+/// clap's usage error (exit 2) and never reach the ingestion path.
+#[test]
+fn s_9_01_analyze_zero_inputs_is_usage_error() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg("-o")
+        .arg(tmp.path().join("out.html"))
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Usage"));
+}
+
+/// S-9.01 AC-001 / EC-001: exactly one positional input still succeeds and
+/// writes a report.
+#[test]
+fn s_9_01_analyze_one_input_succeeds() {
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
+    if !pcap.exists() {
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: synthetic-1mb.pcap missing in CI"
+        );
+        eprintln!("skipping s_9_01_analyze_one_input_succeeds: synthetic-1mb.pcap not present");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let out = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success();
+    assert!(std::fs::read_to_string(&out).unwrap().contains("<html"));
+}
+
+/// S-9.01 AC-001 / AC-002 / AC-005: two positional inputs are ingested as one
+/// logical capture and produce a single report. The markdown source label
+/// (via --md) shows both basenames and never leaks an absolute path separator.
+#[test]
+fn s_9_01_analyze_two_inputs_succeeds() {
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
+    if !pcap.exists() {
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: synthetic-1mb.pcap missing in CI"
+        );
+        eprintln!("skipping s_9_01_analyze_two_inputs_succeeds: synthetic-1mb.pcap not present");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    // Two distinct basenames so the combined source label is observable.
+    let a = tmp.path().join("capture-01.pcap");
+    let b = tmp.path().join("capture-02.pcap");
+    std::fs::copy(&pcap, &a).unwrap();
+    std::fs::copy(&pcap, &b).unwrap();
+    let out = tmp.path().join("report.html");
+    let md = tmp.path().join("report.md");
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&a)
+        .arg(&b)
+        .arg("-o")
+        .arg(&out)
+        .arg("--md")
+        .arg(&md)
+        .assert()
+        .success();
+
+    assert!(std::fs::read_to_string(&out).unwrap().contains("<html"));
+    let md_text = std::fs::read_to_string(&md).unwrap();
+    // AC-005: both basenames appear in the multi-file source label.
+    assert!(
+        md_text.contains("capture-01.pcap"),
+        "multi-file markdown should name the first capture"
+    );
+    assert!(
+        md_text.contains("capture-02.pcap"),
+        "multi-file markdown should name the second capture"
+    );
+    // F-ADV-P2-009: the basename-only label must not embed the tempdir path.
+    let leaked = tmp.path().display().to_string();
+    assert!(
+        !md_text.contains(&leaked),
+        "multi-file source label leaked an absolute path"
+    );
+}
+
 // ── Group A2: S-6.01 --baseline-map flag (BC-5.03.001 AC-003) ────────────────
 
 /// BC-5.03.001 AC-003 / CLI: `scrub --baseline-map` must produce a new map
