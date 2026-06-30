@@ -259,8 +259,8 @@ pub enum WindowAdvisory {
     /// A capture window was missing or sub-second on at least one side, so
     /// flow-shift ratios fell back to raw byte counts (could not normalize).
     Degenerate,
-    /// Both windows were usable but differ by more than 2×; ratios are
-    /// rate-normalized. `factor` is the larger/smaller window ratio.
+    /// Both windows were usable but differ by 2× or more (inclusive); ratios
+    /// are rate-normalized. `factor` is the larger/smaller window ratio.
     Mismatch { factor: f64 },
 }
 

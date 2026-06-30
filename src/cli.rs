@@ -447,8 +447,9 @@ fn run_diff(args: DiffArgs) -> Result<()> {
 
     // S-11.01 (AC-003): surface a capture-window advisory on stderr. A
     // degenerate (missing / sub-second) window means ratios are raw byte
-    // counts; a > 2× mismatch means ratios are rate-normalized but the windows
-    // are materially different. Comparable + normalized windows print nothing.
+    // counts; a >= 2× (2×-or-more) mismatch means ratios are rate-normalized
+    // but the windows are materially different. Windows differing by < 2×
+    // print nothing.
     if let Some(warning) = diff.window_warning() {
         eprintln!("WARNING: {warning}");
     }
