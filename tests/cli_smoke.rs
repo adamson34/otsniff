@@ -802,7 +802,11 @@ fn s_10_01_analyze_sane_pcap_emits_no_capture_warning() {
         .arg(&out)
         .assert()
         .success()
-        .stderr(predicate::str::contains("WARNING").not());
+        // Target the capture-sanity messages specifically (all three end in
+        // "unreliable" or "misleading"), not any "WARNING" — so this stays
+        // green if an unrelated guard (e.g. capture-source) ever warns here.
+        .stderr(predicate::str::contains("unreliable").not())
+        .stderr(predicate::str::contains("misleading").not());
 }
 
 #[test]
