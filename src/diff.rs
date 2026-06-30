@@ -266,8 +266,10 @@ pub enum WindowAdvisory {
 
 impl Diff {
     /// **S-11.01:** the active [`WindowAdvisory`], or `None` when the windows are
-    /// comparable and normalized. The strict `> 2.0` test means windows that
-    /// differ by exactly 2× do NOT raise a mismatch (EC-008).
+    /// comparable and normalized. The `>= 2.0` test means windows that differ by
+    /// 2× **or more** raise a mismatch — so the motivating 1h-vs-30min (exactly
+    /// 2×) case warns (EC-002), and the threshold matches the flow-shift
+    /// detector's own `>=` multiplier semantics.
     pub fn window_advisory(&self) -> Option<WindowAdvisory> {
         if !self.rate_normalized {
             return Some(WindowAdvisory::Degenerate);
@@ -275,7 +277,7 @@ impl Diff {
         match (self.baseline_window_secs, self.current_window_secs) {
             (Some(b), Some(c)) if b > 0.0 && c > 0.0 => {
                 let (hi, lo) = if b >= c { (b, c) } else { (c, b) };
-                if hi / lo > 2.0 {
+                if hi / lo >= 2.0 {
                     Some(WindowAdvisory::Mismatch { factor: hi / lo })
                 } else {
                     None
@@ -1775,15 +1777,14 @@ mod tests {
         assert_eq!(diff.current_window_secs, Some(1800.0));
     }
 
-    /// EC-008 + adversary M-fix regression lock: windows differ EXACTLY 2× so
-    /// `window_advisory` is `None` (strict `> 2×`) and NO mismatch banner is
-    /// shown — yet the ratio is rate-normalized. The flow-shift heading basis
-    /// must read "rate" and the explanatory rate-note MUST still be present, so
-    /// a flagged flow with equal raw bytes isn't read as a "volume change".
+    /// M-1 regression lock: windows differ < 2× (1.5×) so `window_advisory` is
+    /// `None` and NO mismatch banner is shown — yet a rate-normalized flow IS
+    /// flagged. The heading basis must read "rate" and the rate-note MUST still
+    /// be present, so a flagged flow isn't read as a raw "volume change".
     #[test]
-    fn s_11_01_exact_2x_window_no_banner_but_rate_note_present() {
-        let base = obs_with_flow(1000, Some(1800.0)); // rate 1000/1800
-        let curr = obs_with_flow(1000, Some(900.0)); // rate 1000/900 = 2× base
+    fn s_11_01_within_2x_no_banner_but_rate_note_present() {
+        let base = obs_with_flow(600, Some(1800.0)); // rate 600/1800 = 0.333
+        let curr = obs_with_flow(800, Some(1200.0)); // rate 800/1200 = 0.667 = 2× base; 1.5× window
         let map = map_910();
         let diff = compute(
             DiffInput {
@@ -1803,18 +1804,97 @@ mod tests {
         assert_eq!(
             diff.window_advisory(),
             None,
-            "exactly 2× windows must NOT raise an advisory (strict > 2×, EC-008)"
+            "1.5× windows (< 2×) must NOT raise an advisory"
         );
         assert!(
             diff.window_banner().is_none() && diff.window_warning().is_none(),
-            "no banner/stderr warning at exactly 2×"
+            "no banner/stderr warning below 2×"
         );
-        assert_eq!(diff.flow_shifts.len(), 1, "the 2× rate change is flagged");
+        assert_eq!(diff.flow_shifts.len(), 1, "the ~2× rate change is flagged");
         assert_eq!(diff.flow_shift_basis(), "rate");
         assert!(
             diff.flow_shift_rate_note().is_some(),
             "the rate-note MUST be present even when no banner is shown (within-2× band)"
         );
+    }
+
+    /// EC-002 + EC-008 (adversary pass-2 M-1): windows differing EXACTLY 2× (the
+    /// motivating 1h-vs-30min case) DO raise a mismatch advisory — `>= 2×` is
+    /// inclusive — so the headline scenario warns (stderr + banner).
+    #[test]
+    fn s_11_01_exactly_2x_window_raises_mismatch() {
+        let base = obs_with_flow(1000, Some(3600.0)); // 1 hour
+        let curr = obs_with_flow(1000, Some(1800.0)); // 30 minutes
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(diff.rate_normalized);
+        match diff.window_advisory() {
+            Some(WindowAdvisory::Mismatch { factor }) => {
+                assert!(
+                    (factor - 2.0).abs() < 1e-9,
+                    "factor should be 2.0, got {factor}"
+                )
+            }
+            other => panic!("exactly 2× must raise Mismatch (>= 2×, EC-002), got {other:?}"),
+        }
+        assert!(diff.window_banner().is_some(), "exactly 2× ⇒ banner shown");
+        assert!(
+            diff.window_warning()
+                .is_some_and(|w| w.contains("windows differ")),
+            "exactly 2× ⇒ stderr warning"
+        );
+    }
+
+    /// MINOR (adversary pass 2): both advisory variants' surfacing text is
+    /// asserted — degenerate (raw fallback) and mismatch — for `window_warning`
+    /// and `window_banner` (EC-003/EC-004 surfacing claims).
+    #[test]
+    fn s_11_01_advisory_text_for_both_variants() {
+        // Degenerate: one window None ⇒ raw fallback.
+        let degen = Diff {
+            rate_normalized: false,
+            baseline_window_secs: None,
+            current_window_secs: Some(1800.0),
+            ..Default::default()
+        };
+        assert_eq!(degen.window_advisory(), Some(WindowAdvisory::Degenerate));
+        assert!(degen
+            .window_warning()
+            .is_some_and(|w| w.contains("missing or sub-second")));
+        assert!(degen
+            .window_banner()
+            .is_some_and(|b| b.contains("missing or sub-second") && b.contains("raw byte counts")));
+
+        // Mismatch: both windows usable, > 2×.
+        let mismatch = Diff {
+            rate_normalized: true,
+            baseline_window_secs: Some(3600.0),
+            current_window_secs: Some(900.0),
+            ..Default::default()
+        };
+        assert!(matches!(
+            mismatch.window_advisory(),
+            Some(WindowAdvisory::Mismatch { .. })
+        ));
+        assert!(mismatch
+            .window_warning()
+            .is_some_and(|w| w.contains("windows differ") && w.contains("rate-normalized")));
+        assert!(mismatch
+            .window_banner()
+            .is_some_and(|b| b.contains("windows differ")));
     }
 
     /// EC-001: equal windows ⇒ rate ratio ≡ byte ratio; a steady flow is not
