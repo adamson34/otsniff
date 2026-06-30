@@ -190,6 +190,12 @@ fn build_fixture() -> Observations {
         external_flows,
         first_ts: Some(fixed_ts()),
         last_ts: Some(fixed_ts()),
+        // Sane time base (multi-second, monotonic, post-epoch) so
+        // capture_sanity::assess returns [] and the report stays byte-identical
+        // to pre-S-10.01 (AC-005 regression lock).
+        min_ts: Some(fixed_ts()),
+        max_ts: Some(Utc.with_ymd_and_hms(2026, 5, 7, 12, 1, 0).unwrap()),
+        timestamps_monotonic: true,
         total_packets: 505,
         total_bytes: 48_600,
         mac_frame_counts: std::collections::BTreeMap::new(),
@@ -232,6 +238,57 @@ fn html_report_snapshot() {
     )
     .unwrap();
     insta::assert_snapshot!("report_html", html);
+}
+
+/// S-10.01 AC-003: a degenerate (all-epoch) time base derived from the clean
+/// fixture. `first_ts`/`last_ts` (and thus the "Capture window" line) are
+/// unchanged; only the new min/max are repointed at the Unix epoch.
+fn build_epoch_fixture() -> Observations {
+    let epoch = Utc.timestamp_opt(0, 0).single().unwrap();
+    Observations {
+        min_ts: Some(epoch),
+        max_ts: Some(epoch),
+        timestamps_monotonic: true,
+        ..build_fixture()
+    }
+}
+
+/// S-10.01 AC-003: the capture-window warning banner renders in BOTH the HTML
+/// and the markdown report for a degenerate-timestamp fixture. The clean
+/// fixtures (above) must stay byte-identical (AC-005) — these are NEW snapshots.
+#[test]
+fn capture_warning_banner_renders_in_html_and_md() {
+    let obs = build_epoch_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(
+        html.contains("capture-warning"),
+        "degenerate fixture must render the .capture-warning banner"
+    );
+    assert!(
+        html.contains("no real timestamps"),
+        "HTML banner must carry the epoch-zero message"
+    );
+    insta::assert_snapshot!("report_html_capture_warning", html);
+
+    let md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    assert!(
+        md.contains("Capture timestamp warning"),
+        "MD must carry the capture-timestamp warning blockquote"
+    );
+    insta::assert_snapshot!("report_md_capture_warning", md);
 }
 
 #[test]

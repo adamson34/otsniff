@@ -509,6 +509,16 @@ fn classify_with_guard(
     classification
 }
 
+/// S-10.01 AC-004: emit one `WARNING:` line per capture-window sanity finding,
+/// mirroring `classify_with_guard`'s guard-warning emission. Always emitted
+/// (not gated on `--verbose`) — a degenerate time base is a data-quality signal
+/// the operator must see. A sane capture emits nothing.
+fn emit_capture_warnings(obs: &crate::observe::Observations) {
+    for warning in crate::capture_sanity::assess(obs) {
+        eprintln!("WARNING: {}", warning.message());
+    }
+}
+
 /// Parse a PCAP and accumulate observations.
 ///
 /// `progress` is the optional progress reporter introduced in S-5.01.
@@ -613,6 +623,7 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
         Some(&mut reporter),
     )?;
     reporter.finish();
+    emit_capture_warnings(&obs);
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
     let findings = crate::findings::run_all(&obs, &ot_subnets);
@@ -715,6 +726,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     let mut reporter = ProgressReporter::new(std::io::stderr(), args.verbose);
     let obs = analyze(&args.inputs, &ot_subnets, args.verbose, Some(&mut reporter))?;
     reporter.finish();
+    emit_capture_warnings(&obs);
     let classification = classify_with_guard(&obs, args.source_type);
     let inventory = crate::inventory::build(&obs);
 

@@ -25,6 +25,11 @@ struct ReportView {
     total_packets: String,
     total_bytes: String,
     span: String,
+    /// Pre-formatted capture-window sanity warnings (S-10.01 / ADR-0003), one
+    /// per [`crate::capture_sanity::CaptureWarning::message`]. Empty for a sane
+    /// capture, in which case the template emits no banner — keeping
+    /// clean-capture HTML byte-identical.
+    capture_warnings: Vec<String>,
     capture_source: Option<String>,
     finding_count: usize,
     asset_count: usize,
@@ -165,6 +170,13 @@ pub fn render_html(
         total_packets: obs.total_packets.to_string(),
         total_bytes: human_bytes(obs.total_bytes),
         span,
+        // S-10.01 AC-003: pre-format the capture-window sanity warnings
+        // (ADR-0003). Empty for a sane capture, so the template emits no banner
+        // and clean-capture HTML stays byte-identical.
+        capture_warnings: crate::capture_sanity::assess(obs)
+            .iter()
+            .map(|w| w.message().to_string())
+            .collect(),
         capture_source: capture_source.map(|c| c.report_line()),
         finding_count: findings.len(),
         asset_count: inventory.len(),

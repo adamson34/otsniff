@@ -720,6 +720,95 @@ fn test_f_w1_001_unscrub_rejects_corrupted_map() {
         .failure();
 }
 
+// ── S-10.01: capture-window sanity warning on stderr (AC-004) ────────────────
+
+/// Minimal Ethernet II + IPv4 + UDP frame (10.10.0.1 → 10.10.0.2). Hand-built
+/// raw bytes so the test adds no dependency; it parses to exactly one `Packet`.
+fn eth_ipv4_udp_frame() -> Vec<u8> {
+    let mut f = Vec::new();
+    // Ethernet II: dst MAC, src MAC, ethertype 0x0800 (IPv4).
+    f.extend_from_slice(&[0x02, 0, 0, 0, 0, 0x02]);
+    f.extend_from_slice(&[0x02, 0, 0, 0, 0, 0x01]);
+    f.extend_from_slice(&[0x08, 0x00]);
+    // IPv4 header (20 bytes), total length 28, protocol 17 (UDP).
+    f.extend_from_slice(&[0x45, 0x00, 0x00, 0x1c, 0, 0, 0, 0, 0x40, 0x11, 0, 0]);
+    f.extend_from_slice(&[10, 10, 0, 1]); // src
+    f.extend_from_slice(&[10, 10, 0, 2]); // dst
+                                          // UDP header (8 bytes), length 8.
+    f.extend_from_slice(&[0x00, 0x35, 0x00, 0x35, 0x00, 0x08, 0x00, 0x00]);
+    f
+}
+
+/// Build a little-endian legacy pcap (ETHERNET link type) with `records`
+/// frames, each stamped at `ts_sec` (ts_usec = 0).
+fn legacy_pcap(frame: &[u8], records: usize, ts_secs: &[u32]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&[0xd4, 0xc3, 0xb2, 0xa1]); // magic (LE, microsecond)
+    out.extend_from_slice(&2u16.to_le_bytes()); // version major
+    out.extend_from_slice(&4u16.to_le_bytes()); // version minor
+    out.extend_from_slice(&0i32.to_le_bytes()); // thiszone
+    out.extend_from_slice(&0u32.to_le_bytes()); // sigfigs
+    out.extend_from_slice(&65535u32.to_le_bytes()); // snaplen
+    out.extend_from_slice(&1u32.to_le_bytes()); // network = ETHERNET
+    for i in 0..records {
+        let ts = ts_secs.get(i).copied().unwrap_or(0);
+        out.extend_from_slice(&ts.to_le_bytes()); // ts_sec
+        out.extend_from_slice(&0u32.to_le_bytes()); // ts_usec
+        out.extend_from_slice(&(frame.len() as u32).to_le_bytes()); // incl_len
+        out.extend_from_slice(&(frame.len() as u32).to_le_bytes()); // orig_len
+        out.extend_from_slice(frame);
+    }
+    out
+}
+
+/// AC-004: `analyze` on an all-epoch (ts = 0) capture exits 0 and prints the
+/// capture-sanity WARNING to stderr.
+#[test]
+fn s_10_01_analyze_epoch_zero_pcap_warns_on_stderr() {
+    let tmp = TempDir::new().unwrap();
+    let pcap = tmp.path().join("epoch.pcap");
+    std::fs::write(&pcap, legacy_pcap(&eth_ipv4_udp_frame(), 2, &[0, 0])).unwrap();
+    let out = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "WARNING: capture has no real timestamps",
+        ));
+}
+
+/// AC-004 / AC-005: `analyze` on a sane (multi-second, monotonic, post-epoch)
+/// capture emits no capture-sanity WARNING.
+#[test]
+fn s_10_01_analyze_sane_pcap_emits_no_capture_warning() {
+    let tmp = TempDir::new().unwrap();
+    let pcap = tmp.path().join("sane.pcap");
+    std::fs::write(
+        &pcap,
+        legacy_pcap(&eth_ipv4_udp_frame(), 2, &[1_700_000_000, 1_700_000_010]),
+    )
+    .unwrap();
+    let out = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        // Target the capture-sanity messages specifically (all three end in
+        // "unreliable" or "misleading"), not any "WARNING" — so this stays
+        // green if an unrelated guard (e.g. capture-source) ever warns here.
+        .stderr(predicate::str::contains("unreliable").not())
+        .stderr(predicate::str::contains("misleading").not());
+}
+
 #[test]
 fn unscrub_strict_mode_fails_on_unknown_token() {
     let tmp = TempDir::new().unwrap();

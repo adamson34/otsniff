@@ -285,7 +285,7 @@ pub struct ExternalFlow {
     pub bytes: u64,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct Observations {
     pub hosts: HashMap<IpAddr, HostObs>,
     pub flows: HashMap<String, FlowObs>,
@@ -347,6 +347,58 @@ pub struct Observations {
     /// or had the multicast bit set. Used by the capture-source detector
     /// as a SPAN signal.
     pub broadcast_frames: u64,
+    /// Running minimum of every packet's `ts` (S-10.01 AC-001). Distinct from
+    /// `first_ts` (first *processed* packet): `min_ts` is the true earliest
+    /// timestamp even when packets arrive out of order. `None` until the first
+    /// packet is observed. Read by `capture_sanity::assess`.
+    pub min_ts: Option<DateTime<Utc>>,
+    /// Running maximum of every packet's `ts` (S-10.01 AC-001). Distinct from
+    /// `last_ts` (last *processed* packet): `max_ts` is the true latest
+    /// timestamp even when packets arrive out of order. `None` until the first
+    /// packet is observed. Read by `capture_sanity::assess`.
+    pub max_ts: Option<DateTime<Utc>>,
+    /// `true` until a packet whose `ts` is strictly less than the immediately
+    /// preceding packet's `ts` is seen (S-10.01 AC-001). Initialized `true` (see
+    /// the manual `Default` impl below) so a never-observed / monotonic capture
+    /// reports monotonic. `capture_sanity::assess` flags a `false` value.
+    pub timestamps_monotonic: bool,
+}
+
+// Manual `Default` (rather than `#[derive(Default)]`) so `timestamps_monotonic`
+// initializes to `true`: the observer starts from `Observations::default()` and
+// only ever flips the flag to `false`, so a derived `false` default would make
+// every capture look non-monotonic. All other fields take their natural default.
+impl Default for Observations {
+    fn default() -> Self {
+        Self {
+            hosts: HashMap::default(),
+            flows: HashMap::default(),
+            modbus_events: Vec::default(),
+            modbus_flow_summary: BTreeMap::default(),
+            enip_events: Vec::default(),
+            s7_events: Vec::default(),
+            dnp3_events: Vec::default(),
+            ntlm_events: Vec::default(),
+            ldap_bind_events: Vec::default(),
+            rdp_events: Vec::default(),
+            cred_events: Vec::default(),
+            cred_events_index: HashMap::default(),
+            external_flows: HashMap::default(),
+            smbv1_packets: HashMap::default(),
+            tls_client_hellos: HashMap::default(),
+            tls_cipher_suites: HashMap::default(),
+            hostnames: BTreeMap::default(),
+            first_ts: None,
+            last_ts: None,
+            total_packets: 0,
+            total_bytes: 0,
+            mac_frame_counts: BTreeMap::default(),
+            broadcast_frames: 0,
+            min_ts: None,
+            max_ts: None,
+            timestamps_monotonic: true,
+        }
+    }
 }
 
 pub struct Observer {
@@ -391,8 +443,26 @@ impl Observer {
         if is_broadcast_or_multicast(&pkt.dst_mac) {
             self.obs.broadcast_frames += 1;
         }
+        // Capture-window sanity tracking (S-10.01 AC-001). Compare against the
+        // immediately preceding packet's ts (the current `last_ts`, before it is
+        // overwritten below) to detect a strictly-backward step. `first_ts` /
+        // `last_ts` keep their existing first/last-processed semantics — do NOT
+        // repoint them at the min/max extremes.
+        if let Some(prev) = self.obs.last_ts {
+            if pkt.ts < prev {
+                self.obs.timestamps_monotonic = false;
+            }
+        }
         self.obs.first_ts.get_or_insert(pkt.ts);
         self.obs.last_ts = Some(pkt.ts);
+        self.obs.min_ts = Some(match self.obs.min_ts {
+            Some(m) => m.min(pkt.ts),
+            None => pkt.ts,
+        });
+        self.obs.max_ts = Some(match self.obs.max_ts {
+            Some(m) => m.max(pkt.ts),
+            None => pkt.ts,
+        });
 
         self.update_host(pkt.src_ip, pkt.src_mac, pkt, bytes);
         self.update_host(pkt.dst_ip, pkt.dst_mac, pkt, bytes);
@@ -1200,6 +1270,60 @@ mod tests {
         assert!(!has_smb1_magic(&[0xFF, 0x53, 0x4D], 0));
         assert!(!has_smb1_magic(&[], 0));
         assert!(!has_smb1_magic(&[0xFF, 0x53, 0x4D, 0x42], 4));
+    }
+
+    // ── S-10.01 AC-001: capture-window min/max + monotonic tracking ──────────
+
+    fn ts_at(secs: i64) -> chrono::DateTime<Utc> {
+        Utc.timestamp_opt(1_700_000_000 + secs, 0).single().unwrap()
+    }
+
+    fn udp_pkt(ts: chrono::DateTime<Utc>) -> crate::pcap::Packet {
+        use crate::pcap::{Packet, Transport};
+        Packet {
+            ts,
+            src_mac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01],
+            dst_mac: [0x00, 0x1B, 0x1B, 0x11, 0x22, 0x33],
+            src_ip: ip("10.10.0.5"),
+            dst_ip: ip("10.10.0.20"),
+            transport: Transport::Udp,
+            src_port: 40000,
+            dst_port: 9999,
+            payload: vec![],
+        }
+    }
+
+    /// AC-001: a monotonic 3-packet sequence yields `min_ts`/`max_ts` at the
+    /// true extremes and `timestamps_monotonic == true`.
+    #[test]
+    fn observe_tracks_min_max_and_monotonic_for_ordered_sequence() {
+        let mut o = Observer::new(vec![]);
+        let (a, b, c) = (ts_at(0), ts_at(10), ts_at(20));
+        o.observe(&udp_pkt(a));
+        o.observe(&udp_pkt(b));
+        o.observe(&udp_pkt(c));
+        let obs = o.finish();
+        assert_eq!(obs.min_ts, Some(a));
+        assert_eq!(obs.max_ts, Some(c));
+        assert!(obs.timestamps_monotonic);
+    }
+
+    /// AC-001: an out-of-order sequence (p2.ts < p1.ts) sets
+    /// `timestamps_monotonic == false` while `min_ts`/`max_ts` remain the true
+    /// extremes (not first/last processed).
+    #[test]
+    fn observe_flags_non_monotonic_and_keeps_true_extremes() {
+        let mut o = Observer::new(vec![]);
+        let (p1, p2) = (ts_at(100), ts_at(50)); // strictly backward step
+        o.observe(&udp_pkt(p1));
+        o.observe(&udp_pkt(p2));
+        let obs = o.finish();
+        assert!(!obs.timestamps_monotonic);
+        assert_eq!(obs.min_ts, Some(p2));
+        assert_eq!(obs.max_ts, Some(p1));
+        // first_ts/last_ts keep first/last-processed semantics (unchanged).
+        assert_eq!(obs.first_ts, Some(p1));
+        assert_eq!(obs.last_ts, Some(p2));
     }
 
     // -------------------------------------------------------------------------

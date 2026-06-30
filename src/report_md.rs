@@ -61,6 +61,18 @@ pub fn render_markdown(
         _ => "(no timestamps)".to_string(),
     };
     writeln!(out, "- **Capture window:** {}", span).unwrap();
+    // S-10.01 AC-003: a degenerate time base gets a warning blockquote right
+    // after the capture-window line. When the time base is sane, nothing is
+    // written — keeping clean-capture markdown byte-identical (AC-005).
+    let capture_warnings = crate::capture_sanity::assess(obs);
+    if !capture_warnings.is_empty() {
+        let joined = capture_warnings
+            .iter()
+            .map(|w| w.message())
+            .collect::<Vec<_>>()
+            .join("; ");
+        writeln!(out, "> ⚠ **Capture timestamp warning:** {joined}").unwrap();
+    }
     if let Some(c) = capture_source {
         writeln!(out, "- **Capture source:** {}", c.report_line()).unwrap();
     }
