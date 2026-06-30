@@ -3,22 +3,44 @@
   "cycle": "v0.6.0-feature",
   "wave": 2,
   "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
-  "clean_streak": 0,
-  "converged": false,
-  "last_classification": "SUBSTANTIVE",
+  "clean_streak": 3,
+  "converged": true,
+  "converged_at_pass": 4,
+  "convergence_rationale": "Passes 2, 3, 4 all CONVERGED (no blocker/major), novelty LOW, on frozen production code (M-1 fixed at f54cf66; only an additive test 3ef8e24 and doc-only spec edits since). Each pass independently re-derived correctness of the MultiPacketIter state machine, StreamInFile wrapping/exit-delegation, the homogeneity guard, privacy labels, audit input_pcaps/schema-2, the variadic CLI, and EC-001..009 with cited line ranges. Pass-1 M-1 fixed + regression-locked; pass-2 EC-008 coverage gap closed; pass-3 OBS-2 spec metadata corrected. Full suite re-verified green by orchestrator (644 tests, 0 failed) — covers pass-4's read-only caveat. No defects remain.",
+  "last_classification": "CLEAN",
+  "production_code_frozen_at": "f54cf66 (M-1 fix); only additive test 3ef8e24 and doc-only spec edits since",
   "passes": [
     {
       "pass": 1,
       "classification": "SUBSTANTIVE",
-      "base_sha": "develop 6334e36; branch tip pre-fix d8cc9d6",
       "findings": {
         "blocking": 0,
-        "substantive": ["M-1: a mid-stream decode/parse error on a truncated/corrupt file surfaced a path-less OtError::Parse / UnsupportedLinkType; MultiPacketIter passed it through unwrapped, so EC-004's 'fail-fast naming file N' was unmet for the truncated case (the killed-tcpdump-G rotation the story exists to serve); also untested"],
-        "minor": ["m-1: pcap::basename_of fell back to full path despite F-ADV-P2-009 comment", "m-2: story AC-003 exit-code wording self-contradictory (claimed 'same as BadInput' = 65, but BadInput maps to 2)", "m-3: guard masks a missing intermediate file when a later file also mismatches link type (both genuine error states)"],
-        "observations": ["multi-interface pcapng false-homogeneity (pre-existing decode_block limit)", "iter_packets_multi(&[]) returns Ok yielding zero packets (no live caller)", "MultiPacketIter did not latch terminal after an error (no live Vec<Result> collector)"]
+        "substantive": ["M-1: mid-stream decode/parse error on a truncated/corrupt file surfaced a path-less error; EC-004 'name file N' unmet for the killed-tcpdump-G case; untested"],
+        "minor": ["m-1: pcap::basename_of full-path fallback", "m-2: story AC-003 exit-code wording self-contradictory", "m-3: missing intermediate file masked by later link-type mismatch"],
+        "observations": ["multi-interface pcapng false-homogeneity", "iter_packets_multi(&[]) zero-packet (no live caller)", "MultiPacketIter did not latch terminal after error"]
       },
-      "resolution": "M-1 fixed: added OtError::StreamInFile { path, inner } wrapping mid-stream errors with the source file, exit code delegated; MultiPacketIter now tracks current_path, wraps, and latches terminal (also closes the latching observation). m-1 fixed (basename_of -> '<unknown>'). m-2 corrected in the story spec (65/EX_DATAERR consistent with UnsupportedLinkType). m-3 + multi-interface pcapng documented as accepted limitations (story Known-limitations + TD-S901-001). Empty-slice observation: no live caller, left as latent. Commit f54cf66; regression test mid_stream_error_names_the_offending_file. Orchestrator independently verified M-1 against code (path-less Parse at pcap.rs:235/240/258, exit-70; UnsupportedLinkType exit-65) and confirmed no existing test pinned the single-file shape before changing it.",
-      "verification_discipline_note": "Every finding verified against code before acceptance: M-1 confirmed real (path-less streaming errors); m-2 confirmed a spec-wording defect, not an impl defect (impl's 65 is correct); m-3 + multi-interface judged accepted-by-design and documented rather than coded."
+      "resolution": "M-1 fixed (OtError::StreamInFile wrapping + current_path + done latch; commit f54cf66; regression mid_stream_error_names_the_offending_file). m-1 fixed. m-2 corrected in spec. m-3 + multi-interface documented as accepted limitations (story Known-limitations + TD-S901-001). Orchestrator independently verified M-1 against code before fixing.",
+      "verification_discipline_note": "Every finding verified against code before acceptance; m-2 confirmed a spec defect (impl's exit-65 is correct), not an impl defect."
+    },
+    {
+      "pass": 2,
+      "classification": "CLEAN",
+      "base": "branch tip post-fix (f54cf66)",
+      "findings": {"blocking": 0, "major": 0, "substantive": [], "observations": ["EC-008 truncation untested (coverage)", "double file-open on single-file path (perf, negligible)", "single-file mid-stream errors now wrapped (exit code unchanged; AC-001 byte-identical guarantee is about report output, holds)"]},
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "verification": "Traced no-double-wrap (StreamInFile inner is only Parse/UnsupportedLinkType), current_path invariant (set/cleared with current), done-latch correctness, exit-code delegation, single-file byte-identity, audit input_pcaps order + schema 2, variadic CLI vs -o/--md. All 7 areas cleared with cited line ranges.",
+      "response": "Added the one cheap recommended test (source_labels_single_file_identical_and_multi_file_capped, commit 3ef8e24) locking EC-008/AC-005. No production-code change."
+    },
+    {
+      "pass": 3,
+      "classification": "CLEAN",
+      "base": "branch tip with source-label test (3ef8e24)",
+      "findings": {"blocking": 0, "major": 0, "substantive": [], "observations": ["OBS-1 (LOW): pcapng-peek path (EC-007) + EC-005/006 documented-but-untested — coverage, not a defect", "OBS-2 (LOW): story frontmatter subsystems list omitted S.0 (pcap.rs/error.rs) and S.9 (cli.rs)"]},
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "verification": "Independent fresh-context re-derivation: concatenation, done latch, current_path attribution, StreamInFile wrapping/exit-delegation, homogeneity guard, privacy labels, audit input_pcaps/schema 2, variadic CLI, EC-001..009 — all correct and contract-conformant.",
+      "response": "OBS-2 fixed (subsystems -> [S.0,S.1,S.7,S.9]; doc-only, streak preserved). OBS-1 accepted as a LOW coverage gap on a trivial path (idb.linktype read; legacy peek fully tested; multi-file behavior e2e-verified) — recorded, not blocking."
     }
   ]
 }
