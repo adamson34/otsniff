@@ -78,6 +78,18 @@
   h3 { font-size: 1rem; margin: 0.5rem 0 0.25rem 0; }
   .muted { color: var(--muted); }
   .capture-meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
+  .capture-warning {
+    background: color-mix(in oklch, var(--high) 10%, var(--paper));
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--high);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.9rem;
+    margin: 0 0 1rem 0;
+    font-size: 0.85rem;
+    color: var(--ink-2);
+  }
+  .capture-warning ul { margin: 0.35rem 0 0 0; padding-left: 1.2rem; }
+  .capture-warning li { padding: 0.1rem 0; }
   .finding {
     border: 1px solid var(--line);
     border-left-width: 4px;
@@ -327,6 +339,14 @@
 <div class="page-body">
 
 <div class="capture-meta">Capture window: {{ span }}</div>
+{% if capture_warnings.len() > 0 %}
+<div class="capture-warning">
+  <strong>⚠ Capture timestamp warning</strong>
+  <ul>
+  {% for w in capture_warnings %}<li>{{ w }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
 {% match capture_source %}{% when Some with (line) %}
 <div class="capture-meta"><strong>Capture source:</strong> {{ line }}</div>
 {% when None %}
