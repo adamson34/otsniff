@@ -995,7 +995,9 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
             "version": crate::VERSION,
             "input": html_source_label(&args.inputs),
             "inventory": inventory,
-            "findings": findings,
+            // S-12.01 AC-004: enrich each finding with its MITRE ATT&CK for ICS
+            // techniques, looked up from the catalog by id (ADR-0014).
+            "findings": crate::findings::findings_json(&findings[..]),
         });
         std::fs::write(json_path, serde_json::to_string_pretty(&payload)?).map_err(|source| {
             OtError::WriteOutput {
@@ -1115,7 +1117,9 @@ fn write_optional_sidecars(
             "version": crate::VERSION,
             "input": html_source_label(&args.inputs),
             "inventory": inventory,
-            "findings": findings,
+            // S-12.01 AC-004: enrich each finding with its MITRE ATT&CK for ICS
+            // techniques, looked up from the catalog by id (ADR-0014).
+            "findings": crate::findings::findings_json(findings),
         });
         std::fs::write(json_path, serde_json::to_string_pretty(&payload)?).map_err(|source| {
             OtError::WriteOutput {

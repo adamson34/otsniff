@@ -116,6 +116,19 @@ pub fn render_markdown(
                 writeln!(out, "**Detection criteria.** {}", meta.trigger).unwrap();
                 writeln!(out).unwrap();
             }
+            // S-12.01 AC-003: MITRE ATT&CK for ICS techniques, looked up from the
+            // catalog by id (ADR-0014). Rendered only when ≥1 technique maps;
+            // the constant English strings are inert to the scrub layer (EC-004).
+            let mitre = crate::findings::mitre_techniques_for(f.id);
+            if !mitre.is_empty() {
+                let links = mitre
+                    .iter()
+                    .map(|t| format!("[{}]({})", t.label, t.url))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                writeln!(out, "**MITRE ATT&CK for ICS.** {links}").unwrap();
+                writeln!(out).unwrap();
+            }
             writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
             writeln!(out).unwrap();
             if !f.playbook.is_empty() {

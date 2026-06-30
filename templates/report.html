@@ -360,6 +360,12 @@
       <div style="padding:0.3rem 0;">{{ f.trigger }}</div>
     </details>
     {% endif %}
+    {% if !f.mitre.is_empty() %}
+    <div class="mitre" style="margin-top:0.5rem;font-size:0.85rem;">
+      <strong>MITRE ATT&amp;CK for ICS:</strong>
+      {% for t in f.mitre %}<a href="{{ t.url }}">{{ t.label }}</a>{% if !loop.last %}, {% endif %}{% endfor %}
+    </div>
+    {% endif %}
     <div style="margin-top:0.5rem;"><strong>Recommendation:</strong> {{ f.recommendation }}</div>
     {% if !f.playbook.is_empty() %}
     <details open>

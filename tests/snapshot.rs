@@ -16,7 +16,7 @@ use otsniff::ai::prompts;
 use otsniff::audit;
 use otsniff::capture_source::{classify, CaptureSource, Classification, Confidence};
 use otsniff::findings::run_all;
-use otsniff::findings::{catalog, metadata_for};
+use otsniff::findings::{catalog, findings_json, metadata_for};
 use otsniff::inventory::build as build_inventory;
 use otsniff::observe::{
     CredEvent, CredKind, Dnp3Event, EnipEvent, ExternalFlow, FlowKey, FlowObs, HostObs,
@@ -237,6 +237,14 @@ fn html_report_snapshot() {
         None,
     )
     .unwrap();
+    // AC-002: the Telnet finding (creds.telnet) surfaces its T0859 technique as
+    // a labeled MITRE row linking to attack.mitre.org.
+    assert!(
+        html.contains("MITRE ATT&amp;CK for ICS")
+            && html.contains("https://attack.mitre.org/techniques/T0859/")
+            && html.contains("T0859 — Valid Accounts"),
+        "HTML finding card must render the MITRE ATT&CK for ICS technique link"
+    );
     insta::assert_snapshot!("report_html", html);
 }
 
@@ -296,10 +304,18 @@ fn findings_json_snapshot() {
     let obs = build_fixture();
     let inventory = build_inventory(&obs);
     let findings = run_all(&obs, &ot_subnets());
+    // AC-004: findings JSON is enriched with a per-finding `mitre_techniques`
+    // array looked up from the catalog by id.
     let payload = serde_json::json!({
         "inventory": inventory,
-        "findings": findings,
+        "findings": findings_json(&findings),
     });
+    assert!(
+        serde_json::to_string(&payload)
+            .unwrap()
+            .contains("mitre_techniques"),
+        "findings JSON must carry mitre_techniques per finding"
+    );
     insta::assert_json_snapshot!("findings_json", payload);
 }
 
@@ -324,6 +340,15 @@ fn scrubbed_markdown_snapshot_does_not_leak_real_values() {
     // they're scrubbed before reaching any AI provider.
     assert!(!scrubbed.contains("ENG-WS-01"));
     assert!(!scrubbed.contains("PLC-LINE3"));
+
+    // AC-003: the markdown report carries a MITRE ATT&CK for ICS line per
+    // finding; the constant technique strings survive scrubbing (EC-004).
+    assert!(
+        scrubbed.contains("**MITRE ATT&CK for ICS.**")
+            && scrubbed
+                .contains("[T0859 — Valid Accounts](https://attack.mitre.org/techniques/T0859/)"),
+        "markdown finding must carry the MITRE ATT&CK for ICS line"
+    );
 
     insta::assert_snapshot!("scrubbed_markdown", scrubbed);
 }
