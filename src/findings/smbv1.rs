@@ -27,6 +27,11 @@ pub const METADATA: RuleMetadata = RuleMetadata {
             label: "Microsoft — Stop using SMB1",
             url: Some("https://learn.microsoft.com/en-us/windows-server/storage/file-server/troubleshoot/smbv1-not-installed-by-default-in-windows"),
         },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0866 — Exploitation of Remote Services (supporting)",
+            url: Some("https://attack.mitre.org/techniques/T0866/"),
+        },
     ],
 };
 

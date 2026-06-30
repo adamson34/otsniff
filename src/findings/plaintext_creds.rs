@@ -25,6 +25,11 @@ pub const FTP_METADATA: RuleMetadata = RuleMetadata {
             label: "RFC 959 — File Transfer Protocol",
             url: Some("https://datatracker.ietf.org/doc/html/rfc959"),
         },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0859 — Valid Accounts",
+            url: Some("https://attack.mitre.org/techniques/T0859/"),
+        },
     ],
 };
 
@@ -48,6 +53,11 @@ pub const TELNET_METADATA: RuleMetadata = RuleMetadata {
             kind: ReferenceKind::Rfc,
             label: "RFC 854 — Telnet Protocol Specification",
             url: Some("https://datatracker.ietf.org/doc/html/rfc854"),
+        },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0859 — Valid Accounts",
+            url: Some("https://attack.mitre.org/techniques/T0859/"),
         },
     ],
 };
@@ -73,6 +83,11 @@ pub const HTTP_BASIC_METADATA: RuleMetadata = RuleMetadata {
             label: "RFC 7617 — The 'Basic' HTTP Authentication Scheme",
             url: Some("https://datatracker.ietf.org/doc/html/rfc7617"),
         },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0859 — Valid Accounts",
+            url: Some("https://attack.mitre.org/techniques/T0859/"),
+        },
     ],
 };
 
@@ -96,6 +111,11 @@ pub const SNMP_METADATA: RuleMetadata = RuleMetadata {
             kind: ReferenceKind::Rfc,
             label: "RFC 3411 — Architecture for SNMPv3 (the secure replacement)",
             url: Some("https://datatracker.ietf.org/doc/html/rfc3411"),
+        },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0859 — Valid Accounts",
+            url: Some("https://attack.mitre.org/techniques/T0859/"),
         },
     ],
 };
