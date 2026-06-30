@@ -49,6 +49,18 @@ pub enum OtError {
         source: std::io::Error,
     },
 
+    /// **S-9.01 (BC-1.01.003 / EC-004):** wraps a mid-stream decode/parse
+    /// failure with the capture file it came from, so a multi-file
+    /// `analyze cap-01.pcap … cap-30.pcap` names the offending file even
+    /// when the underlying `PacketIter` error (`Parse` / `UnsupportedLinkType`)
+    /// carries no path — e.g. a half-written file from a killed `tcpdump -G`
+    /// rotation. The wrapped error's exit code is preserved (delegated), so
+    /// behaviour for the single-file path is unchanged except for the added
+    /// filename in the message. `inner` is a plain Display field (not a
+    /// `#[source]`) to avoid requiring `Box<OtError>: Error`.
+    #[error("error reading capture '{path}': {inner}")]
+    StreamInFile { path: PathBuf, inner: Box<OtError> },
+
     #[error("internal: failed to render report template")]
     Render(#[from] askama::Error),
 
@@ -94,6 +106,9 @@ impl OtError {
             // re-run after fixing the scrub map).
             Self::PrivacyLeak { .. } => 75,
             Self::Parse(_) | Self::Render(_) | Self::Json(_) => 70, // EX_SOFTWARE
+            // Delegate to the wrapped error so the exit class matches the
+            // underlying failure (e.g. Parse → 70, UnsupportedLinkType → 65).
+            Self::StreamInFile { inner, .. } => inner.exit_code(),
             Self::Segmentation(_) => 2, // config/usage error, like bad input
         }
     }

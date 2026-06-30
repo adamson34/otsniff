@@ -158,12 +158,13 @@ fn check_link_homogeneity(paths: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-/// Basename of a path (F-ADV-P2-009 basename-only), falling back to the full
-/// display string only when there is no final component.
+/// Basename of a path (F-ADV-P2-009 basename-only), falling back to
+/// `<unknown>` when there is no final component (e.g. a path ending in `..`).
+/// Never emits the full path — consistent with `cli::basename_of`.
 fn basename_of(path: &Path) -> String {
     path.file_name()
         .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
+        .unwrap_or_else(|| "<unknown>".to_string())
 }
 
 /// Iterator that concatenates the packet streams of several captures in
@@ -173,29 +174,63 @@ fn basename_of(path: &Path) -> String {
 pub struct MultiPacketIter {
     paths: std::vec::IntoIter<PathBuf>,
     current: Option<PacketIter>,
+    /// Path of the file `current` is draining — used to attribute a
+    /// mid-stream error to the offending file (BC-1.01.003 / EC-004).
+    current_path: Option<PathBuf>,
+    /// Latches `true` once an error has been yielded so the iterator is
+    /// terminal (fail-fast is then a property of the iterator itself, not
+    /// just of callers that use `?`).
+    done: bool,
 }
 
 impl Iterator for MultiPacketIter {
     type Item = Result<Packet>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
         loop {
             // Drain the current file first.
             if let Some(iter) = self.current.as_mut() {
                 match iter.next() {
-                    Some(item) => return Some(item),
-                    None => self.current = None,
+                    Some(Ok(pkt)) => return Some(Ok(pkt)),
+                    // A mid-stream decode/parse error. `PacketIter`'s errors
+                    // (`Parse` / `UnsupportedLinkType`) carry no path, so name
+                    // the offending file here (EC-004) while preserving the
+                    // inner error's exit code. Latch shut: fail-fast.
+                    Some(Err(e)) => {
+                        self.done = true;
+                        let path = self.current_path.clone().unwrap_or_default();
+                        return Some(Err(OtError::StreamInFile {
+                            path,
+                            inner: Box::new(e),
+                        }));
+                    }
+                    None => {
+                        self.current = None;
+                        self.current_path = None;
+                    }
                 }
             }
-            // Advance to the next file. A per-file open/parse failure is
-            // surfaced as an `Err` item (fail-fast) — earlier files' packets
-            // have already been yielded by this point.
+            // Advance to the next file. A per-file open/header failure
+            // (`InputOpen` / `BadInput`) already carries the path, so surface
+            // it as-is. Earlier files' packets have already been yielded.
             match self.paths.next() {
                 Some(path) => match iter_packets(&path) {
-                    Ok(iter) => self.current = Some(iter),
-                    Err(e) => return Some(Err(e)),
+                    Ok(iter) => {
+                        self.current = Some(iter);
+                        self.current_path = Some(path);
+                    }
+                    Err(e) => {
+                        self.done = true;
+                        return Some(Err(e));
+                    }
                 },
-                None => return None,
+                None => {
+                    self.done = true;
+                    return None;
+                }
             }
         }
     }
@@ -211,6 +246,8 @@ pub fn iter_packets_multi(paths: &[PathBuf]) -> Result<MultiPacketIter> {
     Ok(MultiPacketIter {
         paths: Vec::from(paths).into_iter(),
         current: None,
+        current_path: None,
+        done: false,
     })
 }
 
@@ -532,6 +569,43 @@ mod tests {
             }
             other => panic!("expected InputOpen err for missing file, got {other:?}"),
         }
+    }
+
+    /// M-1 (adversary): a mid-stream decode error must name the offending
+    /// file (EC-004 — the killed-`tcpdump -G` rotation case), not surface a
+    /// path-less error. Two homogeneous LINUX_SLL (113) files pass the
+    /// link-type guard, then fail at decode (only Ethernet decodes); the
+    /// error must be `StreamInFile` naming the first file, and its exit code
+    /// must delegate to the inner `UnsupportedLinkType` (65).
+    #[test]
+    fn mid_stream_error_names_the_offending_file() {
+        let frame = eth_frame();
+        let dir = tempfile::tempdir().unwrap();
+        let pa = dir.path().join("rotated-01.pcap");
+        let pb = dir.path().join("rotated-02.pcap");
+        // Both LINUX_SLL → homogeneous, so the guard passes and we reach the
+        // streaming decode, which rejects the non-Ethernet link type.
+        std::fs::write(&pa, legacy_pcap_bytes(113, 100, &frame)).unwrap();
+        std::fs::write(&pb, legacy_pcap_bytes(113, 200, &frame)).unwrap();
+
+        let mut iter = iter_packets_multi(&[pa, pb]).expect("guard allows homogeneous set");
+        match iter.next() {
+            Some(Err(e @ OtError::StreamInFile { .. })) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("rotated-01.pcap"),
+                    "mid-stream error must name the first file, got: {msg}"
+                );
+                // Exit code delegates to the wrapped UnsupportedLinkType (65).
+                assert_eq!(e.exit_code(), 65, "exit code must delegate to inner error");
+            }
+            other => panic!("expected StreamInFile naming the file, got {other:?}"),
+        }
+        // Latched terminal after the error (fail-fast is iterator-intrinsic).
+        assert!(
+            iter.next().is_none(),
+            "iterator must be terminal after a mid-stream error"
+        );
     }
 
     #[test]
