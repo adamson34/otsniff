@@ -73,9 +73,98 @@ pub struct PacketIter {
 /// the homogeneity guard simply skips them — it only compares determinate
 /// types, so an indeterminate file is never the cause of a rejection.
 //
-// STUB (Red Gate): real header read lands in the green step.
-pub fn peek_link_type(_path: &Path) -> Result<Option<Linktype>> {
-    Ok(None)
+pub fn peek_link_type(path: &Path) -> Result<Option<Linktype>> {
+    use pcap_parser::pcapng::Block;
+
+    let file = File::open(path).map_err(|source| OtError::InputOpen {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut reader = create_reader(1 << 20, file).map_err(|e| OtError::BadInput {
+        path: path.to_path_buf(),
+        reason: format!("{e:?}"),
+    })?;
+    loop {
+        match reader.next() {
+            Ok((offset, block)) => {
+                // Determine the link type (or that it's not yet determinable)
+                // from this block, then consume it before returning.
+                let verdict: Option<Option<Linktype>> = match &block {
+                    // Legacy pcap: the global header always comes first and
+                    // carries the link type in `network`.
+                    PcapBlockOwned::LegacyHeader(hdr) => Some(Some(hdr.network)),
+                    PcapBlockOwned::NG(ng) => match ng {
+                        // pcapng: the IDB declares the link type.
+                        Block::InterfaceDescription(idb) => Some(Some(idb.linktype)),
+                        // A packet block before any IDB → indeterminate.
+                        Block::EnhancedPacket(_) | Block::SimplePacket(_) => Some(None),
+                        // Keep scanning past the section header (and anything
+                        // else) until we reach the IDB or a packet block.
+                        _ => None,
+                    },
+                    // A legacy record before its header shouldn't happen; if it
+                    // does, treat the type as indeterminate rather than panic.
+                    PcapBlockOwned::Legacy(_) => Some(None),
+                };
+                reader.consume(offset);
+                if let Some(result) = verdict {
+                    return Ok(result);
+                }
+            }
+            Err(PcapError::Eof) => return Ok(None),
+            Err(PcapError::Incomplete(_)) => {
+                // Couldn't read far enough to classify; treat as indeterminate.
+                if reader.refill().is_err() {
+                    return Ok(None);
+                }
+            }
+            // A genuine parse error here is deferred to the streaming path,
+            // which raises the authoritative error after earlier files'
+            // packets have been yielded. The guard is best-effort.
+            Err(_) => return Ok(None),
+        }
+    }
+}
+
+/// Link-layer homogeneity pre-flight (BC-1.01.004).
+///
+/// Compares only *determinate* link types. The first determinate type
+/// becomes the anchor; any later file whose determinate type differs is a
+/// hard error. Files we cannot peek here (missing/unreadable) or whose type
+/// is indeterminate are skipped — the streaming path raises the authoritative
+/// per-file error (after earlier files' packets have been yielded), and
+/// indeterminate pcapng captures are intentionally not rejected.
+fn check_link_homogeneity(paths: &[PathBuf]) -> Result<()> {
+    let mut anchor: Option<(PathBuf, Linktype)> = None;
+    for path in paths {
+        let lt = match peek_link_type(path) {
+            Ok(Some(lt)) => lt,
+            Ok(None) => continue, // indeterminate — not the guard's concern
+            Err(_) => continue,   // unreadable here — deferred to streaming
+        };
+        match &anchor {
+            None => anchor = Some((path.clone(), lt)),
+            Some((anchor_path, anchor_lt)) => {
+                if lt != *anchor_lt {
+                    return Err(OtError::MixedLinkTypes {
+                        first_file: basename_of(anchor_path),
+                        first_type: format!("{anchor_lt}"),
+                        second_file: basename_of(path),
+                        second_type: format!("{lt}"),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Basename of a path (F-ADV-P2-009 basename-only), falling back to the full
+/// display string only when there is no final component.
+fn basename_of(path: &Path) -> String {
+    path.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 /// Iterator that concatenates the packet streams of several captures in
@@ -116,10 +205,13 @@ impl Iterator for MultiPacketIter {
 /// Build a [`MultiPacketIter`] over `paths` after a link-layer homogeneity
 /// pre-flight (S-9.01 / BC-1.01.003, BC-1.01.004).
 //
-// STUB (Red Gate): yields nothing and performs no guard until the green step.
-pub fn iter_packets_multi(_paths: &[PathBuf]) -> Result<MultiPacketIter> {
+pub fn iter_packets_multi(paths: &[PathBuf]) -> Result<MultiPacketIter> {
+    // Pre-flight: reject a set with differing determinate link types before
+    // streaming any packets (BC-1.01.004). A single-file list has nothing to
+    // compare, so the guard is a no-op there.
+    check_link_homogeneity(paths)?;
     Ok(MultiPacketIter {
-        paths: Vec::new().into_iter(),
+        paths: paths.to_vec().into_iter(),
         current: None,
     })
 }
