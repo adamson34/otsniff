@@ -359,8 +359,18 @@ fn run_diff(args: DiffArgs) -> Result<()> {
 
     // Parse both PCAPs. `diff` stays single-file per side (S-9.01 is
     // analyze-only); pass a 1-element slice to the generalized helper.
-    let base_obs = analyze(std::slice::from_ref(&baseline_pcap), &ot_subnets, false, None)?;
-    let curr_obs = analyze(std::slice::from_ref(&current_pcap), &ot_subnets, false, None)?;
+    let base_obs = analyze(
+        std::slice::from_ref(&baseline_pcap),
+        &ot_subnets,
+        false,
+        None,
+    )?;
+    let curr_obs = analyze(
+        std::slice::from_ref(&current_pcap),
+        &ot_subnets,
+        false,
+        None,
+    )?;
 
     // F-ADV-P4-010: validate map coverage of observed hosts. If the operator
     // swapped --baseline-map and --current-map, or supplied a stale map from

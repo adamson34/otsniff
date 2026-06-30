@@ -86,7 +86,7 @@ impl OtError {
             Self::InputOpen { .. } | Self::BadInput { .. } => 2,
             // Both are bad-input conditions in the data sense → EX_DATAERR.
             Self::UnsupportedLinkType(_) | Self::MixedLinkTypes { .. } => 65, // EX_DATAERR
-            Self::WriteOutput { .. } => 73,     // EX_CANTCREAT
+            Self::WriteOutput { .. } => 73,                                   // EX_CANTCREAT
             // F-ADV-P2-004: distinct exit code so CI scripts can detect a
             // privacy-invariant trip without grepping stderr. 75 = EX_TEMPFAIL
             // in sysexits.h — semantically "the action couldn't be completed

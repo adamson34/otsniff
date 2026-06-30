@@ -72,7 +72,6 @@ pub struct PacketIter {
 /// captures as Ethernet downstream (matching `decode_block`'s default) and
 /// the homogeneity guard simply skips them — it only compares determinate
 /// types, so an indeterminate file is never the cause of a rejection.
-//
 pub fn peek_link_type(path: &Path) -> Result<Option<Linktype>> {
     use pcap_parser::pcapng::Block;
 
@@ -204,14 +203,13 @@ impl Iterator for MultiPacketIter {
 
 /// Build a [`MultiPacketIter`] over `paths` after a link-layer homogeneity
 /// pre-flight (S-9.01 / BC-1.01.003, BC-1.01.004).
-//
 pub fn iter_packets_multi(paths: &[PathBuf]) -> Result<MultiPacketIter> {
     // Pre-flight: reject a set with differing determinate link types before
     // streaming any packets (BC-1.01.004). A single-file list has nothing to
     // compare, so the guard is a no-op there.
     check_link_homogeneity(paths)?;
     Ok(MultiPacketIter {
-        paths: paths.to_vec().into_iter(),
+        paths: Vec::from(paths).into_iter(),
         current: None,
     })
 }
@@ -405,7 +403,7 @@ mod tests {
         out.extend_from_slice(&0u32.to_le_bytes()); // sigfigs
         out.extend_from_slice(&65535u32.to_le_bytes()); // snaplen
         out.extend_from_slice(&network.to_le_bytes()); // network (link type)
-        // Record header.
+                                                       // Record header.
         out.extend_from_slice(&ts_sec.to_le_bytes()); // ts_sec
         out.extend_from_slice(&0u32.to_le_bytes()); // ts_usec
         out.extend_from_slice(&(frame.len() as u32).to_le_bytes()); // incl_len
