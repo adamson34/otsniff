@@ -3,7 +3,7 @@ artifact_type: behavioral-contract-index
 project: otsniff
 generated: 2026-05-18
 status: draft (brownfield-recovered)
-total_bcs: 113  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004; S-8.01 added BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013; S-9.01 added BC-1.01.003, BC-1.01.004, BC-7.01.005; S-10.01 added BC-4.01.004, BC-4.01.005
+total_bcs: 115  # all numbered BCs across S.0..S.9 — S-1.05 folded the 15 BC-AUDIT-* contracts into the numbered space (alias table preserved for legacy refs); S-2.02 added BC-1.03.007; S-2.05 added BC-1.03.005 and BC-3.01.005; S-2.06 added BC-1.03.006 and BC-3.04.004; S-2.07 added BC-1.04.003 and BC-3.04.005; S-2.08 added BC-1.04.004 and BC-3.04.006; S-2.11 added BC-1.02.009 and BC-3.03.006; S-5.01 added BC-9.04.001; S-5.02 added BC-6.04.001; S-5.07 added BC-8.01.005; S-6.01 added BC-5.03.001; S-5.03 added BC-6.05.001, BC-6.05.002, BC-6.05.003, BC-3.07.001, BC-7.01.004; S-8.01 added BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013; S-9.01 added BC-1.01.003, BC-1.01.004, BC-7.01.005; S-10.01 added BC-4.01.004, BC-4.01.005; S-11.01 added BC-3.08.004, BC-3.08.005
 origin: recovered
 canonical_source: .factory/semport/otsniff/otsniff-pass-3-behavioral-contracts.md
 deviations:
@@ -158,6 +158,15 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-9.03.001 `otsniff rules` prints the catalog (HIGH)
 - BC-9.04.001 Verbose-mode (-v) parse loop emits periodic progress to stderr every >= 100,000 packets OR >= 10 MB read; rate-limited to one emission per 2 seconds via injectable Clock trait; final summary always emitted via finish() (HIGH, added S-5.01 v0.4.0)
 - BC-9.06.001 `analyze --review-scrub` pauses for human eyeball (HIGH, added S-5.04 v0.4.0)
+
+### Diff (`src/diff.rs`, cross-cutting findings/render/CLI)
+
+The diff-core / renderer BCs from S-6.02 / S-6.03 (BC-3.08.001..003,
+BC-9.05.001, BC-8.04.001) are referenced in STORY-INDEX but were not added to
+this master list during the brownfield retrofit. New diff BCs are recorded here.
+
+- BC-3.08.004 Diff flow-shift rate normalization: `compute_with_multiplier` derives each side's capture-window duration from `Observations` `min_ts`/`max_ts` (`window_secs`: `Some(secs)` only when both present and `>= 1.0s`, else `None`); when BOTH sides have a usable window the both-sides flow-shift ratio is computed on rates (`bytes / window_secs`) so equal-rate flows over unequal-duration captures are no longer flagged; when either window is `None` it falls back to the existing raw byte ratio; records `rate_normalized: bool` + `baseline_window_secs`/`current_window_secs: Option<f64>` on `Diff`; the `lo == 0` skip and sort orders are unchanged (HIGH, added S-11.01 v0.6.0)
+- BC-3.08.005 Diff capture-window-mismatch surfacing: when a side's window is degenerate (`rate_normalized == false`) or the two usable windows differ by `> 2×`, `run_diff` emits a stderr `WARNING:` and the diff HTML+MD reports render a conditional banner (mirroring `no-deltas-banner`) stating the window sizes and whether flow-shift ratios are rate-normalized or raw; comparable normalized windows (`<= 2×`) emit neither (HIGH, added S-11.01 v0.6.0)
 
 ## Legacy audit-IDs alias table
 

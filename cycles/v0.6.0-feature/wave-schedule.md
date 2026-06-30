@@ -23,7 +23,22 @@ full per-story pipeline with its own wave gate.
 |---|---|---|---|---|---|
 | 1 | S-8.01 — mDNS / NetBIOS-NS / LLMNR hostname extraction | P0-9 | 5 | BC-1.02.010..013 | ✅ gated (PR #138, merge 6334e36) |
 | 2 | S-9.01 — Multi-PCAP / rotated-capture analyze | P0-10 | 5 | BC-1.01.003, BC-1.01.004, BC-7.01.005 | ✅ gated (PR #140, merge 030a279) |
-| 3 | S-10.01 — Capture-window sanity warning | P1-9 | 5 | BC-4.01.004, BC-4.01.005 | in-progress (phase-3 delivery) |
+| 3 | S-10.01 — Capture-window sanity warning | P1-9 | 5 | BC-4.01.004, BC-4.01.005 | ✅ gated (PR #143, merge 668d704) |
+| 4 | S-11.01 — Diff capture-window normalization | P1-11 | 5 | BC-3.08.004, BC-3.08.005 | in-progress (phase-3 delivery) |
+
+## Wave 4 — S-11.01
+
+**Scope.** Rate-normalize `otsniff diff` flow-shift detection by each side's
+capture-window duration (from S-10.01's `min_ts`/`max_ts`) so steady-state flows
+over unequal-duration captures aren't reported as duration-artifact "shifts";
+fall back to raw byte ratio when a window is degenerate (<1s); warn (stderr +
+diff-report banner) on a >2× window mismatch or a degenerate window.
+
+**Touches.** `src/diff.rs::compute_with_multiplier` (rate normalization + new
+`Diff` fields), `src/cli.rs::run_diff` (stderr WARNING), `templates/diff.html` +
+`src/report_md.rs` (conditional banner). **Depends on S-10.01** (the
+`min_ts`/`max_ts` duration source). Intentionally changes diff snapshots (ratio
+is now rate-based); analyze/scrub output is unaffected.
 
 ## Wave 3 — S-10.01
 
