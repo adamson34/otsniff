@@ -521,7 +521,7 @@ contributed to which event), `pcap.rs` write-half. **Deps:** small
 refactor to retain `pcap_offset: u64` on `CredEvent` / `ModbusEvent`
 etc. so we know which bytes to write out.
 
-### P1-9: Capture-window sanity warning (S)
+### P1-9: Capture-window sanity warning (S) — ✅ shipped (#143, S-10.01)
 
 Surface explicit warnings when the input PCAP has degenerate timestamps —
 all-zero (epoch 1970), entire capture window <1s, or non-monotonic
