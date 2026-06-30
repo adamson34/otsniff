@@ -5,7 +5,7 @@ cycle: v0.4.0-feature
 phase: 2
 generated: 2026-05-11T20:50:00Z
 producer: phase-2-story-decomposition (inline)
-total_scenarios: 9
+total_scenarios: 10
 status: draft
 ---
 
@@ -29,6 +29,7 @@ status: draft
 | HS-007 | 3 | E-5 | behavioral-subtleties | yes | AI-augmented findings dedupe against rule findings |
 | HS-008 | 3 | E-6 | behavioral-subtleties | yes | `otsniff diff` reports an unchanged host as unchanged |
 | HS-009 | 1 | E-5 | edge-case-combinations | should | Progress + heartbeat output never contains real identifiers |
+| HS-010 | 2 | E-9 | integration-boundaries | yes | Multi-PCAP analyze unions captures, guards link types, attributes per file (v0.6.0) |
 
 ## Per-wave summary
 
@@ -50,6 +51,7 @@ status: draft
 | BC-5.03.001 (stable pseudonyms) | HS-008 |
 | BC-9.04.001 / BC-6.04.001 (progress + heartbeat) | HS-009 |
 | BC-0.01.002 (reject non-PCAP) | HS-006 |
+| BC-1.01.003/004 + BC-7.01.005 (multi-PCAP ingest, link guard, audit attribution) | HS-010 |
 
 ## Categorical distribution
 
@@ -58,7 +60,7 @@ status: draft
 | behavioral-subtleties | 3 (HS-001, HS-007, HS-008) |
 | security-probes | 2 (HS-003, HS-005) |
 | edge-case-combinations | 2 (HS-006, HS-009) |
-| integration-boundaries | 1 (HS-002) |
+| integration-boundaries | 2 (HS-002, HS-010) |
 | ci-integration | 1 (HS-004) |
 
 ## Implementation walls
