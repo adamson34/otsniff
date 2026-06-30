@@ -809,6 +809,92 @@ fn s_10_01_analyze_sane_pcap_emits_no_capture_warning() {
         .stderr(predicate::str::contains("misleading").not());
 }
 
+// ── S-11.01: diff capture-window normalization warning (AC-003) ──────────────
+
+/// Scrub map covering the two IPs in `eth_ipv4_udp_frame()`
+/// (10.10.0.1 → 10.10.0.2). Written to disk for the `diff` subcommand.
+fn window_scrub_map() -> &'static str {
+    r#"{"version":1,"created_at":"2026-05-07T12:00:00Z","ips":{"host_001":"10.10.0.1","host_002":"10.10.0.2"},"macs":{},"names":{}}"#
+}
+
+/// AC-003: two captures whose windows differ by > 2× (3600s vs 1200s) make
+/// `diff` emit the rate-normalized window-mismatch WARNING on stderr.
+#[test]
+fn s_11_01_diff_mismatched_windows_warns_on_stderr() {
+    let tmp = TempDir::new().unwrap();
+    let frame = eth_ipv4_udp_frame();
+    // baseline spans 3600s, current spans 1200s → 3× difference.
+    let base = tmp.path().join("base.pcap");
+    std::fs::write(
+        &base,
+        legacy_pcap(&frame, 2, &[1_700_000_000, 1_700_003_600]),
+    )
+    .unwrap();
+    let curr = tmp.path().join("curr.pcap");
+    std::fs::write(
+        &curr,
+        legacy_pcap(&frame, 2, &[1_700_000_000, 1_700_001_200]),
+    )
+    .unwrap();
+    let map = tmp.path().join("map.json");
+    std::fs::write(&map, window_scrub_map()).unwrap();
+    let out = tmp.path().join("diff.md");
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["diff"])
+        .arg(&base)
+        .arg(&curr)
+        .arg("--baseline-map")
+        .arg(&map)
+        .arg("--current-map")
+        .arg(&map)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("capture windows differ"));
+}
+
+/// AC-003: two captures whose windows are comparable (1000s vs 1500s, < 2×)
+/// emit NO window-mismatch / degenerate WARNING.
+#[test]
+fn s_11_01_diff_comparable_windows_no_warning() {
+    let tmp = TempDir::new().unwrap();
+    let frame = eth_ipv4_udp_frame();
+    let base = tmp.path().join("base.pcap");
+    std::fs::write(
+        &base,
+        legacy_pcap(&frame, 2, &[1_700_000_000, 1_700_001_000]),
+    )
+    .unwrap();
+    let curr = tmp.path().join("curr.pcap");
+    std::fs::write(
+        &curr,
+        legacy_pcap(&frame, 2, &[1_700_000_000, 1_700_001_500]),
+    )
+    .unwrap();
+    let map = tmp.path().join("map.json");
+    std::fs::write(&map, window_scrub_map()).unwrap();
+    let out = tmp.path().join("diff.md");
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["diff"])
+        .arg(&base)
+        .arg(&curr)
+        .arg("--baseline-map")
+        .arg(&map)
+        .arg("--current-map")
+        .arg(&map)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("capture windows differ").not())
+        .stderr(predicate::str::contains("capture window is missing").not());
+}
+
 #[test]
 fn unscrub_strict_mode_fails_on_unknown_token() {
     let tmp = TempDir::new().unwrap();

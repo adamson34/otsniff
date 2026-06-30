@@ -186,6 +186,17 @@ pub struct Diff {
     /// JSON output otherwise (`skip_serializing_if`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub segmentation: Option<SegmentationDrift>,
+    /// **S-11.01:** `true` iff the flow-shift ratios were computed on per-second
+    /// rates (bytes/sec) because BOTH capture windows were usable. `false` ⇒ a
+    /// degenerate (missing / sub-second) window on at least one side forced the
+    /// fallback to raw byte ratios (the pre-S-11.01 behavior).
+    pub rate_normalized: bool,
+    /// **S-11.01:** baseline capture-window duration in seconds. `None` when the
+    /// window is missing or sub-second (degenerate; see [`window_secs`]).
+    pub baseline_window_secs: Option<f64>,
+    /// **S-11.01:** current capture-window duration in seconds. `None` when the
+    /// window is missing or sub-second.
+    pub current_window_secs: Option<f64>,
 }
 
 impl Default for Diff {
@@ -202,7 +213,31 @@ impl Default for Diff {
             flows_gone: Vec::new(),
             flow_shift_multiplier: DEFAULT_FLOW_SHIFT_MULTIPLIER,
             segmentation: None,
+            rate_normalized: false,
+            baseline_window_secs: None,
+            current_window_secs: None,
         }
+    }
+}
+
+/// **S-11.01:** the usable capture-window duration of a capture, in seconds.
+///
+/// Returns `Some(secs)` only when BOTH `min_ts`/`max_ts` are present AND the
+/// span is at least 1 second. A missing, zero, or sub-second window is the
+/// S-10.01 "degenerate" case — it cannot serve as a rate-normalization
+/// denominator, so it yields `None` and the caller falls back to raw byte
+/// ratios.
+fn window_secs(obs: &Observations) -> Option<f64> {
+    match (obs.min_ts, obs.max_ts) {
+        (Some(min), Some(max)) => {
+            let s = (max - min).num_milliseconds() as f64 / 1000.0;
+            if s >= 1.0 {
+                Some(s)
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 
@@ -672,6 +707,11 @@ pub fn compute_with_multiplier(
     let all_flow_keys: HashSet<&FlowPseudoKey> =
         base_flows.keys().chain(curr_flows.keys()).collect();
 
+    // ---- S-11.01: per-side capture windows for rate normalization --------
+    let baseline_window_secs = window_secs(baseline.observations);
+    let current_window_secs = window_secs(current.observations);
+    let rate_normalized = baseline_window_secs.is_some() && current_window_secs.is_some();
+
     let multiplier = flow_shift_multiplier;
 
     let mut flows_new: Vec<FlowSummary> = Vec::new();
@@ -764,6 +804,9 @@ pub fn compute_with_multiplier(
         flows_gone,
         flow_shift_multiplier,
         segmentation,
+        rate_normalized,
+        baseline_window_secs,
+        current_window_secs,
     }
 }
 
@@ -1424,5 +1467,158 @@ mod tests {
         assert_eq!(vref.src_pseudonym, "host_001");
         assert_ne!(vref.dst_pseudonym, "203.0.113.45");
         assert!(vref.dst_pseudonym.starts_with("unmapped_"));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // S-11.01: diff capture-window normalization
+    // ──────────────────────────────────────────────────────────────────────
+
+    use crate::observe::{FlowKey, FlowObs};
+    use std::collections::HashSet as StdHashSet;
+
+    /// Build an `Observations` carrying a single `10.9.0.1 -> 10.9.0.2:502/tcp`
+    /// flow of `bytes`, with the capture window set from `window` seconds
+    /// (`None` ⇒ leave `min_ts`/`max_ts` unset = degenerate).
+    fn obs_with_flow(bytes: u64, window: Option<f64>) -> Observations {
+        let src: std::net::IpAddr = "10.9.0.1".parse().unwrap();
+        let dst: std::net::IpAddr = "10.9.0.2".parse().unwrap();
+        let t0 = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let mut obs = Observations::default();
+        if let Some(w) = window {
+            obs.min_ts = Some(t0);
+            obs.max_ts = Some(t0 + chrono::Duration::milliseconds((w * 1000.0) as i64));
+        }
+        let key = FlowKey {
+            src,
+            dst,
+            dst_port: 502,
+            proto: 6,
+        };
+        obs.flows.insert(
+            "10.9.0.1->10.9.0.2:502/6".to_string(),
+            FlowObs {
+                key,
+                packets: 1,
+                bytes,
+                first_seen: t0,
+                last_seen: t0,
+                label: None,
+                unique_src_ports: StdHashSet::new(),
+            },
+        );
+        obs
+    }
+
+    fn map_910() -> ScrubMap {
+        scrub_map(&[("host_910", "10.9.0.1"), ("host_911", "10.9.0.2")])
+    }
+
+    /// AC-002 worked example: a steady flow with 2× bytes over a 2× window is a
+    /// pure duration artifact. The raw ratio (2.0) would flag it, but the
+    /// rate ratio is 1.0 → NOT flagged. `rate_normalized` is `true`.
+    #[test]
+    fn s_11_01_worked_example_steady_flow_not_flagged_when_rate_normalized() {
+        let base = obs_with_flow(2000, Some(3600.0)); // 2X bytes over 3600s
+        let curr = obs_with_flow(1000, Some(1800.0)); // X bytes over 1800s
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(
+            diff.rate_normalized,
+            "both windows usable ⇒ rate_normalized must be true"
+        );
+        assert!(
+            diff.flow_shifts.is_empty(),
+            "rate ratio is 1.0 (2X/3600 vs X/1800) ⇒ steady flow must NOT be flagged; \
+             got {:?}",
+            diff.flow_shifts
+        );
+        assert_eq!(diff.baseline_window_secs, Some(3600.0));
+        assert_eq!(diff.current_window_secs, Some(1800.0));
+    }
+
+    /// AC-002 / EC-005: a flow whose true *rate* doubled (same windows) is still
+    /// flagged — a real behavioral shift is preserved.
+    #[test]
+    fn s_11_01_real_rate_doubled_still_flagged() {
+        let base = obs_with_flow(1000, Some(1800.0));
+        let curr = obs_with_flow(2000, Some(1800.0)); // same window, 2× rate
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(diff.rate_normalized, "both windows usable ⇒ rate_normalized");
+        assert_eq!(
+            diff.flow_shifts.len(),
+            1,
+            "a genuine 2× rate increase must still be flagged"
+        );
+        assert!(
+            (diff.flow_shifts[0].ratio - 2.0).abs() < 1e-9,
+            "rate ratio for 2000/1800 vs 1000/1800 should be 2.0, got {}",
+            diff.flow_shifts[0].ratio
+        );
+    }
+
+    /// AC-002 / EC-003: a degenerate window on one side forces the raw-byte
+    /// fallback — `rate_normalized` is `false` and a 2× byte change is flagged.
+    #[test]
+    fn s_11_01_degenerate_window_falls_back_to_raw_ratio() {
+        let base = obs_with_flow(1000, None); // no timestamps ⇒ degenerate
+        let curr = obs_with_flow(2000, Some(1800.0));
+        let map = map_910();
+        let diff = compute(
+            DiffInput {
+                observations: &base,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+            DiffInput {
+                observations: &curr,
+                map: &map,
+                findings: &[],
+                conformance: None,
+            },
+        );
+        assert!(
+            !diff.rate_normalized,
+            "a None window on one side ⇒ rate_normalized must be false"
+        );
+        assert_eq!(
+            diff.flow_shifts.len(),
+            1,
+            "raw fallback: a 2× byte change must still be flagged"
+        );
+        assert!(
+            (diff.flow_shifts[0].ratio - 2.0).abs() < 1e-9,
+            "raw ratio for 2000/1000 should be 2.0, got {}",
+            diff.flow_shifts[0].ratio
+        );
+        assert_eq!(diff.baseline_window_secs, None);
+        assert_eq!(diff.current_window_secs, Some(1800.0));
     }
 }

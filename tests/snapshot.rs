@@ -3698,6 +3698,11 @@ fn build_diff_fixture() -> Diff {
         flows_gone: vec![flow_gone],
         flow_shift_multiplier: 2.0,
         segmentation: None,
+        // S-11.01: normalized + comparable windows (equal) — no banner, just the
+        // informational "Capture windows" line.
+        rate_normalized: true,
+        baseline_window_secs: Some(3600.0),
+        current_window_secs: Some(3600.0),
     }
 }
 
