@@ -24,6 +24,24 @@ pub enum OtError {
     #[error("unsupported link type {0:?} (only Ethernet is supported in v0.1)")]
     UnsupportedLinkType(String),
 
+    /// **S-9.01 (BC-1.01.004):** the multi-file `analyze a.pcap b.pcap …`
+    /// homogeneity guard rejects a set whose files declare *different
+    /// determinate* link-layer types. Concatenating captures of differing
+    /// L2 framing would silently misparse, so we fail early and clearly,
+    /// naming the offending files + types and suggesting the fix. Maps to
+    /// `EX_DATAERR` (65), the same class as a bad-input condition.
+    #[error(
+        "cannot merge captures with differing link-layer types: \
+         {first_file}={first_type}, {second_file}={second_type}; \
+         merge only captures that share the same link-layer type"
+    )]
+    MixedLinkTypes {
+        first_file: String,
+        first_type: String,
+        second_file: String,
+        second_type: String,
+    },
+
     #[error("could not write output '{path}': {source}")]
     WriteOutput {
         path: PathBuf,
@@ -66,7 +84,8 @@ impl OtError {
     pub fn exit_code(&self) -> i32 {
         match self {
             Self::InputOpen { .. } | Self::BadInput { .. } => 2,
-            Self::UnsupportedLinkType(_) => 65, // EX_DATAERR
+            // Both are bad-input conditions in the data sense → EX_DATAERR.
+            Self::UnsupportedLinkType(_) | Self::MixedLinkTypes { .. } => 65, // EX_DATAERR
             Self::WriteOutput { .. } => 73,     // EX_CANTCREAT
             // F-ADV-P2-004: distinct exit code so CI scripts can detect a
             // privacy-invariant trip without grepping stderr. 75 = EX_TEMPFAIL
@@ -93,6 +112,22 @@ mod tests {
             reason: "y".into(),
         };
         assert_eq!(e.exit_code(), 2);
+    }
+
+    #[test]
+    fn mixed_link_types_is_exit_65() {
+        let e = OtError::MixedLinkTypes {
+            first_file: "a.pcap".into(),
+            first_type: "ETHERNET".into(),
+            second_file: "b.pcap".into(),
+            second_type: "LINUX_SLL".into(),
+        };
+        assert_eq!(e.exit_code(), 65);
+        let msg = e.to_string();
+        assert!(msg.contains("a.pcap"));
+        assert!(msg.contains("b.pcap"));
+        assert!(msg.contains("ETHERNET"));
+        assert!(msg.contains("LINUX_SLL"));
     }
 
     #[test]
