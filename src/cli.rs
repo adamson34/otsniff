@@ -1221,6 +1221,39 @@ fn run_rules(args: RulesArgs) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// S-9.01 AC-005: single-file source labels are byte-identical to the
+    /// pre-S-9.01 expressions (HTML = full-path display, MD = basename), and
+    /// the multi-file label is a basename-only join capped at 3 names then
+    /// `… (+N more)` (EC-008). Locks the privacy-preserving format.
+    #[test]
+    fn source_labels_single_file_identical_and_multi_file_capped() {
+        let one = [PathBuf::from("/srv/plant/caps/acme-line3.pcap")];
+        // Single-file HTML == old `args.input.display().to_string()`.
+        assert_eq!(
+            html_source_label(&one),
+            "/srv/plant/caps/acme-line3.pcap".to_string()
+        );
+        // Single-file MD == old basename via `file_name()`.
+        assert_eq!(md_source_label(&one), "acme-line3.pcap".to_string());
+
+        // Two/three files: plain comma-join of basenames (no path leak).
+        let three: Vec<PathBuf> = ["/a/cap-01.pcap", "/b/cap-02.pcap", "/c/cap-03.pcap"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        let label3 = md_source_label(&three);
+        assert_eq!(label3, "cap-01.pcap, cap-02.pcap, cap-03.pcap");
+        assert!(!label3.contains('/'), "multi-file label leaked a path");
+
+        // Four+ files: first 3 names then `… (+N more)`.
+        let five: Vec<PathBuf> = (1..=5)
+            .map(|n| PathBuf::from(format!("/d/cap-{n:02}.pcap")))
+            .collect();
+        let label5 = html_source_label(&five);
+        assert_eq!(label5, "cap-01.pcap, cap-02.pcap, cap-03.pcap … (+2 more)");
+        assert!(!label5.contains("/d/"), "capped label leaked a path");
+    }
+
     /// AC-005 regression-lockdown: ot_or_default(&[]) must return exactly
     /// the three IPv4 RFC1918 ranges — no IPv6, no extras, no missing.
     #[test]
