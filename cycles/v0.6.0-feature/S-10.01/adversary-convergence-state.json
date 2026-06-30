@@ -1,0 +1,33 @@
+{
+  "story_id": "S-10.01",
+  "cycle": "v0.6.0-feature",
+  "wave": 3,
+  "convergence_rule": "clean_streak >= 3 AND last_classification == NITPICK_ONLY|CLEAN",
+  "clean_streak": 3,
+  "converged": true,
+  "converged_at_pass": 3,
+  "convergence_rationale": "Passes 1, 2, 3 all CONVERGED (no blocker/major), novelty LOW, on frozen production code (implemented at ffe498a; only a test tightening 436b064 since). Each independently re-derived: assess rule logic + mutual exclusion + no-panic + boundaries; observer min/max/monotonic tracking + manual Default (26 fields cross-checked); AC-005 byte-identity across HTML (the {% endif -%} trim verified by direct snapshot comparison), MD, and JSON (Observations never serialized to a user surface); surfacing in both run_analyze and run_scrub; constant-string privacy; EC-001..008. Full suite re-verified green by orchestrator (659 tests, 0 failed). Only non-blocking observations remain (dead-but-spec-faithful guard, contained serde fields, MD warning entering the AI prompt for degenerate captures — sanctioned by the Scrub Stance).",
+  "last_classification": "CLEAN",
+  "production_code_frozen_at": "ffe498a (implementation); only an additive test tightening 436b064 since",
+  "passes": [
+    {
+      "pass": 1,
+      "classification": "CLEAN",
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "findings": {"blocking": 0, "major": 0, "observations": ["LOW: epoch message wording for the sub-1970-second case (spec-conformant string, theoretical)", "LOW: sane-capture cli test asserted absence of any WARNING, coupling to capture-source guard"]},
+      "verification": "All 6 areas cleared with cited lines: assess rules + mutual exclusion + no-panic, observer min/max/monotonic + manual Default (26 fields cross-checked), AC-005 byte-identity (incl. the serde-not-skip fields are safe because JSON serializes inventory+findings not Observations), surfacing in run_analyze+run_scrub, privacy constant-strings, EC-001..008.",
+      "response": "obs-2 fixed: tightened the sane-capture test to target capture-sanity messages ('unreliable'/'misleading') not any WARNING (commit 436b064, test-only). obs-1 left (spec-conformant, 1970-only theoretical)."
+    },
+    {
+      "pass": 2,
+      "classification": "CLEAN",
+      "base": "branch tip with test tightening (436b064)",
+      "verdict": "CONVERGED",
+      "novelty": "LOW",
+      "findings": {"blocking": 0, "major": 0, "observations": ["dead-but-spec-faithful guard total_packets>=1 (always true after the max_ts early return; matches AC formula verbatim)", "min_ts/max_ts/timestamps_monotonic are plain Serialize not #[serde(skip)] — verified NOT reachable by any user-visible surface (only inventory+findings serialized)"]},
+      "verification": "Independent fresh-context re-derivation: rule logic + boundaries, observer tracking + manual Default field-by-field, byte-identity (clean .snap files absent from change set), surfacing both call sites, privacy, EC-001..008 incl. SimplePacket→epoch dependency.",
+      "response": "Both observations informational, no action. Production code frozen."
+    }
+  ]
+}
