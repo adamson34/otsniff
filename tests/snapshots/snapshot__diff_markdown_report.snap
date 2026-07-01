@@ -4,7 +4,7 @@ expression: md
 ---
 # otsniff diff report
 
-_otsniff v0.6.0_
+_otsniff v0.7.0-dev.1_
 
 _Capture windows: baseline 3600s vs current 3600s_
 
