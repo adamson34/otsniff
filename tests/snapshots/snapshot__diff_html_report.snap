@@ -1,6 +1,5 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 3731
 expression: html
 ---
 <!doctype html>
@@ -168,7 +167,7 @@ expression: html
 <div class="brand-header" style="padding-left:1.5rem;padding-right:1.5rem;">
   <div>
     <div class="brand-wordmark">otsniff <span class="brand-sep">/</span> diff</div>
-    <div class="brand-meta">v0.6.0-dev.1</div>
+    <div class="brand-meta">v0.6.0</div>
   </div>
 </div>
 
