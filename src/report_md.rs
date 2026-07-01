@@ -61,6 +61,18 @@ pub fn render_markdown(
         _ => "(no timestamps)".to_string(),
     };
     writeln!(out, "- **Capture window:** {}", span).unwrap();
+    // S-10.01 AC-003: a degenerate time base gets a warning blockquote right
+    // after the capture-window line. When the time base is sane, nothing is
+    // written — keeping clean-capture markdown byte-identical (AC-005).
+    let capture_warnings = crate::capture_sanity::assess(obs);
+    if !capture_warnings.is_empty() {
+        let joined = capture_warnings
+            .iter()
+            .map(|w| w.message())
+            .collect::<Vec<_>>()
+            .join("; ");
+        writeln!(out, "> ⚠ **Capture timestamp warning:** {joined}").unwrap();
+    }
     if let Some(c) = capture_source {
         writeln!(out, "- **Capture source:** {}", c.report_line()).unwrap();
     }
@@ -102,6 +114,19 @@ pub fn render_markdown(
             }
             if let Some(meta) = crate::findings::metadata_for(f.id) {
                 writeln!(out, "**Detection criteria.** {}", meta.trigger).unwrap();
+                writeln!(out).unwrap();
+            }
+            // S-12.01 AC-003: MITRE ATT&CK for ICS techniques, looked up from the
+            // catalog by id (ADR-0014). Rendered only when ≥1 technique maps;
+            // the constant English strings are inert to the scrub layer (EC-004).
+            let mitre = crate::findings::mitre_techniques_for(f.id);
+            if !mitre.is_empty() {
+                let links = mitre
+                    .iter()
+                    .map(|t| format!("[{}]({})", t.label, t.url))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                writeln!(out, "**MITRE ATT&CK for ICS.** {links}").unwrap();
                 writeln!(out).unwrap();
             }
             writeln!(out, "**Recommendation:** {}", f.recommendation).unwrap();
@@ -409,6 +434,88 @@ pub fn render_conformance_section_md(r: &zonewarden::types::ConformanceResult) -
     out
 }
 
+/// Render the "Segmentation drift" markdown section from a
+/// [`crate::diff::SegmentationDrift`] (P1-13). Mirror of the HTML section: a
+/// policy-digest anchor line, a tally table, and three violation-delta lists.
+/// Returned as a standalone fragment so the caller injects it positionally.
+pub fn render_segmentation_drift_md(drift: &crate::diff::SegmentationDrift) -> String {
+    /// Cap on violation rows per list to keep the report readable.
+    const MAX_VIOLATIONS: usize = 10;
+
+    let mut out = String::new();
+    writeln!(out, "## Segmentation drift").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "Policy digest: `{}` — one policy scored both captures; identical on \
+         each side by construction.",
+        drift.policy_digest
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // Tally deltas.
+    writeln!(out, "### Conformance tally").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "| Metric | Baseline | Current | Direction |").unwrap();
+    writeln!(out, "|--------|---------:|--------:|:---------:|").unwrap();
+    for t in &drift.tally {
+        let arrow = match t.current.cmp(&t.baseline) {
+            std::cmp::Ordering::Greater => "▲",
+            std::cmp::Ordering::Less => "▼",
+            std::cmp::Ordering::Equal => "—",
+        };
+        writeln!(
+            out,
+            "| {} | {} | {} | {} |",
+            md_cell(&t.metric),
+            t.baseline,
+            t.current,
+            arrow
+        )
+        .unwrap();
+    }
+    writeln!(out).unwrap();
+
+    let render_list = |out: &mut String, title: &str, refs: &[crate::diff::ViolationRef]| {
+        if refs.is_empty() {
+            return;
+        }
+        writeln!(out, "### {} ({})", title, refs.len()).unwrap();
+        writeln!(out).unwrap();
+        for v in refs.iter().take(MAX_VIOLATIONS) {
+            writeln!(
+                out,
+                "- `{}` · `{}` → `{}:{}/{}` · {}",
+                md_cell(&v.kind),
+                v.src_pseudonym,
+                v.dst_pseudonym,
+                v.dst_port,
+                md_cell(&v.proto),
+                md_cell(&v.severity),
+            )
+            .unwrap();
+        }
+        if refs.len() > MAX_VIOLATIONS {
+            writeln!(out, "- _… and {} more_", refs.len() - MAX_VIOLATIONS).unwrap();
+        }
+        writeln!(out).unwrap();
+    };
+    render_list(
+        &mut out,
+        "New violations — NEW since baseline",
+        &drift.violations_new,
+    );
+    render_list(&mut out, "Resolved violations", &drift.violations_resolved);
+    render_list(
+        &mut out,
+        "Persisting violations",
+        &drift.violations_persisting,
+    );
+
+    out
+}
+
 /// Produces an LLM-friendly markdown report with the same sections as the HTML
 /// diff renderer. All sections sort deterministically; each section defensively
 /// re-sorts its local clone before rendering so the output is self-sufficiently
@@ -422,6 +529,29 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     writeln!(out, "_otsniff v{}_", crate::VERSION).unwrap();
     writeln!(out).unwrap();
 
+    // S-11.01: capture-window informational line + advisory banner (AC-004).
+    if let Some(line) = diff.capture_windows_line() {
+        writeln!(out, "_{line}_").unwrap();
+        writeln!(out).unwrap();
+    }
+    if let Some(banner) = diff.window_banner() {
+        writeln!(out, "> **{banner}**").unwrap();
+        writeln!(out).unwrap();
+    }
+
+    // P1-13: pre-render the drift fragment (empty when no policy was supplied)
+    // and treat any actual drift as a delta so the "no deltas" banner stays honest.
+    let segmentation_md = diff
+        .segmentation
+        .as_ref()
+        .map(render_segmentation_drift_md)
+        .unwrap_or_default();
+    let seg_has_drift = diff
+        .segmentation
+        .as_ref()
+        .map(segmentation_has_drift_md)
+        .unwrap_or(false);
+
     let no_deltas = diff.hosts_new.is_empty()
         && diff.hosts_gone.is_empty()
         && diff.findings_new.is_empty()
@@ -430,7 +560,8 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
         && diff.role_shifts.is_empty()
         && diff.flow_shifts.is_empty()
         && diff.flows_new.is_empty()
-        && diff.flows_gone.is_empty();
+        && diff.flows_gone.is_empty()
+        && !seg_has_drift;
 
     if no_deltas {
         writeln!(
@@ -439,6 +570,10 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
         )
         .unwrap();
         writeln!(out).unwrap();
+        // Still surface the conformance tally when a policy was supplied.
+        if !segmentation_md.is_empty() {
+            out.push_str(&segmentation_md);
+        }
         return out;
     }
 
@@ -710,11 +845,19 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
     if !flow_shifts.is_empty() {
         writeln!(
             out,
-            "## Flow shifts (≥{} volume change)",
-            fmt_multiplier(diff.flow_shift_multiplier)
+            "## Flow shifts (≥{} {} change)",
+            fmt_multiplier(diff.flow_shift_multiplier),
+            diff.flow_shift_basis()
         )
         .unwrap();
         writeln!(out).unwrap();
+        // S-11.01: when ratios are rate-normalized, say so above the table —
+        // including the within-2× band where no mismatch banner is shown — so
+        // the ratio column isn't misread as a raw-byte (volume) change.
+        if let Some(note) = diff.flow_shift_rate_note() {
+            writeln!(out, "_{note}_").unwrap();
+            writeln!(out).unwrap();
+        }
         writeln!(
             out,
             "| Source | Destination | Port | Proto | Baseline bytes | Current bytes | Ratio |"
@@ -783,7 +926,21 @@ pub fn render_diff_markdown(diff: &Diff) -> String {
         writeln!(out).unwrap();
     }
 
+    // P1-13: segmentation drift section (empty when no policy was supplied).
+    if !segmentation_md.is_empty() {
+        out.push_str(&segmentation_md);
+    }
+
     out
+}
+
+/// True when a [`crate::diff::SegmentationDrift`] carries any actual movement
+/// (new/resolved violations, or a changed tally metric). Mirrors the HTML
+/// renderer's `segmentation_has_drift`.
+fn segmentation_has_drift_md(drift: &crate::diff::SegmentationDrift) -> bool {
+    !drift.violations_new.is_empty()
+        || !drift.violations_resolved.is_empty()
+        || drift.tally.iter().any(|t| t.baseline != t.current)
 }
 
 /// C-1 (AC-003): sort a findings slice by a provably total key

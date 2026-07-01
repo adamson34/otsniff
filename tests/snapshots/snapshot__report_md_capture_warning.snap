@@ -1,0 +1,232 @@
+---
+source: tests/snapshot.rs
+expression: md
+---
+# otsniff report
+
+_Source: `<scrubbed>` · Generated: 2026-05-07 12:00:00 UTC · otsniff v0.6.0_
+
+## Summary
+
+- **Packets parsed:** 505
+- **Payload bytes:** 48.6 KB
+- **Hosts seen:** 3 (2 in OT zones)
+- **Findings:** 8
+- **Capture window:** 2026-05-07 12:00:00 UTC → 2026-05-07 12:00:00 UTC
+> ⚠ **Capture timestamp warning:** capture has no real timestamps (all at/before the Unix epoch); time-based findings are unreliable
+
+## Findings
+
+### [CRITICAL] Telnet session observed (cleartext by definition)
+
+1 Telnet packet(s) seen across 1 host(s). Credentials traversing these flows should be considered exposed.
+
+**Evidence (1 sample(s)):**
+```
+PLC-LINE3 (10.10.0.20):23 (1 packet(s))
+```
+
+**Detection criteria.** Fires when any non-empty payload is observed on TCP/23 (src or dst). Telnet has no encryption — every byte of the session including the login is in cleartext, so we don't try to identify the authentication exchange specifically.
+
+**MITRE ATT&CK for ICS.** [T0859 — Valid Accounts](https://attack.mitre.org/techniques/T0859/)
+
+**Recommendation:** Migrate the device(s) to SSH if supported, or place behind a jump host. Rotate any passwords used during the session window.
+
+**Investigation playbook:**
+
+1. Treat any password used during the Telnet sessions to `10.10.0.20:23` as exposed. Plan a rotation with the on-shift engineer for those devices and any account whose credentials may be reused (a Telnet password on a switch is often the same engineer account used elsewhere).
+2. Migrate the listed devices to SSH where they support it. The asset inventory shows which hosts also speak the secure equivalent — use that as the starting list.
+3. For devices without a secure alternative (older Moxa serial servers, legacy HMIs, managed switches that only support Telnet), place behind a jump host on a hardened management VLAN. Document the exception with a revocation date.
+4. Record the credentials-exposed window in the change log so future investigations know which sessions to consider compromised. Capture window: see report header.
+
+_id: `creds.telnet`_
+
+### [CRITICAL] Internet-bound traffic from OT subnets
+
+Saw 1 distinct flow(s) (600 bytes total) from hosts inside the configured OT subnets to public internet addresses. Plant networks should be egress-restricted at the IT/OT boundary.
+
+**Evidence (1 sample(s)):**
+```
+ENG-WS-01 (10.10.0.5) -> 8.8.8.8:80 (tcp, 5 pkts, 600 bytes)
+```
+
+**Detection criteria.** Fires when at least one packet has been seen with a source IP inside a configured `--ot-subnet` and a destination IP that is public (not RFC1918, not link-local, not loopback, not multicast, not broadcast, and not in a documented IPv6 ULA range). Aggregates by the (src, dst, dst_port, proto) tuple; one finding fires regardless of how many flows match.
+
+**MITRE ATT&CK for ICS.** [T0883 — Internet Accessible Device](https://attack.mitre.org/techniques/T0883/)
+
+**Recommendation:** Audit the IT/OT firewall ruleset. OT zones should only egress to specifically allowed update servers and vendor cloud endpoints, brokered through a DMZ with logging. Block, then add explicit allow rules.
+
+**Investigation playbook:**
+
+1. Identify the IT/OT gateway physically. The flows below traverse it — look at the asset inventory for hosts whose MACs appear on both sides of the boundary (a single MAC showing up for an OT IP and a public IP is the gateway interface).
+2. Pull the running config / ruleset from the gateway (firewall, L3 switch, or whatever serves as the OT boundary). Look for an explicit deny-all-by-default with named exceptions. The expected answer for a plant boundary is "deny everything; allow these specific update servers / vendor cloud endpoints / time sources."
+3. Cross-reference each flow in the evidence against that ruleset. Any flow not covered by an explicit allow is either a missing rule or a control gap — both worth fixing.
+4. After the rules are tightened, log the changes in the change-management system and re-capture in 24 hours to confirm the egress is blocked.
+
+_id: `egress.ot_to_internet`_
+
+### [HIGH] SMBv1 traffic on the wire
+
+12 SMBv1 packet(s) seen across 1 host pair(s). SMBv1 is deprecated, blocked by default in modern Windows, and a known exploitation surface (WannaCry / EternalBlue). Its presence indicates legacy clients, legacy servers, or both.
+
+**Evidence (1 sample(s)):**
+```
+ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20):445 (12 SMBv1 packet(s))
+```
+
+**Detection criteria.** Fires when at least one TCP/445 or TCP/139 packet carries the SMB1 magic bytes (`\xFF SMB`) at offset 0 (raw SMB) or offset 4 (after an NBSS session-message header). SMB1 has been deprecated by Microsoft since 2014 and is blocked by default in modern Windows; its presence indicates a legacy client or server. Same protocol family the EternalBlue / WannaCry exploits abused.
+
+**MITRE ATT&CK for ICS.** [T0866 — Exploitation of Remote Services (supporting)](https://attack.mitre.org/techniques/T0866/)
+
+**Recommendation:** Identify the legacy hosts and migrate to SMBv2/v3 or retire. Disable SMB1 via Group Policy on Windows hosts. SMBv1 is the protocol EternalBlue / WannaCry exploited; its presence is a known-bad pattern.
+
+**Investigation playbook:**
+
+1. Identify the hosts physically: `10.10.0.5` and `10.10.0.20`. Walk each MAC to a switch port using the asset inventory's MAC for that host.
+2. For Windows hosts: disable SMB1 via Group Policy (Computer Configuration → Policies → Windows Settings → Security Settings → ...) or PowerShell (`Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol`). After SMB1 is off, a host that legitimately needed it will fail loudly — better than failing silently.
+3. For embedded / OT-class devices that can only speak SMB1 (older Moxa NAS, legacy HMI file shares): isolate on a hardened management VLAN, document the exception with a decommission target date. Do not just leave it on the OT VLAN with no plan.
+4. Patch / decommission known-vulnerable Windows versions (Windows 7, Server 2008 / 2008 R2 without SMB1-disable) that depend on SMB1 for file shares. These are the hosts WannaCry-class malware actually pivoted through.
+5. Audit the OT-zone firewall ruleset for SMB allow rules between zones. SMB / CIFS file transfer should not cross the IT/OT boundary in either direction outside narrow, documented operational paths.
+
+_id: `compat.smbv1`_
+
+### [HIGH] EtherNet/IP CIP engineering-class services observed
+
+1 CIP engineering-class request(s) (Set/Reset/Start/Stop/Forward Open with config) seen across 1 pair(s). These services change controller configuration or run state.
+
+**Evidence (1 sample(s)):**
+```
+ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20) : SendRRData / Stop
+```
+
+**Detection criteria.** Fires when an EtherNet/IP encapsulation request contains a CIP service we classify as engineering — Stop, Reset, Apply Attributes, Forward Close to a controller-class object. Function-code level only; we don't reconstruct CIP path semantics. Like Modbus, ENIP/CIP has no native authentication.
+
+**MITRE ATT&CK for ICS.** [T0858 — Change Operating Mode](https://attack.mitre.org/techniques/T0858/)
+
+**Recommendation:** Limit which engineering workstations can talk to controllers on tcp/44818 + udp/2222. Lock controller keyswitches to RUN/REMOTE-ONLY where possible to refuse program downloads.
+
+**Investigation playbook:**
+
+1. Identify the source host(s) physically: `10.10.0.5`. Use the same MAC-table approach as for the Modbus playbook. Engineering workstations running Studio 5000 / RSLogix or Rockwell Connected Components Workbench are the usual culprits.
+2. Lock controller keyswitches to RUN or REMOTE-ONLY where possible. Allen-Bradley ControlLogix, CompactLogix, and Micro800-series controllers physically refuse program downloads in those positions.
+3. In Studio 5000 (or the equivalent for your platform), pull the controller's audit log and download history for `10.10.0.20`. Look for unauthorized program downloads, online edits, or tag changes during the capture window.
+4. Limit which engineering workstations can reach controllers on tcp/44818 + udp/2222 via switch ACL or firewall rule. Engineering access should be a known-IP allow list, not "everyone on the OT VLAN."
+5. If any unauthorized download is confirmed, treat as a controller-integrity incident. Plan a recovery window with operations to verify the running program against a known-good backup before resuming.
+
+_id: `ics.cip_engineering`_
+
+### [HIGH] Modbus engineering-class commands on the wire
+
+1 write/diagnostic Modbus call(s) observed across 1 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.
+
+**Evidence (1 sample(s)):**
+```
+ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20) : fc=0x05 (Write Single Coil)
+```
+
+**Detection criteria.** Fires when one or more Modbus/TCP requests have a function code that writes or changes device state. Function-code level only — no payload deep-parse. The engineering class includes: 0x05 (Write Single Coil), 0x06 (Write Single Register), 0x0F (Write Multiple Coils), 0x10 (Write Multiple Registers), 0x16 (Mask Write Register), 0x17 (Read/Write Multiple Registers), 0x08 (Diagnostics — includes Restart Communication), 0x15 (Write File Record), and FC 8 sub-function 1 (Force Listen Only Mode). Modbus has no authentication; any host reaching tcp/502 can issue these.
+
+**MITRE ATT&CK for ICS.** [T0836 — Modify Parameter](https://attack.mitre.org/techniques/T0836/), [T0855 — Unauthorized Command Message](https://attack.mitre.org/techniques/T0855/)
+
+**Recommendation:** Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.
+
+**Investigation playbook:**
+
+1. Identify the source host(s) physically: `10.10.0.5`. Run `show mac address-table address <mac>` on the access switch (or your switch vendor's equivalent), then walk the cable. The asset inventory in this report has the MAC for each host.
+2. Ask the on-shift control engineer whether `10.10.0.5` is the authorized Modbus master for `10.10.0.20`. Common authorized masters: SCADA servers, Niagara N4 supervisors, RTUs polling downstream PLCs. If yes, the finding is expected — but the host hygiene (other ports open on the asset inventory) is worth a separate look.
+3. Pull session / event logs from `10.10.0.20`. Most controllers can show which coil and register addresses were written, with timestamps. Cross-reference against change-management tickets covering the capture window.
+4. If the source is not an authorized writer, do NOT block at the switch yet. An unexpected ACL on a Modbus path is an availability event. Coordinate with operations first — schedule the change, run it past the control engineer.
+5. Once the unauthorized path is confirmed: ACL the switch port (or VLAN) so only the authorized writer can reach tcp/502 on the target controllers. Consider Modbus-aware filtering (DPI) in front of safety-critical PLCs.
+
+_id: `ics.modbus_writes`_
+
+### [HIGH] S7Comm engineering-class commands on the wire
+
+1 S7 engineering call(s) — 1 download op(s) across 1 client→server pair(s). S7Comm has no authentication; any host that can reach a controller on tcp/102 can read/write variables, download programs, or stop the CPU.
+
+**Evidence (1 sample(s)):**
+```
+ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20) : fc=0x1A (Request download)
+```
+
+**Detection criteria.** Fires when S7Comm (Siemens S7-300/400/1200/1500 over tcp/102) traffic contains a function code we classify as engineering — 0x05 Write Var, 0x1A-0x1C block download, 0x1D-0x1F block upload, 0x28 PLC Control (hot / cold restart sub-types), 0x29 PLC Stop. S7Comm has no native authentication; S7-1500 adds Secure Communication only when explicitly enabled.
+
+**MITRE ATT&CK for ICS.** [T0858 — Change Operating Mode](https://attack.mitre.org/techniques/T0858/), [T0843 — Program Download](https://attack.mitre.org/techniques/T0843/)
+
+**Recommendation:** Limit which engineering workstations can talk to controllers on tcp/102. For S7-1500 / TIA Portal environments, set the controller access level to "no access (complete protection)" or "read access" and require known-fingerprint TLS via Secure Communication. For older S7-300/400, use switch ACLs and physically lock the keyswitch to RUN.
+
+**Investigation playbook:**
+
+1. Identify the source host(s) physically: `10.10.0.5`. For TIA Portal / Step 7 Manager-class hosts, expect a Windows engineering laptop or a permanent PG.
+2. In TIA Portal, set the controller's access level on `10.10.0.20` to "no access (complete protection)" or "read access" — anything looser allows variable writes from anyone reaching tcp/102.
+3. Pull the controller diagnostic buffer for `10.10.0.20` (TIA Portal: Online & Diagnostics → Diagnostic Buffer). Look for download events, mode changes (RUN → STOP), and password-protection changes during the capture window.
+4. For S7-1500: enable Secure Communication with TLS and pin the controller's certificate. For S7-300/400 (no native TLS): physical keyswitch lock plus a switch-level ACL is the path.
+5. STOP commands or program downloads were seen — treat as a controller-integrity incident. Compare the running program against a known-good project backup before resuming production. Plan a recovery window with operations.
+
+_id: `ics.s7_engineering`_
+
+### [MEDIUM] DNS queries to a non-OT resolver
+
+1 OT host(s) sending DNS queries to resolvers outside the configured OT subnets (100 total query packet(s)). Cross-zone DNS leaks query patterns to the IT side and trusts an external resolver's answers. Both belong on the OT side under change control.
+
+**Evidence (1 sample(s)):**
+```
+ENG-WS-01 (10.10.0.5) -> 8.8.8.8:53 (UDP/TCP, 100 packet(s))
+```
+
+**Detection criteria.** Fires when at least one flow with `dst_port = 53` has a source IP inside a configured `--ot-subnet` and a destination IP that is NOT inside any configured OT subnet. Cross-zone DNS leaks query patterns to the IT side and trusts an external resolver's answers; both the resolution path and the DNS server itself should be in-zone under change control.
+
+**MITRE ATT&CK for ICS.** [T0884 — Connection Proxy (supporting)](https://attack.mitre.org/techniques/T0884/)
+
+**Recommendation:** Repoint OT hosts at an in-zone (or DMZ-relayed) DNS resolver. Add an outbound UDP/53 deny rule at the IT/OT boundary for everything except the sanctioned resolver(s).
+
+**Investigation playbook:**
+
+1. Identify each source host's configured DNS server: `10.10.0.5`. On Windows: `ipconfig /all` shows DNS Servers per interface. On Linux: `/etc/resolv.conf` (or `systemd-resolve --status` on systemd hosts). Don't change anything yet — read-only check.
+2. Verify whether an in-zone resolver exists. The asset inventory in this report shows which OT hosts speak DNS — a host running a DNS server on the OT side will show up with `dns` in its protocol list. If one exists, the listed clients should point at it.
+3. If no in-zone resolver: stand one up in the OT zone (or a dedicated DMZ). Configure it with a strict upstream relationship — only resolves a known set of plant-relevant names; everything else fails closed. CoreDNS or BIND with a small zone file is the standard pattern here.
+4. Once OT clients are repointed at the in-zone resolver, add an outbound UDP/53 deny rule at the IT/OT firewall for OT subnets that aren't the resolver itself. This catches any host that gets reverted to its old config and prevents cross-zone DNS from being a quiet failure mode.
+5. Cross-reference the destination resolver IPs against your IT team's documented DNS infrastructure. If a host is querying a known public resolver (Google, Cloudflare, etc.) that's a different problem than querying an internal IT resolver — the public case is also caught by the egress finding; the internal case is a routing / config gap on the OT side.
+
+_id: `boundary.dns_resolver`_
+
+### [MEDIUM] Deprecated TLS versions observed (SSL 3.0 / TLS 1.0 / 1.1)
+
+4 ClientHello(s) using deprecated TLS versions seen across 1 host pair(s): TLS 1.0 (4 hello(s)). These versions are deprecated and blocked by default in modern Windows / browsers. Their presence indicates legacy clients (older Java runtimes, embedded devices) or legacy services.
+
+**Evidence (1 sample(s)):**
+```
+ENG-WS-01 (10.10.0.5) -> PLC-LINE3 (10.10.0.20):443 : TLS 1.0 (4 hello(s))
+```
+
+**Detection criteria.** Fires when a TLS ClientHello on TCP/443 or TCP/8443 carries a `legacy_version` field of 0x0300 (SSL 3.0), 0x0301 (TLS 1.0), or 0x0302 (TLS 1.1). Detection runs on the TLS record + handshake layout (content_type 0x16, handshake type 0x01) — no full TLS state machine. These versions are deprecated and blocked by default in modern Windows / browsers; their presence indicates legacy clients (older Java, embedded devices) or legacy services.
+
+**MITRE ATT&CK for ICS.** [T0830 — Adversary-in-the-Middle (supporting)](https://attack.mitre.org/techniques/T0830/)
+
+**Recommendation:** Identify the source clients and services. Modern Windows blocks TLS 1.0/1.1 by default; their presence indicates legacy clients (older Java, embedded devices) or services worth replacing. Cipher suites available at these versions are vulnerable to BEAST / POODLE / downgrade attacks.
+
+**Investigation playbook:**
+
+1. Identify the source hosts and the services they're connecting to: `10.10.0.5`. A legacy TLS ClientHello almost always traces to one of: an older Java runtime, a Windows host with TLS 1.0/1.1 still enabled in Schannel, or an embedded device whose firmware predates TLS 1.2.
+2. For Windows clients: confirm TLS 1.2+ is enabled and TLS 1.0 / TLS 1.1 / SSL 3.0 are disabled in Schannel registry settings (HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols). Microsoft has a tested registry script for this — use that, don't hand-edit.
+3. For services / servers: upgrade the TLS implementation. If it's an embedded device that only supports TLS 1.0 (older Moxa, older Schneider HMIs), put it behind a TLS-terminating reverse proxy that speaks modern TLS to clients.
+4. Treat any captured authentication traffic from these connections as suspect — cipher suites available with TLS 1.0/1.1 are vulnerable to known attacks (BEAST, POODLE, downgrade-to-RC4). Rotate any credentials or session tokens that crossed these flows.
+5. Audit the firewall ruleset for outbound TLS to legacy services on OT — the modern answer is "only allow tcp/443 to a known set of update servers and vendor cloud endpoints, all of which speak TLS 1.2+."
+
+_id: `compat.stale_tls`_
+
+## Asset inventory
+
+| IP | Hostname | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |
+|----|----------|------|-----|--------|---------------|-----------|---------|-------|
+| `10.10.0.5` | `ENG-WS-01` | OT | `AA:BB:CC:DD:EE:01` | — | HMI | modbus, smb | 250 | 24.0 KB |
+| `10.10.0.20` | `PLC-LINE3` | OT | `00:1B:1B:11:22:33` | Siemens | PLC / controller | modbus | 250 | 24.0 KB |
+| `8.8.8.8` | — | IT | `AA:BB:CC:DD:EE:99` | — | Unknown | http | 5 | 600.0 B |
+
+## Top flows
+
+| Source | Destination | Protocol | Conns | Packets | Bytes |
+|--------|-------------|----------|-------|---------|-------|
+| `10.10.0.5` | `10.10.0.20:502` | modbus | 1 | 500 | 48.0 KB |
+| `10.10.0.5` | `8.8.8.8:53` | dns | 1 | 100 | 8.0 KB |
+| `10.10.0.5` | `8.8.8.8:80` | http | 1 | 5 | 600.0 B |

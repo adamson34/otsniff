@@ -82,9 +82,11 @@ outputs in a way an OT defender would notice.
 
 **Track 1 emphasis (next priority).** P0-7 (investigation playbooks)
 shipped in v0.3; P0-8 (AI-augmented detection) shipped in the v0.5 dev
-cycle (S-5.03). The remaining open P0 items are P0-6 (OUI refresh),
-P0-9 (mDNS/NetBIOS hostnames), and P0-10 (multi-PCAP) — all sized **S**.
-The biggest *new* opportunity is **segmentation drift** (P1-13 below),
+cycle (S-5.03). P0-6 (OUI refresh, #48/S-2.03), P0-9 (mDNS/NetBIOS
+hostnames, #138/S-8.01), and P0-10 (multi-PCAP, #140/S-9.01) have all
+shipped — **the P0 track is now fully delivered**. The next priorities
+are the **P1** items below; the biggest *new* opportunity is
+**segmentation drift** (P1-13 below),
 which pairs the now-shipped cross-capture diff with the Zonewarden
 engine.
 
@@ -217,7 +219,7 @@ SPAN but it isn't" mistake.
 **Touches:** `cli.rs` (flag), `capture_source.rs` (warning emission
 when user-declared and heuristic disagree). **Deps:** none.
 
-### P0-6: OUI table refresh (S)
+### P0-6: OUI table refresh (S) — ✅ shipped (#48, S-2.03)
 
 The 4SICS captures had Siemens devices we mostly identified, but real plant
 captures will have many vendors we don't. Curated subset of the IEEE OUI
@@ -322,7 +324,7 @@ hostname extraction mean richer anchors for the LLM's reasoning.
 Doable in parallel with P0-7 since the entry points are different
 detectors.
 
-### P0-9: mDNS / NetBIOS / LLMNR hostname extraction (S)
+### P0-9: mDNS / NetBIOS / LLMNR hostname extraction (S) — ✅ shipped (#138, S-8.01)
 
 Completes the deferred half of P0-3. Today we extract hostnames from
 DHCP `Option 12 / Hostname` only. Mid-shop OT networks frequently have
@@ -345,7 +347,7 @@ extended to captures that lacked DHCP entirely. **Touches:**
 already exists — just more code-paths populating it.
 **Deps:** none.
 
-### P0-10: Multi-PCAP / rotated-capture analyze (S)
+### P0-10: Multi-PCAP / rotated-capture analyze (S) — ✅ shipped (#140, S-9.01)
 
 `otsniff analyze a.pcap b.pcap c.pcap -o report.html` — concatenate
 captures in CLI order, treat them as one logical capture, emit a
@@ -387,7 +389,7 @@ Data (15), Save Configuration (24), Disable/Enable Unsolicited (20/21).
 DNP3 fixture is a fuzz test — we'd need a real-traffic capture to validate
 quality. Worth verifying that one exists publicly before starting.
 
-### P1-2: Better progress feedback (S)
+### P1-2: Better progress feedback (S) — ✅ shipped (#73 S-5.01 parse progress, #74 S-5.02 claude heartbeat)
 
 Two related UX gaps in `-v` mode:
 
@@ -479,7 +481,7 @@ recurring discipline — the `release/v0.X.Y` branch + `develop → main`
 PR + tag flow runs after every meaningful develop accumulation. See
 `.claude/commands/release.md` for the current playbook.
 
-### P1-6: MITRE ATT&CK for ICS technique mapping (M)
+### P1-6: MITRE ATT&CK for ICS technique mapping (M) — ✅ shipped (#147, S-12.01)
 
 Every `Finding` gains a `technique_ids: Vec<MitreId>` field
 referencing the [ATT&CK for ICS](https://attack.mitre.org/matrices/ics/)
@@ -519,7 +521,7 @@ contributed to which event), `pcap.rs` write-half. **Deps:** small
 refactor to retain `pcap_offset: u64` on `CredEvent` / `ModbusEvent`
 etc. so we know which bytes to write out.
 
-### P1-9: Capture-window sanity warning (S)
+### P1-9: Capture-window sanity warning (S) — ✅ shipped (#143, S-10.01)
 
 Surface explicit warnings when the input PCAP has degenerate timestamps —
 all-zero (epoch 1970), entire capture window <1s, or non-monotonic
@@ -566,7 +568,7 @@ src IPs, but reporting them as "hosts" misleads the analyst) and UX
 `report_md.rs` inventory section, snapshot tests.
 **Deps:** none.
 
-### P1-11: Diff capture-window normalization (S)
+### P1-11: Diff capture-window normalization (S) — ✅ shipped (#145, S-11.01)
 
 `otsniff diff` flow-shift detection currently compares raw byte
 counts. When the two captures cover different durations (e.g. 1h
@@ -624,7 +626,7 @@ deployments" gap discovered in May 2026 triage.
 (per-finding suppression hook), snapshot tests.
 **Deps:** none.
 
-### P1-13: Segmentation drift (M) — proposed
+### P1-13: Segmentation drift (M) — ✅ shipped
 
 `otsniff diff baseline.pcap current.pcap --policy zones.yaml` (or a
 dedicated `--segmentation-drift` mode) compares the *Zonewarden

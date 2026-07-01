@@ -32,6 +32,11 @@ pub const LDAP_METADATA: RuleMetadata = RuleMetadata {
             label: "RFC 4513 — LDAP Authentication Methods and Security Mechanisms (STARTTLS)",
             url: Some("https://datatracker.ietf.org/doc/html/rfc4513"),
         },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0859 — Valid Accounts",
+            url: Some("https://attack.mitre.org/techniques/T0859/"),
+        },
     ],
 };
 

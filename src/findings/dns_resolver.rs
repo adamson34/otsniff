@@ -30,6 +30,11 @@ pub const METADATA: RuleMetadata = RuleMetadata {
             label: "Purdue Reference Model — boundary services",
             url: None,
         },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0884 — Connection Proxy (supporting)",
+            url: Some("https://attack.mitre.org/techniques/T0884/"),
+        },
     ],
 };
 

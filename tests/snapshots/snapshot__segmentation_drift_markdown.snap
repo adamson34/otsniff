@@ -1,0 +1,28 @@
+---
+source: tests/snapshot.rs
+expression: md
+---
+## Segmentation drift
+
+Policy digest: `abc123def456` — one policy scored both captures; identical on each side by construction.
+
+### Conformance tally
+
+| Metric | Baseline | Current | Direction |
+|--------|---------:|--------:|:---------:|
+| allowed | 10 | 12 | ▲ |
+| idmz_bypasses | 1 | 3 | ▲ |
+| no_matching_conduit | 4 | 2 | ▼ |
+| wrong_direction | 0 | 0 | — |
+
+### New violations — NEW since baseline (1)
+
+- `idmz_bypass` · `host_001` → `host_009:44818/tcp` · established
+
+### Resolved violations (1)
+
+- `wrong_direction` · `host_002` → `host_003:102/tcp` · attempted
+
+### Persisting violations (1)
+
+- `deny_by_default` · `host_001` → `host_002:502/tcp` · established

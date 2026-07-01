@@ -103,3 +103,40 @@ If already on `develop` or `main`, skip to Stage 2.
     ```
     git tag -l "vX.Y.Z-dev.*" | xargs -I {} git push origin :refs/tags/{}
     ```
+
+## Stage 4: Back-merge main → develop (REQUIRED — do not skip)
+
+The stable release adds commits to `main` (`chore: release vX.Y.Z` + the
+release-PR merge commit) that do **not** exist on `develop`. If they are never
+merged back, `main` and `develop` diverge and the *next* release PR conflicts on
+`Cargo.toml`, `Cargo.lock`, and any version-stamped snapshots. Close the loop
+every time:
+
+1. Confirm the divergence (these are the commits that must come back):
+   ```
+   git fetch origin main develop
+   git log origin/main --oneline --not origin/develop
+   ```
+2. Branch from `develop` and merge `main` in:
+   ```
+   git checkout develop && git pull
+   git checkout -b chore/back-merge-vX.Y.Z
+   git merge --no-ff origin/main
+   ```
+   Conflicts here are almost always version-string only (`main` has the stable
+   `X.Y.Z`; `develop` has the old `-dev`). Resolve, then in the next step the
+   version is overwritten anyway.
+3. Bump `develop` to the next dev version (optimistic next minor, `dev.1`):
+   ```
+   # e.g. just released v0.5.0 → develop becomes 0.6.0-dev.1
+   ```
+   Then `cargo check` (updates `Cargo.lock`) and `cargo test` — accept any
+   version-only snapshot changes via `cargo insta` after verifying the *only*
+   delta is the version string.
+4. `cargo fmt --all` + `cargo clippy --all-targets --workspace -- -D warnings`.
+5. Commit (`chore: back-merge vX.Y.Z and bump develop to <next>-dev.1`), push,
+   open a PR `chore/back-merge-vX.Y.Z` → `develop`, and merge once green. Going
+   through a PR (not a direct push) keeps `develop`'s branch protection intact.
+
+After this, `main` and `develop` share history again and the next release cuts
+cleanly.

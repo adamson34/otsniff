@@ -30,6 +30,11 @@ pub const METADATA: RuleMetadata = RuleMetadata {
             label: "CWE-326 — Inadequate Encryption Strength",
             url: Some("https://cwe.mitre.org/data/definitions/326.html"),
         },
+        Reference {
+            kind: ReferenceKind::MitreIcsAttack,
+            label: "T0830 — Adversary-in-the-Middle (supporting)",
+            url: Some("https://attack.mitre.org/techniques/T0830/"),
+        },
     ],
 };
 

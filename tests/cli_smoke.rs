@@ -212,6 +212,105 @@ fn scrub_round_trip_via_pcap() {
     assert!(final_text.contains("host_999")); // unmapped pseudonym left as-is
 }
 
+// ── Group A1: S-9.01 multi-PCAP analyze (BC-1.01.003) ────────────────────────
+
+/// S-9.01 AC-001 / EC-002: `analyze` with zero positional inputs must fail with
+/// clap's usage error (exit 2) and never reach the ingestion path.
+#[test]
+fn s_9_01_analyze_zero_inputs_is_usage_error() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg("-o")
+        .arg(tmp.path().join("out.html"))
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Usage"));
+}
+
+/// S-9.01 AC-001 / EC-001: exactly one positional input still succeeds and
+/// writes a report.
+#[test]
+fn s_9_01_analyze_one_input_succeeds() {
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
+    if !pcap.exists() {
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: synthetic-1mb.pcap missing in CI"
+        );
+        eprintln!("skipping s_9_01_analyze_one_input_succeeds: synthetic-1mb.pcap not present");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let out = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success();
+    assert!(std::fs::read_to_string(&out).unwrap().contains("<html"));
+}
+
+/// S-9.01 AC-001 / AC-002 / AC-005: two positional inputs are ingested as one
+/// logical capture and produce a single report. The markdown source label
+/// (via --md) shows both basenames and never leaks an absolute path separator.
+#[test]
+fn s_9_01_analyze_two_inputs_succeeds() {
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
+    if !pcap.exists() {
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: synthetic-1mb.pcap missing in CI"
+        );
+        eprintln!("skipping s_9_01_analyze_two_inputs_succeeds: synthetic-1mb.pcap not present");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    // Two distinct basenames so the combined source label is observable.
+    let a = tmp.path().join("capture-01.pcap");
+    let b = tmp.path().join("capture-02.pcap");
+    std::fs::copy(&pcap, &a).unwrap();
+    std::fs::copy(&pcap, &b).unwrap();
+    let out = tmp.path().join("report.html");
+    let md = tmp.path().join("report.md");
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&a)
+        .arg(&b)
+        .arg("-o")
+        .arg(&out)
+        .arg("--md")
+        .arg(&md)
+        .assert()
+        .success();
+
+    assert!(std::fs::read_to_string(&out).unwrap().contains("<html"));
+    let md_text = std::fs::read_to_string(&md).unwrap();
+    // AC-005: both basenames appear in the multi-file source label.
+    assert!(
+        md_text.contains("capture-01.pcap"),
+        "multi-file markdown should name the first capture"
+    );
+    assert!(
+        md_text.contains("capture-02.pcap"),
+        "multi-file markdown should name the second capture"
+    );
+    // F-ADV-P2-009: the basename-only label must not embed the tempdir path.
+    let leaked = tmp.path().display().to_string();
+    assert!(
+        !md_text.contains(&leaked),
+        "multi-file source label leaked an absolute path"
+    );
+}
+
 // ── Group A2: S-6.01 --baseline-map flag (BC-5.03.001 AC-003) ────────────────
 
 /// BC-5.03.001 AC-003 / CLI: `scrub --baseline-map` must produce a new map
@@ -619,6 +718,181 @@ fn test_f_w1_001_unscrub_rejects_corrupted_map() {
         .arg(&input)
         .assert()
         .failure();
+}
+
+// ── S-10.01: capture-window sanity warning on stderr (AC-004) ────────────────
+
+/// Minimal Ethernet II + IPv4 + UDP frame (10.10.0.1 → 10.10.0.2). Hand-built
+/// raw bytes so the test adds no dependency; it parses to exactly one `Packet`.
+fn eth_ipv4_udp_frame() -> Vec<u8> {
+    let mut f = Vec::new();
+    // Ethernet II: dst MAC, src MAC, ethertype 0x0800 (IPv4).
+    f.extend_from_slice(&[0x02, 0, 0, 0, 0, 0x02]);
+    f.extend_from_slice(&[0x02, 0, 0, 0, 0, 0x01]);
+    f.extend_from_slice(&[0x08, 0x00]);
+    // IPv4 header (20 bytes), total length 28, protocol 17 (UDP).
+    f.extend_from_slice(&[0x45, 0x00, 0x00, 0x1c, 0, 0, 0, 0, 0x40, 0x11, 0, 0]);
+    f.extend_from_slice(&[10, 10, 0, 1]); // src
+    f.extend_from_slice(&[10, 10, 0, 2]); // dst
+                                          // UDP header (8 bytes), length 8.
+    f.extend_from_slice(&[0x00, 0x35, 0x00, 0x35, 0x00, 0x08, 0x00, 0x00]);
+    f
+}
+
+/// Build a little-endian legacy pcap (ETHERNET link type) with `records`
+/// frames, each stamped at `ts_sec` (ts_usec = 0).
+fn legacy_pcap(frame: &[u8], records: usize, ts_secs: &[u32]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&[0xd4, 0xc3, 0xb2, 0xa1]); // magic (LE, microsecond)
+    out.extend_from_slice(&2u16.to_le_bytes()); // version major
+    out.extend_from_slice(&4u16.to_le_bytes()); // version minor
+    out.extend_from_slice(&0i32.to_le_bytes()); // thiszone
+    out.extend_from_slice(&0u32.to_le_bytes()); // sigfigs
+    out.extend_from_slice(&65535u32.to_le_bytes()); // snaplen
+    out.extend_from_slice(&1u32.to_le_bytes()); // network = ETHERNET
+    for i in 0..records {
+        let ts = ts_secs.get(i).copied().unwrap_or(0);
+        out.extend_from_slice(&ts.to_le_bytes()); // ts_sec
+        out.extend_from_slice(&0u32.to_le_bytes()); // ts_usec
+        out.extend_from_slice(&(frame.len() as u32).to_le_bytes()); // incl_len
+        out.extend_from_slice(&(frame.len() as u32).to_le_bytes()); // orig_len
+        out.extend_from_slice(frame);
+    }
+    out
+}
+
+/// AC-004: `analyze` on an all-epoch (ts = 0) capture exits 0 and prints the
+/// capture-sanity WARNING to stderr.
+#[test]
+fn s_10_01_analyze_epoch_zero_pcap_warns_on_stderr() {
+    let tmp = TempDir::new().unwrap();
+    let pcap = tmp.path().join("epoch.pcap");
+    std::fs::write(&pcap, legacy_pcap(&eth_ipv4_udp_frame(), 2, &[0, 0])).unwrap();
+    let out = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "WARNING: capture has no real timestamps",
+        ));
+}
+
+/// AC-004 / AC-005: `analyze` on a sane (multi-second, monotonic, post-epoch)
+/// capture emits no capture-sanity WARNING.
+#[test]
+fn s_10_01_analyze_sane_pcap_emits_no_capture_warning() {
+    let tmp = TempDir::new().unwrap();
+    let pcap = tmp.path().join("sane.pcap");
+    std::fs::write(
+        &pcap,
+        legacy_pcap(&eth_ipv4_udp_frame(), 2, &[1_700_000_000, 1_700_000_010]),
+    )
+    .unwrap();
+    let out = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        // Target the capture-sanity messages specifically (all three end in
+        // "unreliable" or "misleading"), not any "WARNING" — so this stays
+        // green if an unrelated guard (e.g. capture-source) ever warns here.
+        .stderr(predicate::str::contains("unreliable").not())
+        .stderr(predicate::str::contains("misleading").not());
+}
+
+// ── S-11.01: diff capture-window normalization warning (AC-003) ──────────────
+
+/// Scrub map covering the two IPs in `eth_ipv4_udp_frame()`
+/// (10.10.0.1 → 10.10.0.2). Written to disk for the `diff` subcommand.
+fn window_scrub_map() -> &'static str {
+    r#"{"version":1,"created_at":"2026-05-07T12:00:00Z","ips":{"host_001":"10.10.0.1","host_002":"10.10.0.2"},"macs":{},"names":{}}"#
+}
+
+/// AC-003: two captures whose windows differ by > 2× (3600s vs 1200s) make
+/// `diff` emit the rate-normalized window-mismatch WARNING on stderr.
+#[test]
+fn s_11_01_diff_mismatched_windows_warns_on_stderr() {
+    let tmp = TempDir::new().unwrap();
+    let frame = eth_ipv4_udp_frame();
+    // baseline spans 3600s, current spans 1200s → 3× difference.
+    let base = tmp.path().join("base.pcap");
+    std::fs::write(
+        &base,
+        legacy_pcap(&frame, 2, &[1_700_000_000, 1_700_003_600]),
+    )
+    .unwrap();
+    let curr = tmp.path().join("curr.pcap");
+    std::fs::write(
+        &curr,
+        legacy_pcap(&frame, 2, &[1_700_000_000, 1_700_001_200]),
+    )
+    .unwrap();
+    let map = tmp.path().join("map.json");
+    std::fs::write(&map, window_scrub_map()).unwrap();
+    let out = tmp.path().join("diff.md");
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["diff"])
+        .arg(&base)
+        .arg(&curr)
+        .arg("--baseline-map")
+        .arg(&map)
+        .arg("--current-map")
+        .arg(&map)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("capture windows differ"));
+}
+
+/// AC-003: two captures whose windows are comparable (1000s vs 1500s, < 2×)
+/// emit NO window-mismatch / degenerate WARNING.
+#[test]
+fn s_11_01_diff_comparable_windows_no_warning() {
+    let tmp = TempDir::new().unwrap();
+    let frame = eth_ipv4_udp_frame();
+    let base = tmp.path().join("base.pcap");
+    std::fs::write(
+        &base,
+        legacy_pcap(&frame, 2, &[1_700_000_000, 1_700_001_000]),
+    )
+    .unwrap();
+    let curr = tmp.path().join("curr.pcap");
+    std::fs::write(
+        &curr,
+        legacy_pcap(&frame, 2, &[1_700_000_000, 1_700_001_500]),
+    )
+    .unwrap();
+    let map = tmp.path().join("map.json");
+    std::fs::write(&map, window_scrub_map()).unwrap();
+    let out = tmp.path().join("diff.md");
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["diff"])
+        .arg(&base)
+        .arg(&curr)
+        .arg("--baseline-map")
+        .arg(&map)
+        .arg("--current-map")
+        .arg(&map)
+        .arg("-o")
+        .arg(&out)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("capture windows differ").not())
+        .stderr(predicate::str::contains("capture window is missing").not());
 }
 
 #[test]

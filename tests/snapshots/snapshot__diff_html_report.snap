@@ -1,6 +1,5 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 3668
 expression: html
 ---
 <!doctype html>
@@ -88,6 +87,20 @@ expression: html
     color: var(--ok);
     font-weight: 600;
   }
+  .window-mismatch-banner {
+    background: color-mix(in oklch, var(--med) 10%, var(--paper));
+    border: 1px solid var(--med);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+    color: var(--med);
+    font-weight: 600;
+  }
+  .capture-windows-line {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 1rem 0 0.25rem;
+  }
   .finding {
     border: 1px solid var(--line);
     border-left-width: 4px;
@@ -154,11 +167,16 @@ expression: html
 <div class="brand-header" style="padding-left:1.5rem;padding-right:1.5rem;">
   <div>
     <div class="brand-wordmark">otsniff <span class="brand-sep">/</span> diff</div>
-    <div class="brand-meta">v0.5.0</div>
+    <div class="brand-meta">v0.6.0</div>
   </div>
 </div>
 
 <div class="page-body">
+
+
+<p class="capture-windows-line">Capture windows: baseline 3600s vs current 3600s</p>
+
+
 
 
 
@@ -308,7 +326,8 @@ expression: html
 
 
 
-<h2>Flow shifts (≥2× volume change)</h2>
+<h2>Flow shifts (≥2× rate change)</h2>
+<p class="capture-windows-line">Ratios are per-second rates, normalized by each capture&#x27;s window (baseline 3600s vs current 3600s); the byte columns are raw totals.</p>
 <table>
   <thead>
     <tr><th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>Baseline</th><th>Current</th><th>Ratio</th></tr>

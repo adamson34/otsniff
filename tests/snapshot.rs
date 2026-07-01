@@ -16,7 +16,7 @@ use otsniff::ai::prompts;
 use otsniff::audit;
 use otsniff::capture_source::{classify, CaptureSource, Classification, Confidence};
 use otsniff::findings::run_all;
-use otsniff::findings::{catalog, metadata_for};
+use otsniff::findings::{catalog, findings_json, metadata_for};
 use otsniff::inventory::build as build_inventory;
 use otsniff::observe::{
     CredEvent, CredKind, Dnp3Event, EnipEvent, ExternalFlow, FlowKey, FlowObs, HostObs,
@@ -190,6 +190,12 @@ fn build_fixture() -> Observations {
         external_flows,
         first_ts: Some(fixed_ts()),
         last_ts: Some(fixed_ts()),
+        // Sane time base (multi-second, monotonic, post-epoch) so
+        // capture_sanity::assess returns [] and the report stays byte-identical
+        // to pre-S-10.01 (AC-005 regression lock).
+        min_ts: Some(fixed_ts()),
+        max_ts: Some(Utc.with_ymd_and_hms(2026, 5, 7, 12, 1, 0).unwrap()),
+        timestamps_monotonic: true,
         total_packets: 505,
         total_bytes: 48_600,
         mac_frame_counts: std::collections::BTreeMap::new(),
@@ -231,7 +237,66 @@ fn html_report_snapshot() {
         None,
     )
     .unwrap();
+    // AC-002: the Telnet finding (creds.telnet) surfaces its T0859 technique as
+    // a labeled MITRE row linking to attack.mitre.org.
+    assert!(
+        html.contains("MITRE ATT&amp;CK for ICS")
+            && html.contains("https://attack.mitre.org/techniques/T0859/")
+            && html.contains("T0859 — Valid Accounts"),
+        "HTML finding card must render the MITRE ATT&CK for ICS technique link"
+    );
     insta::assert_snapshot!("report_html", html);
+}
+
+/// S-10.01 AC-003: a degenerate (all-epoch) time base derived from the clean
+/// fixture. `first_ts`/`last_ts` (and thus the "Capture window" line) are
+/// unchanged; only the new min/max are repointed at the Unix epoch.
+fn build_epoch_fixture() -> Observations {
+    let epoch = Utc.timestamp_opt(0, 0).single().unwrap();
+    Observations {
+        min_ts: Some(epoch),
+        max_ts: Some(epoch),
+        timestamps_monotonic: true,
+        ..build_fixture()
+    }
+}
+
+/// S-10.01 AC-003: the capture-window warning banner renders in BOTH the HTML
+/// and the markdown report for a degenerate-timestamp fixture. The clean
+/// fixtures (above) must stay byte-identical (AC-005) — these are NEW snapshots.
+#[test]
+fn capture_warning_banner_renders_in_html_and_md() {
+    let obs = build_epoch_fixture();
+    let inventory = build_inventory(&obs);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(
+        html.contains("capture-warning"),
+        "degenerate fixture must render the .capture-warning banner"
+    );
+    assert!(
+        html.contains("no real timestamps"),
+        "HTML banner must carry the epoch-zero message"
+    );
+    insta::assert_snapshot!("report_html_capture_warning", html);
+
+    let md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    assert!(
+        md.contains("Capture timestamp warning"),
+        "MD must carry the capture-timestamp warning blockquote"
+    );
+    insta::assert_snapshot!("report_md_capture_warning", md);
 }
 
 #[test]
@@ -239,10 +304,18 @@ fn findings_json_snapshot() {
     let obs = build_fixture();
     let inventory = build_inventory(&obs);
     let findings = run_all(&obs, &ot_subnets());
+    // AC-004: findings JSON is enriched with a per-finding `mitre_techniques`
+    // array looked up from the catalog by id.
     let payload = serde_json::json!({
         "inventory": inventory,
-        "findings": findings,
+        "findings": findings_json(&findings),
     });
+    assert!(
+        serde_json::to_string(&payload)
+            .unwrap()
+            .contains("mitre_techniques"),
+        "findings JSON must carry mitre_techniques per finding"
+    );
     insta::assert_json_snapshot!("findings_json", payload);
 }
 
@@ -267,6 +340,15 @@ fn scrubbed_markdown_snapshot_does_not_leak_real_values() {
     // they're scrubbed before reaching any AI provider.
     assert!(!scrubbed.contains("ENG-WS-01"));
     assert!(!scrubbed.contains("PLC-LINE3"));
+
+    // AC-003: the markdown report carries a MITRE ATT&CK for ICS line per
+    // finding; the constant technique strings survive scrubbing (EC-004).
+    assert!(
+        scrubbed.contains("**MITRE ATT&CK for ICS.**")
+            && scrubbed
+                .contains("[T0859 — Valid Accounts](https://attack.mitre.org/techniques/T0859/)"),
+        "markdown finding must carry the MITRE ATT&CK for ICS line"
+    );
 
     insta::assert_snapshot!("scrubbed_markdown", scrubbed);
 }
@@ -591,11 +673,11 @@ fn audit_log_rendered_for_an_analyze_run_carries_no_real_identifiers() {
         schema_version: audit::SCHEMA_VERSION,
         otsniff_version: "0.3.0-test".to_string(),
         timestamp: fixed_ts(),
-        input_pcap: audit::InputDescriptor {
-            path: "tests/fixtures/synthetic.pcap".to_string(),
+        input_pcaps: vec![audit::InputDescriptor {
+            path: "synthetic.pcap".to_string(),
             size_bytes: 1024,
             sha256: audit::sha256_hex("synthetic-pcap-bytes"),
-        },
+        }],
         scrub: audit::ScrubSummary {
             ip_pseudonyms: map.ips.len(),
             mac_pseudonyms: map.macs.len(),
@@ -3248,11 +3330,11 @@ fn audit_log_records_augment_pass_hashes_separately() {
         schema_version: audit::SCHEMA_VERSION,
         otsniff_version: "test".to_string(),
         timestamp: fixed_ts(),
-        input_pcap: otsniff::audit::InputDescriptor {
+        input_pcaps: vec![otsniff::audit::InputDescriptor {
             path: "test.pcap".to_string(),
             size_bytes: 0,
             sha256: audit::sha256_hex(""),
-        },
+        }],
         scrub: otsniff::audit::ScrubSummary::default(),
         leak_check: otsniff::audit::LeakCheckSummary {
             regex: otsniff::audit::LeakCheckResult {
@@ -3640,6 +3722,12 @@ fn build_diff_fixture() -> Diff {
         flows_new: vec![flow_new],
         flows_gone: vec![flow_gone],
         flow_shift_multiplier: 2.0,
+        segmentation: None,
+        // S-11.01: normalized + comparable windows (equal) — no banner, just the
+        // informational "Capture windows" line.
+        rate_normalized: true,
+        baseline_window_secs: Some(3600.0),
+        current_window_secs: Some(3600.0),
     }
 }
 
@@ -3918,11 +4006,13 @@ fn test_bc_8_04_001_determinism_with_shared_rule_id() {
         observations: &empty_obs,
         map: &empty_map,
         findings: &baseline_findings,
+        conformance: None,
     };
     let current = DiffInput {
         observations: &empty_obs,
         map: &empty_map,
         findings: &current_findings,
+        conformance: None,
     };
 
     // Compute twice — HashSet iteration order may differ between runs.
@@ -3931,11 +4021,13 @@ fn test_bc_8_04_001_determinism_with_shared_rule_id() {
         observations: &empty_obs,
         map: &empty_map,
         findings: &baseline_findings,
+        conformance: None,
     };
     let current2 = DiffInput {
         observations: &empty_obs,
         map: &empty_map,
         findings: &current_findings,
+        conformance: None,
     };
     let diff_b = compute(baseline2, current2);
 
@@ -4097,5 +4189,200 @@ fn test_flow_shift_label_reflects_actual_multiplier() {
     assert!(
         md_2x.contains("≥2×"),
         "Markdown with default multiplier=2.0 must still contain '≥2×' (regression guard)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P1-13 — segmentation drift (diff --policy)
+// ---------------------------------------------------------------------------
+
+use otsniff::diff::{compute, DiffInput, SegmentationDrift, TallyDelta, ViolationRef};
+use otsniff::report::render_segmentation_drift_section;
+use otsniff::report_md::render_segmentation_drift_md;
+use otsniff::scrub::ScrubMap;
+
+/// Build a deterministic `SegmentationDrift` covering: a tally with up / down /
+/// unchanged movements, and all three violation-delta lists.
+fn build_drift_fixture() -> SegmentationDrift {
+    SegmentationDrift {
+        policy_digest: "abc123def456".to_string(),
+        tally: vec![
+            TallyDelta {
+                metric: "allowed".to_string(),
+                baseline: 10,
+                current: 12,
+            },
+            TallyDelta {
+                metric: "idmz_bypasses".to_string(),
+                baseline: 1,
+                current: 3,
+            },
+            TallyDelta {
+                metric: "no_matching_conduit".to_string(),
+                baseline: 4,
+                current: 2,
+            },
+            TallyDelta {
+                metric: "wrong_direction".to_string(),
+                baseline: 0,
+                current: 0,
+            },
+        ],
+        violations_new: vec![ViolationRef {
+            kind: "idmz_bypass".to_string(),
+            src_pseudonym: "host_001".to_string(),
+            dst_pseudonym: "host_009".to_string(),
+            dst_port: 44818,
+            proto: "tcp".to_string(),
+            severity: "established".to_string(),
+        }],
+        violations_resolved: vec![ViolationRef {
+            kind: "wrong_direction".to_string(),
+            src_pseudonym: "host_002".to_string(),
+            dst_pseudonym: "host_003".to_string(),
+            dst_port: 102,
+            proto: "tcp".to_string(),
+            severity: "attempted".to_string(),
+        }],
+        violations_persisting: vec![ViolationRef {
+            kind: "deny_by_default".to_string(),
+            src_pseudonym: "host_001".to_string(),
+            dst_pseudonym: "host_002".to_string(),
+            dst_port: 502,
+            proto: "tcp".to_string(),
+            severity: "established".to_string(),
+        }],
+    }
+}
+
+#[test]
+fn segmentation_drift_html_section_snapshot() {
+    let drift = build_drift_fixture();
+    let html = render_segmentation_drift_section(&drift);
+    insta::assert_snapshot!("segmentation_drift_html", html);
+
+    // Structural anchors.
+    assert!(html.contains("Segmentation drift"));
+    assert!(html.contains("abc123def456"), "policy digest must appear");
+    assert!(html.contains("idmz_bypass"));
+    assert!(html.contains("host_009"));
+    assert!(html.contains("Resolved violations"));
+    assert!(html.contains("Persisting violations"));
+}
+
+#[test]
+fn segmentation_drift_markdown_section_snapshot() {
+    let drift = build_drift_fixture();
+    let md = render_segmentation_drift_md(&drift);
+    insta::assert_snapshot!("segmentation_drift_markdown", md);
+
+    assert!(md.contains("## Segmentation drift"));
+    assert!(md.contains("`abc123def456`"));
+    assert!(md.contains("| Metric | Baseline | Current | Direction |"));
+    assert!(md.contains("idmz_bypass"));
+    assert!(md.contains("### Resolved violations"));
+}
+
+/// Privacy invariant (P1-13 Scrub stance §4): a `SegmentationDrift` built from
+/// `Violation`s carrying canary REAL IPs must never leak those IPs into JSON,
+/// HTML, or markdown — the projection pseudonymizes every endpoint. Mirrors
+/// `scrubbed_markdown_snapshot_does_not_leak_real_values`.
+#[test]
+fn segmentation_drift_no_leak_of_canary_ips_across_json_html_md() {
+    use std::collections::BTreeMap;
+    use zonewarden::types as zw;
+
+    // Two canary public IPs: one is mapped to a pseudonym, one is deliberately
+    // left out of the map (must fall back to an opaque label, never raw).
+    const CANARY_MAPPED: &str = "198.51.100.7";
+    const CANARY_UNMAPPED: &str = "203.0.113.45";
+
+    let mk_map = || ScrubMap {
+        version: 1,
+        created_at: Utc::now(),
+        ips: BTreeMap::from([("host_001".to_string(), CANARY_MAPPED.to_string())]),
+        macs: BTreeMap::new(),
+        names: BTreeMap::new(),
+    };
+    let base_map = mk_map();
+    let curr_map = mk_map();
+
+    let mk_violation = |src: &str, dst: &str| zw::Violation {
+        flow_index: 0,
+        src_zone: zw::ZoneId("a".into()),
+        dst_zone: zw::ZoneId("b".into()),
+        kind: zw::ViolationKind::NoMatchingConduit,
+        severity: zw::Severity::Established,
+        idmz_bypass: false,
+        explanation: format!("{src} -> {dst}"),
+        ts: zw::Timestamp(0),
+        src_ip: src.parse().unwrap(),
+        dst_ip: dst.parse().unwrap(),
+        src_port: Some(40000),
+        dst_port: Some(502),
+        proto: zw::Proto::Tcp,
+        service: None,
+        service_source: zw::ServiceSource::Unknown,
+        conn_state: None,
+    };
+
+    let base_conf = zw::ConformanceResult {
+        violations: vec![mk_violation(CANARY_MAPPED, CANARY_UNMAPPED)],
+        policy_digest: "deadbeef".to_string(),
+        ..Default::default()
+    };
+    // Current adds a second violation so there's a "new" row too.
+    let curr_conf = zw::ConformanceResult {
+        violations: vec![
+            mk_violation(CANARY_MAPPED, CANARY_UNMAPPED),
+            mk_violation(CANARY_UNMAPPED, CANARY_MAPPED),
+        ],
+        policy_digest: "deadbeef".to_string(),
+        ..Default::default()
+    };
+
+    let base_obs = Observations::default();
+    let curr_obs = Observations::default();
+    let base_findings: Vec<otsniff::findings::Finding> = vec![];
+    let curr_findings: Vec<otsniff::findings::Finding> = vec![];
+
+    let diff = compute(
+        DiffInput {
+            observations: &base_obs,
+            map: &base_map,
+            findings: &base_findings,
+            conformance: Some(&base_conf),
+        },
+        DiffInput {
+            observations: &curr_obs,
+            map: &curr_map,
+            findings: &curr_findings,
+            conformance: Some(&curr_conf),
+        },
+    );
+
+    assert!(
+        diff.segmentation.is_some(),
+        "both inputs carried conformance, so segmentation must be present"
+    );
+
+    let json = serde_json::to_string_pretty(&diff).unwrap();
+    let html = render_diff_html(&diff).expect("html render");
+    let md = render_diff_markdown(&diff);
+
+    for (name, body) in [("json", &json), ("html", &html), ("md", &md)] {
+        assert!(
+            !body.contains(CANARY_MAPPED),
+            "canary IP {CANARY_MAPPED} leaked into {name} output"
+        );
+        assert!(
+            !body.contains(CANARY_UNMAPPED),
+            "canary IP {CANARY_UNMAPPED} leaked into {name} output"
+        );
+    }
+    // Sanity: the pseudonym for the mapped canary is what reaches the output.
+    assert!(
+        json.contains("host_001"),
+        "mapped pseudonym must appear in JSON"
     );
 }

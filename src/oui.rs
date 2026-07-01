@@ -4,7 +4,10 @@
 //! Snapshot date: 2026-05-12
 //! Curation: entries matching OT industrial and common IT vendor patterns;
 //!   normalized to human-readable vendor names. Sorted by 3-byte OUI prefix.
-//! Regeneration: fetch oui.csv and run the Python script in .factory/stories/S-2.03-oui-refresh.md
+//! Regeneration: fetch oui.csv from the source URL above and re-apply the
+//!   curation criteria above, emitting `([u8; 3], &str)` rows sorted by the
+//!   3-byte prefix. No standalone regen script is committed; the curation
+//!   criteria in this header are the source of truth for replaying the build.
 
 const TABLE: &[([u8; 3], &str)] = &[
     ([0x00, 0x00, 0x0A], "Omron"),

@@ -187,11 +187,13 @@ fn test_ac_002_host_added_appears_in_hosts_new() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -254,11 +256,13 @@ fn test_ac_002_identification_by_pseudonym_not_ip() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -300,11 +304,13 @@ fn test_ac_002_empty_intersection_is_all_new_and_all_gone() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -349,11 +355,13 @@ fn test_ac_003_finding_new_in_current_only_is_in_findings_new() {
             observations: &base_obs,
             map: &base_map,
             findings: &base_findings,
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &curr_findings,
+            conformance: None,
         },
     );
 
@@ -391,11 +399,13 @@ fn test_ac_003_finding_in_both_is_findings_recurring() {
             observations: &base_obs,
             map: &base_map,
             findings: &base_findings,
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &curr_findings,
+            conformance: None,
         },
     );
 
@@ -431,11 +441,13 @@ fn test_ac_003_finding_only_in_baseline_is_findings_resolved() {
             observations: &base_obs,
             map: &base_map,
             findings: &base_findings,
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &curr_findings,
+            conformance: None,
         },
     );
 
@@ -474,11 +486,13 @@ fn test_ac_003_matching_by_exact_tuple_no_near_matches() {
             observations: &base_obs,
             map: &base_map,
             findings: &base_findings,
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &curr_findings,
+            conformance: None,
         },
     );
 
@@ -523,11 +537,13 @@ fn test_ac_004_role_shift_detected() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -576,11 +592,13 @@ fn test_ac_004_no_role_shift_when_role_unchanged() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -611,11 +629,13 @@ fn test_ac_004_new_flow_pair_appears_in_flow_shifts() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -663,11 +683,13 @@ fn test_ac_004_flow_volume_doubled_triggers_shift() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -726,11 +748,13 @@ fn test_ac_004_flow_volume_minor_change_not_in_shifts() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -769,11 +793,13 @@ fn test_ec_002_maps_with_no_shared_pseudonyms_warns_and_proceeds() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -844,11 +870,13 @@ fn test_f_w2_002_disjoint_flow_does_not_pad_flow_shifts() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -883,11 +911,13 @@ fn test_f_w2_002_disjoint_flow_baseline_only_goes_to_flows_gone() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -920,11 +950,13 @@ fn test_f_w2_003_hosts_new_uses_pseudonym_not_real_ip() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -988,11 +1020,13 @@ fn test_f_w2_004_finding_dst_port_extracted_from_real_evidence() {
             observations: &base_obs,
             map: &base_map,
             findings: std::slice::from_ref(&f_baseline),
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: std::slice::from_ref(&f_current),
+            conformance: None,
         },
     );
 
@@ -1043,11 +1077,13 @@ fn test_f_w2_004_same_dst_across_captures_is_recurring() {
             observations: &base_obs,
             map: &base_map,
             findings: std::slice::from_ref(&f_b),
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: std::slice::from_ref(&f_c),
+            conformance: None,
         },
     );
 
@@ -1115,11 +1151,13 @@ fn test_f_adv_p1_002_flow_shift_multiplier_below_default_retains_flows() {
             observations: &base_obs,
             map: &base_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &curr_map,
             findings: &[],
+            conformance: None,
         },
         1.5, // user threshold below the DEFAULT
     );
@@ -1446,11 +1484,13 @@ fn test_f_adv_p3_006_unmapped_label_has_sufficient_entropy() {
             observations: &Observations::default(),
             map: &empty_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &empty_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -1516,11 +1556,13 @@ fn test_f_adv_p3_006_unmapped_label_deterministic_with_fixed_salt() {
             observations: &Observations::default(),
             map: &empty_map,
             findings: &[],
+            conformance: None,
         },
         DiffInput {
             observations: &curr_obs,
             map: &empty_map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -1736,11 +1778,13 @@ fn test_f_adv_p4_003_extract_kv_requires_all_three_tokens() {
             observations: &obs,
             map: &map,
             findings: std::slice::from_ref(&finding),
+            conformance: None,
         },
         DiffInput {
             observations: &obs,
             map: &map,
             findings: &[],
+            conformance: None,
         },
     );
 
@@ -1749,4 +1793,112 @@ fn test_f_adv_p4_003_extract_kv_requires_all_three_tokens() {
     // not from the stray "port=53" token. This test mainly asserts that
     // the diff runs without confusion.
     assert_eq!(diff.findings_resolved.len(), 1);
+}
+
+/// P1-13: a minimal segmentation policy (YAML) for the `diff --policy` smoke
+/// test. Doesn't need to match the fixture's addressing — the conformance
+/// engine runs regardless, and the drift section renders whenever a policy is
+/// supplied.
+const SMOKE_POLICY: &str = r#"zones:
+  - id: plc
+    name: PLC Cell
+    purdue_level: L1
+    members: ["10.0.1.0/24"]
+  - id: hist
+    name: Historian
+    purdue_level: L3
+    members: ["10.0.3.0/24"]
+conduits:
+  - from_zone: plc
+    to_zone: hist
+    direction: forward
+    proto: tcp
+    ports: [502]
+"#;
+
+/// P1-13 CLI smoke: `diff --policy` end-to-end produces a report containing the
+/// "Segmentation drift" section; the same diff WITHOUT `--policy` does not.
+///
+/// Skips when the committed synthetic fixture is absent (same gate as the other
+/// fixture-dependent tests in this file).
+#[test]
+fn test_p1_13_diff_policy_emits_segmentation_drift_section() {
+    use assert_cmd::Command;
+    use tempfile::TempDir;
+
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
+    if !pcap.exists() {
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: synthetic-1mb.pcap missing in CI"
+        );
+        eprintln!(
+            "skipping test_p1_13_diff_policy_emits_segmentation_drift_section: fixture absent"
+        );
+        return;
+    }
+
+    let tmp = TempDir::new().unwrap();
+
+    // Build a scrub map from the fixture; reuse it for both diff sides.
+    let map = tmp.path().join("map.json");
+    let scrubbed_md = tmp.path().join("scrubbed.md");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["scrub"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&scrubbed_md)
+        .arg("--map")
+        .arg(&map)
+        .assert()
+        .success();
+
+    let policy = tmp.path().join("zones.yaml");
+    std::fs::write(&policy, SMOKE_POLICY).unwrap();
+
+    // ── with --policy: the drift section must appear ──
+    let with_policy = tmp.path().join("drift.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .arg("diff")
+        .arg(&pcap)
+        .arg(&pcap)
+        .arg("--baseline-map")
+        .arg(&map)
+        .arg("--current-map")
+        .arg(&map)
+        .arg("--policy")
+        .arg(&policy)
+        .arg("-o")
+        .arg(&with_policy)
+        .assert()
+        .success();
+    let html_with = std::fs::read_to_string(&with_policy).unwrap();
+    assert!(
+        html_with.contains("Segmentation drift"),
+        "diff --policy must render the Segmentation drift section"
+    );
+
+    // ── without --policy: the drift section must be absent ──
+    let no_policy = tmp.path().join("plain.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .arg("diff")
+        .arg(&pcap)
+        .arg(&pcap)
+        .arg("--baseline-map")
+        .arg(&map)
+        .arg("--current-map")
+        .arg(&map)
+        .arg("-o")
+        .arg(&no_policy)
+        .assert()
+        .success();
+    let html_without = std::fs::read_to_string(&no_policy).unwrap();
+    assert!(
+        !html_without.contains("Segmentation drift"),
+        "a plain diff (no --policy) must NOT render the Segmentation drift section"
+    );
 }

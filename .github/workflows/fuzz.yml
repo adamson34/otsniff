@@ -18,7 +18,7 @@ jobs:
           - parse_dnp3
           - scrub_text
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Pin the nightly toolchain. Unpinned `@nightly` broke the job:
       # cargo-fuzz's `rustix` dep stopped compiling on bleeding-edge nightly
