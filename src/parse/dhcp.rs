@@ -91,14 +91,8 @@ pub fn parse(payload: &[u8]) -> Option<DhcpInfo> {
         yiaddr
     } else if !ciaddr.is_unspecified() {
         ciaddr
-    } else if let Some(req) = requested_ip {
-        if !req.is_unspecified() {
-            req
-        } else {
-            return None;
-        }
     } else {
-        return None;
+        requested_ip.filter(|req| !req.is_unspecified())?
     };
 
     Some(DhcpInfo { ip, hostname: name })
