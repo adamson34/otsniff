@@ -29,7 +29,6 @@
 #   src/inventory.rs — role-inference heuristics; best tested by integration.
 #   src/oui.rs      — static lookup table; no branches to mutate meaningfully.
 #   src/report*.rs  — HTML/MD rendering; output format, not security logic.
-[examine]
 examine_globs = [
     "src/findings/**/*.rs",
     "src/parse/**/*.rs",
@@ -41,7 +40,6 @@ examine_globs = [
 # ---------------------------------------------------------------------------
 # Exclusions — generated or test-only files that are not production logic
 # ---------------------------------------------------------------------------
-[exclude]
 exclude_globs = [
     "tests/**",
     "benches/**",
@@ -54,7 +52,6 @@ exclude_globs = [
 # Set to 5× the baseline test-suite runtime so that genuinely slow mutants
 # are killed rather than timed out (which would inflate the "timeout" bucket
 # and undercount the true kill rate).
-[timeout]
 timeout_multiplier = 5.0
 
 # ---------------------------------------------------------------------------
@@ -76,7 +73,6 @@ timeout_multiplier = 5.0
 #                       the security properties we care about.
 #
 #   info! / warn!     — see above.
-[skip_calls]
 skip_calls = [
     "unwrap",
     "expect",

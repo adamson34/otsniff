@@ -40,6 +40,10 @@ predicates = "3"
 insta = { version = "1", features = ["json"] }
 tempfile = "3"
 criterion = "0.8"
+# Used by tests/s_3_03_mutation_testing_infrastructure.rs to deserialize
+# .cargo-mutants.toml against cargo-mutants' real schema. A substring check
+# cannot tell a valid config from one cargo-mutants rejects at startup.
+toml = "0.9"
 
 [lints.rust]
 # `kani` is a well-known custom cfg injected by cargo-kani during proof runs.
