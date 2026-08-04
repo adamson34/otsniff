@@ -4,22 +4,35 @@
 // (fa95cd3) that contains TODO placeholders, and must PASS once the
 // implementer fills in real values in Step 4.
 //
-// Tests use only `std::fs` and string matching; no new dependencies.
-//
 // Naming: test_ac_NNN_description
+//
+// AC-001's config tests deserialize .cargo-mutants.toml against a mirror of
+// cargo-mutants' own schema rather than string-matching the file. The original
+// substring assertions passed against a config that cargo-mutants rejected at
+// startup ("invalid type: map, expected a sequence"), which let every scheduled
+// mutants run fail from the workflow's first week onward without a red test.
 
 // ---------------------------------------------------------------------------
 // AC-001 — .cargo-mutants.toml: scoped mutation config
 // ---------------------------------------------------------------------------
 
-/// AC-001: .cargo-mutants.toml must exist and be parseable as TOML.
-/// Fails against stub because the file has TODO placeholders that indicate
-/// it is incomplete — we verify completeness by asserting no TODOs remain
-/// (handled in test_ac_001_no_todo_placeholders_remain).  This test also
-/// asserts the file exists and can be read so that a missing file is caught
-/// with a clear message.
-#[test]
-fn test_ac_001_cargo_mutants_config_exists_and_is_valid_toml() {
+/// Mirror of the subset of cargo-mutants' config schema that this repo sets.
+///
+/// `deny_unknown_fields` is the load-bearing part: cargo-mutants reads every
+/// one of these as a *top-level* key. Wrapping any of them in a `[table]`
+/// header — as this config did from the workflow's first commit — either
+/// errors outright or is silently ignored, dropping the intended scoping.
+/// Denying unknown fields turns both cases into a test failure.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MutantsConfig {
+    examine_globs: Vec<String>,
+    exclude_globs: Vec<String>,
+    timeout_multiplier: f64,
+    skip_calls: Vec<String>,
+}
+
+fn load_mutants_config() -> MutantsConfig {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/.cargo-mutants.toml");
     let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!(
@@ -27,47 +40,54 @@ fn test_ac_001_cargo_mutants_config_exists_and_is_valid_toml() {
              failed to read {path}: {e}"
         )
     });
+    toml::from_str(&content).unwrap_or_else(|e| {
+        panic!(
+            "AC-001: .cargo-mutants.toml must deserialize against cargo-mutants' \
+             schema — every key is top-level, not nested under a [table] header. \
+             cargo-mutants rejects a config it cannot read and the weekly gate \
+             then fails before running a single mutant.\n\
+             Parse error: {e}\n\nFound content:\n{content}"
+        )
+    })
+}
 
-    // Minimal structure: must have an [examine] section with examine_globs.
+/// AC-001: .cargo-mutants.toml must exist and be a config cargo-mutants
+/// actually accepts — not merely well-formed TOML.
+#[test]
+fn test_ac_001_cargo_mutants_config_exists_and_is_valid_toml() {
+    let config = load_mutants_config();
+
     assert!(
-        content.contains("[examine]"),
-        "AC-001: .cargo-mutants.toml must contain an [examine] section; \
-         found content:\n{content}"
-    );
-    assert!(
-        content.contains("examine_globs"),
-        "AC-001: .cargo-mutants.toml must contain examine_globs to scope \
-         mutation testing; found content:\n{content}"
+        !config.examine_globs.is_empty(),
+        "AC-001: examine_globs must scope mutation testing to the high-value \
+         modules; an empty list mutates the whole crate"
     );
 
-    // Must have a [skip] section with at least one documented entry (not empty).
     // AC-001 requires "skip-list documented for known-irrelevant mutations".
-    // The stub has `skip = []` — an empty skip list means the skip-list is not
-    // yet documented, so this assertion fails until Step 4 populates it.
     assert!(
-        !content.contains("skip = []"),
-        "AC-001: .cargo-mutants.toml skip list must be populated with \
-         at least one entry for known-irrelevant mutations (e.g. metadata \
-         strings, log levels, evidence sample order); stub had skip = [] \
-         with no entries documented"
+        !config.skip_calls.is_empty(),
+        "AC-001: skip_calls must be populated with at least one entry for \
+         known-irrelevant mutations (e.g. unwrap/expect panic sites, log-level \
+         macros)"
+    );
+
+    assert!(
+        config.timeout_multiplier > 1.0,
+        "AC-001: timeout_multiplier must exceed 1.0 so genuinely slow mutants \
+         are killed rather than timed out (which undercounts the kill rate); \
+         found {}",
+        config.timeout_multiplier
     );
 }
 
-/// AC-001: The four high-value modules must be listed in examine_globs AND
-/// the skip-list must be non-trivially documented (not just a bare comment
-/// referencing TODO).
+/// AC-001: The high-value modules must be covered by the *parsed* examine_globs.
 ///
-/// Fails against stub because `skip = []` means no skip entries are present,
-/// and also because TODO placeholders appear throughout the skip section.
+/// Checked against the deserialized globs, not the file text — every one of
+/// these module paths also appears in the config's comment block, so a
+/// substring check passes even when examine_globs is empty or misparsed.
 #[test]
 fn test_ac_001_examine_globs_cover_the_four_high_value_modules() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/.cargo-mutants.toml");
-    let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
-        panic!(
-            "AC-001: .cargo-mutants.toml must exist; \
-             failed to read {path}: {e}"
-        )
-    });
+    let config = load_mutants_config();
 
     for module in &[
         "src/findings/",
@@ -76,22 +96,17 @@ fn test_ac_001_examine_globs_cover_the_four_high_value_modules() {
         "src/ai/leak_detector.rs",
     ] {
         assert!(
-            content.contains(module),
-            "AC-001: .cargo-mutants.toml examine_globs must reference \
-             high-value module {module}; it was missing from content:\n\
-             {content}"
+            config.examine_globs.iter().any(|g| g.starts_with(module)),
+            "AC-001: examine_globs must reference high-value module {module}; \
+             parsed globs were {:?}",
+            config.examine_globs
         );
     }
 
-    // The skip section must have at least one real skip entry (not TODO).
-    // A real skip entry will be a non-empty string value, e.g. `"src/main.rs"`.
-    // We detect "no real skip entries" by checking that the file still has the
-    // TODO marker specifically in the skip-list block.
     assert!(
-        !content.contains("TODO(S-3.03 step 4): add skip-list entries"),
-        "AC-001: the [skip] section TODO comment must be replaced with real \
-         skip-list entries for known-irrelevant mutations; stub had TODO \
-         placeholder for skip-list entries"
+        !config.exclude_globs.is_empty(),
+        "AC-001: exclude_globs must keep test/bench/example sources out of the \
+         mutated set"
     );
 }
 
