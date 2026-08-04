@@ -30,6 +30,22 @@ This scope is codified in `.cargo-mutants.toml` at the repo root.
 
 ## Kill-rate baseline
 
+> **The baseline below does not describe the current scope and must be
+> re-derived.**  It was measured against **180 mutants**; the scope codified in
+> `.cargo-mutants.toml` generates **1388**, and the measurement predates
+> `src/diff.rs` entering scope, so that module contributes nothing to it.
+>
+> The cause: from the config's introduction until 2026-08-04, every key in
+> `.cargo-mutants.toml` was nested under a `[table]` header when cargo-mutants
+> reads them all as top-level.  It rejected the file outright, so **no
+> scheduled run ever completed** — the numbers here came from a local
+> invocation against a much smaller mutant set, and the workflow that was
+> supposed to keep them honest never ran.  See the workflow-history note under
+> "Ratchet policy" below.
+>
+> The first complete sharded run establishes the real baseline; the table and
+> the 79.1% threshold should both be replaced from it.
+
 The wave-1 baseline was established on 2026-05-22 against commit `4680e66`
 with cargo-mutants 27.0.0.  The numbers below reflect the **effective kill
 rate after disposition**: surviving mutants were classified and recorded as:
@@ -57,7 +73,14 @@ cargo-mutants version: 27.0.0
 **Ratchet policy:** A future PR that drops kill-rate by > 5% (i.e. below
 79.1%) is flagged for review as a soft signal.  The workflow posts the
 current kill rate to `$GITHUB_STEP_SUMMARY` on every weekly run so the
-team can track drift.  A drop of > 5% is not an automatic block, but it
+team can track drift.
+
+> **Workflow history.** Every scheduled run from 2026-05-25 through
+> 2026-08-03 — 11 consecutive weeks, the workflow's entire history — failed
+> at startup on the malformed config, so no drift was ever tracked and the
+> 79.1% gate never evaluated.  Both the config and the tests that were
+> supposed to catch it were fixed in #154; the run is now sharded 16 ways
+> because ~1400 mutants cannot finish serially inside GitHub's 6h job ceiling.  A drop of > 5% is not an automatic block, but it
 must be acknowledged in the PR description with one of: a new test that
 re-kills the escaped mutant, a B/C waiver with justification, or a comment
 explaining why the drop is acceptable.

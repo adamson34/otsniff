@@ -1,9 +1,15 @@
 name: Mutants (weekly)
 
 # Runs mutation tests on the develop tip once per week.
-# Does NOT trigger on pull_request — mutation testing is slow (~30 min) and
-# must not block PR merges per AC-002.  Results are surfaced as a GitHub
-# Actions step summary and as a downloadable artifact.
+# Does NOT trigger on pull_request — mutation testing is slow and must not
+# block PR merges per AC-002.  Results are surfaced as a GitHub Actions step
+# summary and as downloadable per-shard artifacts.
+#
+# Sharding: the scoped mutant set is ~1400 mutants, each of which costs an
+# incremental rebuild plus a full test-suite run.  Serially that is many hours
+# — far past the 6h GitHub job ceiling — so the set is split across a matrix
+# and the kill rate is aggregated afterwards.  `--shard k/n` is 0-indexed and
+# partitions deterministically, so the shards are disjoint and exhaustive.
 
 on:
   schedule:
@@ -14,10 +20,27 @@ on:
   workflow_dispatch:
     # Allow manual trigger for ad-hoc baseline runs or after a large refactor.
 
+env:
+  # Single source of truth for the shard denominator.  The `shard` matrix list
+  # below must enumerate 0..SHARD_COUNT-1; the aggregate job fails loudly if the
+  # number of shard results it receives does not equal this value, which catches
+  # the two drifting apart.
+  SHARD_COUNT: 16
+  CARGO_MUTANTS_VERSION: 27.0.0
+
 jobs:
   mutants:
-    name: Mutation testing
+    name: Mutation testing (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    # A shard that blows past this is a signal to raise SHARD_COUNT, not to wait.
+    # Bounded so a pathological shard fails fast instead of burning the 6h ceiling.
+    timeout-minutes: 120
+    strategy:
+      # Every shard must run: a failure in one still leaves the others'
+      # outcomes worth aggregating, and the aggregate reports the shortfall.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
     steps:
       - name: Checkout repository
@@ -28,73 +51,105 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cargo-mutants (pinned to 27.0.0)
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Shards build identical dependency graphs; one shared cache entry
+          # saves a cold dependency compile on each of them.
+          shared-key: mutants
+          save-if: ${{ matrix.shard == 0 }}
+
+      - name: Cache cargo-mutants binary
+        id: cache-mutants-bin
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-mutants
+          key: cargo-mutants-${{ runner.os }}-${{ env.CARGO_MUTANTS_VERSION }}
+
+      - name: Install cargo-mutants (pinned)
         # ADV-W2-005: exact-version pin (not a "^27" range) so the kill-rate
         # threshold and JSON schema are reproducible. Bump manually when a new
         # release is validated against this config.
-        run: cargo install --locked cargo-mutants --version "=27.0.0"
+        # Building this from source on all 16 shards costs more than the cache.
+        if: steps.cache-mutants-bin.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-mutants --version "=${{ env.CARGO_MUTANTS_VERSION }}"
 
       - name: Run mutation testing
         run: |
           cargo mutants \
             --no-shuffle \
+            --shard ${{ matrix.shard }}/${{ env.SHARD_COUNT }} \
+            --jobs 2 \
             --timeout-multiplier 5 \
             --output mutants-out \
             --config .cargo-mutants.toml
         env:
           RUST_BACKTRACE: 1
 
-      - name: Upload mutation results artifact
+      - name: Upload shard results artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: mutants-results
+          name: mutants-results-shard-${{ matrix.shard }}
           path: mutants-out/**
           retention-days: 30
 
-      - name: Post kill-rate summary to Actions step summary
-        if: always()
+  aggregate:
+    name: Aggregate kill rate
+    runs-on: ubuntu-latest
+    needs: mutants
+    # Shards are allowed to fail individually; the aggregate is what gates, and
+    # it reports how many shards are missing rather than silently under-counting.
+    if: always()
+
+    steps:
+      - name: Download all shard results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: mutants-results-shard-*
+          path: shard-results
+
+      - name: Aggregate kill rate and gate
         run: |
-          # Parse the outcomes.json produced by cargo-mutants and compute kill rate.
+          # Merge every shard's outcomes.json into one tally.
           #
-          # F-ADV-P4-002: the previous parser searched for schema values
-          # `'MissedMutations'` (plural — wrong), `'killed'`, and `'caught'`,
-          # none of which match cargo-mutants v27's actual schema:
-          # `CaughtMutant`, `MissedMutation` (singular), `Timeout`, `Unviable`,
-          # `Success`. killed=0 always, the F-ADV-P3-007 gate exited 1 on
-          # every successful run AND no schema-mismatch sanity check fired.
-          OUTCOMES="mutants-out/outcomes.json"
-          if [ -f "$OUTCOMES" ]; then
-            PARSED=$(python3 -c "
-          import json, sys
-          data = json.load(open('$OUTCOMES'))
-          outcomes = data.get('outcomes', [])
-          # cargo-mutants v27 schema (verify against \`cargo mutants --json\` output):
-          #   CaughtMutant   — test suite detected the mutation (KILLED)
-          #   MissedMutation — mutation passed tests (SURVIVED — bug!)
-          #   Timeout        — test timed out (counted as killed for kill-rate purposes)
-          #   Unviable       — mutation didn't compile (skipped; not in denominator)
-          #   Success        — baseline run (the unmutated build); excluded from rate
-          killed   = sum(1 for o in outcomes if o.get('summary') == 'CaughtMutant')
-          survived = sum(1 for o in outcomes if o.get('summary') == 'MissedMutation')
-          timeout  = sum(1 for o in outcomes if o.get('summary') == 'Timeout')
-          unviable = sum(1 for o in outcomes if o.get('summary') == 'Unviable')
-          # 'total' excludes Unviable (those didn't get a real test result)
-          # and Success (the baseline run, not a mutant).
+          # F-ADV-P4-002: the parser matches cargo-mutants v27's actual schema
+          # (`CaughtMutant`, `MissedMutation` singular, `Timeout`, `Unviable`,
+          # `Success`). An earlier version searched for `MissedMutations`
+          # (plural), `killed`, and `caught` — none of which exist — so killed
+          # was always 0 and no schema-mismatch check fired.
+          PARSED=$(python3 - <<'PY'
+          import glob, json
+
+          killed = survived = timeout = unviable = 0
+          shards = 0
+          for path in sorted(glob.glob('shard-results/*/outcomes.json')):
+              shards += 1
+              for o in json.load(open(path)).get('outcomes', []):
+                  s = o.get('summary')
+                  # 'Success' is the per-shard unmutated baseline run, not a mutant.
+                  if s == 'CaughtMutant':
+                      killed += 1
+                  elif s == 'MissedMutation':
+                      survived += 1
+                  elif s == 'Timeout':
+                      timeout += 1
+                  elif s == 'Unviable':
+                      unviable += 1
+          # Unviable mutations did not compile, so they never got a test result
+          # and stay out of the denominator.
           total = killed + survived + timeout
-          print(f'{killed} {total} {survived} {timeout} {unviable}')
-          " 2>/dev/null || echo "0 0 0 0 0")
-            read -r KILLED TOTAL SURVIVED TIMEOUT UNVIABLE <<< "$PARSED"
-            if [ "$TOTAL" -gt 0 ]; then
-              # Killed + Timeout count as kills (timeout means test exceeded
-              # budget — still a detected mutation). Survived is the failure
-              # mode the kill rate is measuring.
-              KILL_PCT=$(python3 -c "print(f'{($KILLED + $TIMEOUT) / $TOTAL * 100:.1f}')")
-            else
-              KILL_PCT="n/a"
-            fi
+          print(f'{killed} {total} {survived} {timeout} {unviable} {shards}')
+          PY
+          ) || PARSED="0 0 0 0 0 0"
+          read -r KILLED TOTAL SURVIVED TIMEOUT UNVIABLE SHARDS <<< "$PARSED"
+
+          if [ "$TOTAL" -gt 0 ]; then
+            # Killed + Timeout both count as kills: a timeout means the mutation
+            # was detected by exceeding the test budget. Survived is the failure
+            # mode the kill rate actually measures.
+            KILL_PCT=$(python3 -c "print(f'{($KILLED + $TIMEOUT) / $TOTAL * 100:.1f}')")
           else
-            KILLED=0; TOTAL=0; SURVIVED=0; TIMEOUT=0; UNVIABLE=0; KILL_PCT="n/a"
+            KILL_PCT="n/a"
           fi
 
           {
@@ -107,38 +162,43 @@ jobs:
             echo "| Survived (MissedMutation) | ${SURVIVED} |"
             echo "| Timeout | ${TIMEOUT} |"
             echo "| Unviable (excluded) | ${UNVIABLE} |"
+            echo "| Shards reporting | ${SHARDS} / ${SHARD_COUNT} |"
             echo ""
-            echo "See the \`mutants-results\` artifact for the full report."
-            echo ""
-            echo "> Baseline: 84.1% (wave-1, effective kill rate after disposition)."
-            echo "> Threshold: 79.1% (5pp below baseline). Below threshold fails CI."
+            echo "See the \`mutants-results-shard-*\` artifacts for surviving mutants."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # F-ADV-P4-002: schema-mismatch sanity check. If the parser produced
-          # zero killed AND zero survived AND zero timeout despite total > 0
-          # being possible (outcomes.json existed with entries), the
-          # cargo-mutants schema has likely shifted and the parser needs
-          # updating. Fail loudly with a clear actionable error rather than
-          # silently reporting bogus counts.
-          if [ -f "$OUTCOMES" ] && [ "$KILLED" = "0" ] && [ "$SURVIVED" = "0" ] && [ "$TIMEOUT" = "0" ] && [ "$UNVIABLE" = "0" ]; then
-            ENTRY_COUNT=$(python3 -c "import json; print(len(json.load(open('$OUTCOMES')).get('outcomes', [])))" 2>/dev/null || echo "0")
-            if [ "$ENTRY_COUNT" != "0" ]; then
-              echo "::error::F-ADV-P4-002: outcomes.json has ${ENTRY_COUNT} entries but parser found zero of any kind — cargo-mutants schema has likely changed. Update .github/workflows/mutants.yml summary-field strings."
-              exit 1
-            fi
+          # An incomplete shard set means the tally is a floor, not a rate, so
+          # gating on it would compare against the wrong denominator.
+          if [ "$SHARDS" != "$SHARD_COUNT" ]; then
+            echo "::error::only ${SHARDS}/${SHARD_COUNT} shards reported outcomes — the aggregate kill rate is incomplete. Check for timed-out or failed shard jobs."
+            exit 1
           fi
 
-          # F-ADV-P3-007: POL-11 — fail CI on kill-rate regression instead of
-          # writing a "soft signal" to the step summary that nobody reads.
-          # Threshold is 5pp below the 84.1% baseline = 79.1%.
+          # F-ADV-P4-002: schema-mismatch sanity check. Entries present but every
+          # bucket zero means cargo-mutants' schema shifted under the pin.
+          if [ "$KILLED" = "0" ] && [ "$SURVIVED" = "0" ] && [ "$TIMEOUT" = "0" ] && [ "$UNVIABLE" = "0" ]; then
+            echo "::error::F-ADV-P4-002: shards reported outcomes but the parser found zero of every kind — cargo-mutants schema has likely changed. Update the summary-field strings in this workflow."
+            exit 1
+          fi
+
+          # F-ADV-P3-007: POL-11 — fail on kill-rate regression rather than
+          # writing a soft signal nobody reads. This workflow does not run on
+          # pull_request, so a failure here reports drift; it does not block merges.
+          #
+          # NOTE: the 79.1% threshold derives from an 84.1% baseline measured on
+          # 2026-05-22 against 180 mutants. The scoped set is ~1400, and that
+          # baseline predates src/diff.rs entering scope, so it does not describe
+          # this population. See docs/MUTANTS.md — the first complete run here
+          # establishes the real baseline and this number should be re-derived
+          # from it.
           if [ "$KILL_PCT" = "n/a" ]; then
-            echo "::warning::mutation testing produced no outcomes.json (cargo-mutants may have failed early); not gating"
+            echo "::warning::no mutant outcomes parsed; not gating"
             exit 0
           fi
           THRESHOLD_OK=$(python3 -c "print(1 if $KILL_PCT >= 79.1 else 0)")
           if [ "$THRESHOLD_OK" = "1" ]; then
-            echo "Check passed: parsed ${TOTAL} outcomes, kill rate ${KILL_PCT}% (>= 79.1% threshold), $((KILLED + TIMEOUT))/${TOTAL} mutants killed (incl. ${TIMEOUT} timeout), ${UNVIABLE} unviable excluded"
+            echo "Check passed: ${TOTAL} outcomes across ${SHARDS} shards, kill rate ${KILL_PCT}% (>= 79.1%), $((KILLED + TIMEOUT))/${TOTAL} killed (incl. ${TIMEOUT} timeout), ${UNVIABLE} unviable excluded"
           else
-            echo "::error::F-ADV-P3-007: kill rate ${KILL_PCT}% is below threshold 79.1% (5pp below 84.1% baseline). See mutants-results artifact for surviving mutants."
+            echo "::error::F-ADV-P3-007: kill rate ${KILL_PCT}% is below the 79.1% threshold. See the mutants-results-shard-* artifacts for surviving mutants."
             exit 1
           fi
