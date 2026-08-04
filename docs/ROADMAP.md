@@ -594,7 +594,13 @@ common operator footgun.
 (window-mismatch warning), snapshot tests.
 **Deps:** P1-3 base diff (shipped).
 
-### P1-12: Trusted-writer / engineering-allowlist suppression (M)
+### P1-12: Trusted-writer / engineering-allowlist suppression (M) — 🔵 spec written
+
+Spec: [`docs/specs/trusted-writer-allowlist.md`](specs/trusted-writer-allowlist.md).
+Decision record: [ADR-0015](adr/0015-operator-declared-trusted-writers.md) —
+operator assertions may lower severity but never suppress, and a finding mixing
+trusted and untrusted pairs keeps its severity for the untrusted ones.
+
 
 Today the `ics.modbus_writes` (and analogous `ics.s7_engineering`,
 `ics.cip_engineering`) rules fire on every engineering-class call,
