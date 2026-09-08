@@ -8,22 +8,22 @@ cycle: v0.7.0-feature
 current_wave: 1
 total_waves: 1  # w1 S-13.01 (otsniff-privacy crate extraction); more waves added as scoped
 total_stories: 1
-wave_1_status: not_started
-wave_1_gate: pending
+wave_1_status: complete
+wave_1_gate: pending  # run wave-gate now that the sole wave-1 story is merged
 
 stories:
   S-13.01:
-    status: ready
+    status: merged
     wave: 1
-    branch: feat/otsniff-privacy-crate  # created off develop, currently empty (0 commits)
-    worktree: null
-    merge_sha: null
-    pr: null
-    completed_at: null
+    branch: feature/S-13.01-otsniff-privacy-crate  # deleted post-merge (remote + local)
+    worktree: null  # removed post-merge
+    merge_sha: 9f54a6b858a506fbb3b602aaff5ff4eaca9a0528
+    pr: 164
+    completed_at: 2026-09-08T17:14:39Z
     points: 8
     epic: E-13
-    adversary_convergence: not_started
-    red_gate: not_started
+    adversary_convergence: converged  # 10 fresh-context passes, 3 consecutive NITPICK_ONLY (8/9/10); see cycles/v0.7.0-feature/S-13.01/adversary-convergence-state.json
+    red_gate: passed  # see cycles/v0.7.0-feature/S-13.01/implementation/red-gate-log.md
     bcs: [BC-5.01.001, BC-5.01.002, BC-5.01.003, BC-5.01.004, BC-5.02.001, BC-5.02.002, BC-5.02.003, BC-5.03.001]
     traces_to: P1-14
-    notes: "otsniff-privacy crate extraction (ADR-0016). Pure refactor: moves ScrubMap/scrub_text/unscrub_text/pseudonym mechanics + leak_detector into crates/otsniff-privacy; build_map/merge_map (Observations-dependent) stay in otsniff/src. Enables the planned otsniff-hunt companion tool to reuse the privacy core. No observable behavior change — see stories/S-13.01-otsniff-privacy-crate-extraction.md."
+    notes: "otsniff-privacy crate extraction (ADR-0016). Pure refactor: moves ScrubMap/scrub_text/unscrub_text/pseudonym mechanics + leak_detector into crates/otsniff-privacy; build_map/merge_map (Observations-dependent) stay in otsniff/src. Enables the planned otsniff-hunt companion tool to reuse the privacy core. One deliberate, documented exception to 'no observable behavior change': a u32-overflow hardening fix in merge_family (was a debug-panic/release-silent-wrap pre-move, now a clean exit-70 error). Crate relicensed Apache-2.0 (maintainer decision, to match the root crate it was extracted from) instead of zonewarden's MIT precedent. 679 tests passing (669 baseline + 10 net-new regression tests added across the review cycles). See stories/S-13.01-otsniff-privacy-crate-extraction.md."

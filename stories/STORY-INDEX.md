@@ -65,7 +65,7 @@ status: active
      introduced by it. sprint-state.yaml is the authoritative record for
      those five stories in the meantime. -->
 
-| S-13.01 | Extract privacy/scrub layer into `crates/otsniff-privacy` | E-13 | 1 | 8 | ready | — | S.5, build |
+| S-13.01 | Extract privacy/scrub layer into `crates/otsniff-privacy` | E-13 | 1 | 8 | merged | — | S.5, build |
 
 **Total points (v0.4.0-feature):** 125 (Wave 1: ~88, Wave 2: ~24, Wave 3: ~13)
 **Total stories (v0.4.0-feature):** 38 (Wave 1: 30, Wave 2: 6, Wave 3: 2)
@@ -73,7 +73,7 @@ status: active
 **Story-count check (v0.4.0-feature):** E-1=6, E-2=12, E-3=6, E-4=4, E-5=7, E-6=3 → 38.
 **v0.5.0 backfill:** E-7=2 stories (delivered outside VSDD pipeline — see story files).
 **v0.6.0-feature:** E-8..E-12=5 stories (S-8.01..S-12.01, all completed & gated — see sprint-state.yaml).
-**v0.7.0-feature:** E-13=1 story so far (S-13.01, P1-14 otsniff-privacy crate extraction, 8 points, Wave 1, status ready).
+**v0.7.0-feature:** E-13=1 story so far (S-13.01, P1-14 otsniff-privacy crate extraction, 8 points, Wave 1, status merged — PR #164).
 **Cumulative story count:** 46 (per frontmatter `total_stories`; this table's rows lag behind — see the S-9.01..S-12.01 backfill note above). **E-7** stories have no point values (not tracked through the pipeline).
 
 ## Epic rollup

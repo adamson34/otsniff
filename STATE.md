@@ -5,7 +5,7 @@ product: otsniff
 mode: brownfield
 timestamp: 2026-09-07T00:00:00Z
 current_cycle: v0.7.0-feature
-current_cycle_status: open — S-13.01 ready for phase-3 delivery
+current_cycle_status: wave 1 complete (S-13.01 merged) — wave-gate pending
 previous_cycle: v0.6.0-feature
 previous_cycle_status: complete
 v050_backfill_status: complete
@@ -14,14 +14,16 @@ phase_0_status: complete
 phase_1_status: complete-converged
 phase_2_status: complete-approved
 phase_2_approval: human-approved 2026-05-11
-next_phase: S-13.01 (otsniff-privacy crate extraction, P1-14, ADR-0016) ready on branch feat/otsniff-privacy-crate — awaiting phase-3 delivery
+next_phase: run /wave-gate wave-1 for v0.7.0-feature (S-13.01 merged via PR #164, 9f54a6b); a separate, already-spec'd P1-12 (trusted-writer, ADR-0015) on branch feat/trusted-writer-impl is not yet sequenced into a wave
 ---
 
 # otsniff factory state
 
 v0.6.0-feature closed with all 5 waves gated; develop bumped to 0.7.0-dev.1.
-The factory is now open on cycle v0.7.0-feature with its first story,
-S-13.01, sprint-ready.
+The factory is on cycle v0.7.0-feature; its first (and so far only) story,
+S-13.01, merged via PR #164 (9f54a6b) after a 10-pass adversarial
+convergence loop (converged: 3 consecutive NITPICK_ONLY passes, zero
+BLOCKING/MAJOR findings in the final 5). Wave 1 gate has not been run yet.
 
 ## Completed cycles
 
