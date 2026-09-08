@@ -318,8 +318,9 @@ mod tests {
 /// Production code (regex-based `scan`, `ensure_clean`,
 /// `ensure_no_map_values`) is never modified; all changes are inside this
 /// `#[cfg(kani)]` module. The model functions below are self-contained and
-/// do not call into the (currently stubbed) production functions above, so
-/// they exist and type-check independent of Red Gate status.
+/// do not call into the production functions above -- they implement the
+/// same algorithm independently so Kani can unwind them without hitting
+/// the `regex` crate's heap-allocated state machines.
 #[cfg(kani)]
 mod kani_proofs {
     use super::*;

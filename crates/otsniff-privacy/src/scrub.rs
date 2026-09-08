@@ -382,9 +382,9 @@ pub fn pseudonym_regex() -> Regex {
 /// Moved verbatim from otsniff's `src/scrub.rs` per ADR-0016. Production
 /// code (`scrub_text`, `unscrub_text`, `pseudonym_regex`) is never modified;
 /// all changes are inside this `#[cfg(kani)]` module. The model functions
-/// below are self-contained and do not call into the (currently stubbed)
-/// production functions above, so they exist and type-check independent of
-/// Red Gate status.
+/// below are self-contained and do not call into the production functions
+/// above -- they implement the same algorithm independently so Kani can
+/// unwind them without hitting the `regex` crate.
 #[cfg(kani)]
 mod kani_proofs {
     use super::*;
