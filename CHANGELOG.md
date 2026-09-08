@@ -30,9 +30,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   boundary. `otsniff`'s own `src/scrub.rs` keeps
   only the population functions (`build_map`, `build_map_at`, `merge_map`)
   that walk otsniff's `Observations` capture model.
-  - No user-facing or CLI behavior change: `otsniff analyze`, `scrub`,
-    `unscrub`, and `diff` all produce byte-identical output to before this
-    change.
+  - No user-facing or CLI behavior change for all existing fixtures and
+    smoke tests: `otsniff analyze`, `scrub`, `unscrub`, and `diff` all
+    produce byte-identical output to before this change. (See the
+    `### Fixed` entry below for one deliberate, narrow exception uncovered
+    by a later review cycle.)
   - `OtError::PrivacyLeak { kind, message }` is now
     `OtError::Privacy(otsniff_privacy::PrivacyError)`, following the same
     wrapping shape as the existing `OtError::Segmentation` variant (an
@@ -54,3 +56,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     pre-extraction exit code (70) and `"pcap parse error: ..."` message
     prefix for that class of error exactly, rather than folding it into the
     75/"privacy invariant tripped" shape above.
+
+### Fixed
+
+- `otsniff scrub --baseline-map` (and other baseline-map-consuming paths)
+  no longer panics (debug) or silently mints a colliding
+  `host_000`/`mac_000`/`name_000` pseudonym (release) when a baseline
+  map's family already contains a `u32::MAX`-indexed key; it now fails
+  cleanly with exit code 70.
