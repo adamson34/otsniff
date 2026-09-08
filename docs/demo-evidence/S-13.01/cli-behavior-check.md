@@ -1,4 +1,4 @@
-# CLI Behavior Check: Map-Corruption Path (AC-005)
+# CLI Behavior Check: Map-Corruption Path (AC-003, AC-005)
 
 **Purpose:** AC-005 requires no observable behavior change from the crate
 extraction. This check exercises `ScrubMap::validate()`'s map-corruption
