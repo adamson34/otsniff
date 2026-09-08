@@ -192,7 +192,10 @@ pub fn is_canonical_pseudonym(pseudo: &str, prefix: &str) -> bool {
 /// present in `baseline` (as map values) are skipped — their existing
 /// pseudonyms are preserved. New real values are appended with fresh
 /// pseudonyms of the form `{prefix}{NNN:03}` continuing from
-/// `max_index(baseline, prefix) + 1`.
+/// `max_index(baseline, prefix) + 1`. Returns `Err(PrivacyError::MapCorrupt)`
+/// (rather than panicking or wrapping) if that index would overflow `u32`
+/// (F-2, S-13.01 third review) or if a pseudonym collision is detected
+/// (EC-002 / F-ADV-P4-009).
 pub fn merge_family(
     baseline: &mut BTreeMap<String, String>,
     current_entries: impl Iterator<Item = (String, String)>,
@@ -219,8 +222,36 @@ pub fn merge_family(
         return Ok(());
     }
 
-    let start = max_index(baseline, prefix) + 1;
-    for (idx, real) in (start..).zip(new_reals) {
+    let start =
+        max_index(baseline, prefix)
+            .checked_add(1)
+            .ok_or_else(|| PrivacyError::MapCorrupt {
+                message: format!(
+                    "scrub map's '{prefix}' family already contains the maximum \
+                 representable pseudonym index (u32::MAX); cannot assign a new \
+                 pseudonym. Regenerate the map with `otsniff scrub`."
+                ),
+            })?;
+    // Note: deliberately NOT `(start..).zip(new_reals)`. `RangeFrom<u32>::next()`
+    // eagerly computes `current + 1` (via `Step::forward`) to advance its
+    // internal state *before* returning the current item, and that advance
+    // panics on overflow unconditionally (not just in debug builds) rather
+    // than saturating. So even a `start` that is itself a valid `u32` (e.g.
+    // `u32::MAX`) would panic on the very first `.next()` call, before
+    // `zip`'s short-circuiting on `new_reals` running out ever gets a chance
+    // to matter. Indexing by `checked_add` per iteration avoids constructing
+    // an unbounded range at all.
+    for (i, real) in new_reals.into_iter().enumerate() {
+        let idx = u32::try_from(i)
+            .ok()
+            .and_then(|i| start.checked_add(i))
+            .ok_or_else(|| PrivacyError::MapCorrupt {
+                message: format!(
+                    "scrub map's '{prefix}' family already contains the maximum \
+                     representable pseudonym index (u32::MAX); cannot assign a new \
+                     pseudonym. Regenerate the map with `otsniff scrub`."
+                ),
+            })?;
         let pseudo = format!("{prefix}{idx:03}");
         // EC-002: if this pseudonym already maps to a *different* real value
         // that's a bug — the invariant has been violated.
@@ -906,35 +937,67 @@ mod tests {
     ///
     /// Investigated whether a real call to `merge_family` can reach this
     /// branch: it cannot, for any well-typed `BTreeMap<String, String>`
-    /// input. `start = max_index(baseline, prefix) + 1`, and `max_index`
+    /// input whose max index for `prefix` is below `u32::MAX`. `max_index`
     /// scans *every* baseline key that starts with `prefix` and parses as
     /// `u32` after stripping it -- which is exactly the shape of any key
     /// that could later collide (`format!("{prefix}{idx:03}")` also has that
     /// shape and also parses). So any baseline entry that could collide with
     /// a future `pseudo` is, by construction, already counted in `max_index`,
-    /// which pushes `start` past it. This matches the surrounding code
-    /// comment ("unreachable in correct code"); this test therefore pins the
-    /// *shape* of the error the guard constructs (the `MapCorrupt` variant),
-    /// directly, rather than exercising the unreachable call site -- so a
-    /// future refactor that changes the `pseudonym_collision` construction
-    /// site from `PrivacyError::MapCorrupt` to `PrivacyError::Leak` is still
-    /// only caught by code review, not by this test. See the M-2 fix-up
-    /// report for the full reachability analysis.
+    /// which pushes `start` past it.
+    ///
+    /// F-2 (S-13.01 third review): that reachability analysis had an
+    /// unstated boundary condition -- it assumed `max_index(...) + 1` never
+    /// overflows. A baseline map loaded from disk can legitimately contain a
+    /// key like `"host_4294967295"` (`u32::MAX`), at which point
+    /// `checked_add(1)` now returns a `MapCorrupt` error of its own (see the
+    /// guard right after `max_index` in `merge_family`) rather than reaching
+    /// this collision branch at all. So the collision branch itself is still
+    /// unreachable below that boundary, and the boundary case takes a
+    /// different, dedicated error path -- exercised directly by
+    /// `test_f_002_merge_family_rejects_u32_max_baseline_index` below rather
+    /// than by this test. This test therefore continues to pin only the
+    /// *shape* of the (still-unreached-in-practice) collision error, not
+    /// site coverage.
     #[test]
-    fn test_f_002_pseudonym_collision_error_shape() {
+    fn test_f_002_map_corrupt_display_includes_fault_name() {
         let err = PrivacyError::MapCorrupt {
             message: "EC-002: pseudonym collision in baseline map — 'host_002' \
                       maps to both 'A' (baseline) and 'B' (current)."
                 .to_string(),
         };
-        assert!(
-            matches!(err, PrivacyError::MapCorrupt { .. }),
-            "pseudonym_collision must be a MapCorrupt variant, not Leak: {err:?}"
-        );
         let msg = format!("{err}");
         assert!(
             msg.contains("collision"),
             "error message should name the fault; got: {msg}"
+        );
+    }
+
+    /// F-2 (S-13.01 third review): `merge_family` must not panic (debug-mode
+    /// `attempt to add with overflow`) or silently wrap (release mode) when
+    /// a baseline map loaded from disk already has the maximum representable
+    /// pseudonym index (`u32::MAX`) for a family. This is user-controlled
+    /// input via `--baseline-map`, not something the CLI itself can rule
+    /// out, so it must fail cleanly with a typed `PrivacyError::MapCorrupt`
+    /// instead -- same "no panic on user input" convention the EC-002 guard
+    /// a few lines above already follows.
+    #[test]
+    fn test_f_002_merge_family_rejects_u32_max_baseline_index() {
+        let mut baseline = BTreeMap::new();
+        baseline.insert("host_4294967295".to_string(), "10.0.0.1".to_string());
+
+        let new_entries = vec![("host_001".to_string(), "10.0.0.2".to_string())];
+        let result = merge_family(&mut baseline, new_entries.into_iter(), "host_");
+
+        assert!(
+            matches!(result, Err(PrivacyError::MapCorrupt { .. })),
+            "merge_family must return PrivacyError::MapCorrupt on a u32::MAX \
+             baseline index, not panic or wrap: {result:?}"
+        );
+        let err = result.unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("u32::MAX") || msg.to_ascii_uppercase().contains("MAXIMUM"),
+            "error message should explain the overflow; got: {msg}"
         );
     }
 }
