@@ -99,11 +99,12 @@ pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
         .any(|k| matches!(*k, "bittorrent" | "irc" | "sip" | "rtmp"));
     let has_email_or_messaging = counts.keys().any(|k| matches!(*k, "smtp" | "apns" | "gcm"));
 
-    let mut playbook = vec![format!(
+    let mut playbook = vec![
         "Identify the device(s) using each unexpected protocol. The evidence list shows \
              source → destination per flow. Walk each source IP to a physical switch port (use \
-             `show mac address-table` and the asset inventory's MAC for that host).",
-    )];
+             `show mac address-table` and the asset inventory's MAC for that host)."
+            .to_string(),
+    ];
     if has_remote_access {
         playbook.push(
             "Remote-access tools (TeamViewer / AnyDesk / OpenVPN) on OT are usually vendor \
