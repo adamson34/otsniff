@@ -138,6 +138,115 @@ fn mac_regex() -> &'static Regex {
     &MAC_RE
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Moved verbatim from otsniff's `src/ai/leak_detector.rs` per ADR-0016
+    // (S-13.01 Task 2) — this whole file has no otsniff-specific logic, so
+    // all 7 original unit tests move here as-is.
+
+    #[test]
+    fn flags_ipv4_in_otherwise_clean_text() {
+        let leak = scan("the host was 192.168.1.5 doing things").unwrap();
+        assert_eq!(leak.kind, LeakKind::Ipv4);
+        assert_eq!(leak.pattern, "192.168.1.5");
+    }
+
+    #[test]
+    fn flags_mac_in_text() {
+        let leak = scan("found mac 00:1B:1B:11:22:33 on the wire").unwrap();
+        assert_eq!(leak.kind, LeakKind::Mac);
+    }
+
+    #[test]
+    fn flags_ipv6_in_text() {
+        let leak = scan("the v6 addr 2001:db8:85a3::8a2e:370:7334 is real").unwrap();
+        assert_eq!(leak.kind, LeakKind::Ipv6);
+    }
+
+    #[test]
+    fn does_not_flag_pseudonyms() {
+        assert!(scan("host_001 talked to mac_005 on host_007").is_none());
+    }
+
+    #[test]
+    fn does_not_flag_normal_prose() {
+        let prose = "## Findings\n\nThe analyst should review hosts in the OT zone. \
+                     Severity: critical. Recommendation: investigate.";
+        assert!(scan(prose).is_none());
+    }
+
+    /// AC-003 regression test. Adapted from otsniff's
+    /// `src/ai/leak_detector.rs::ensure_clean_returns_descriptive_error`:
+    /// the original asserted through `OtError`'s `Display`, which added a
+    /// "privacy invariant tripped: " prefix and an `exit_code()` of 75 — both
+    /// belong to otsniff's error-wrapping layer, one level above this crate.
+    /// `ensure_clean` here returns `PrivacyError` directly (one layer below
+    /// that wrapper), which has neither concept, so those two assertions are
+    /// dropped; everything else is unchanged.
+    #[test]
+    fn ensure_clean_returns_descriptive_error() {
+        let err = ensure_clean("see 10.0.0.5").unwrap_err();
+        let msg = err.to_string();
+        // F-ADV-P2-004: error is the PrivacyError::Leak variant.
+        // F-ADV-P2-007: raw value MUST NOT appear in error message; only
+        // length + offset + hash prefix.
+        assert!(
+            msg.contains("IPv4"),
+            "F-ADV-P2-004: error should name the leak kind: {msg}"
+        );
+        assert!(
+            !msg.contains("10.0.0.5"),
+            "F-ADV-P2-007: raw leaked value MUST NOT appear in the error message: {msg}"
+        );
+        assert!(
+            msg.contains("hash-prefix"),
+            "F-ADV-P2-007: error must include hash-prefix for correlation: {msg}"
+        );
+    }
+
+    /// AC-003 regression test. Adapted from otsniff's
+    /// `src/ai/leak_detector.rs::ensure_no_map_values_catches_hostname_leak_that_regex_misses`
+    /// — see the note on `ensure_clean_returns_descriptive_error` above for
+    /// why the `OtError`-wrapper assertions ("privacy invariant tripped",
+    /// `exit_code()`) are dropped here.
+    #[test]
+    fn ensure_no_map_values_catches_hostname_leak_that_regex_misses() {
+        use chrono::Utc;
+        use std::collections::BTreeMap;
+
+        // A hostname like "LINE-3-PLC" does not match the IPv4/IPv6/MAC
+        // regexes — only the map-value check would catch it leaking.
+        let mut names = BTreeMap::new();
+        names.insert("name_001".to_string(), "LINE-3-PLC".to_string());
+        let map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: BTreeMap::new(),
+            macs: BTreeMap::new(),
+            names,
+        };
+
+        let leaky = "Engineer connected to LINE-3-PLC and started a download.";
+        assert!(scan(leaky).is_none(), "regex check should miss hostname");
+        let err = ensure_no_map_values(leaky, &map).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("map_value"),
+            "F-ADV-P2-004: must name the kind as map_value: {msg}"
+        );
+        // F-ADV-P2-007: the hostname must NOT appear in the error message.
+        assert!(
+            !msg.contains("LINE-3-PLC"),
+            "F-ADV-P2-007: raw hostname must NOT appear in error message: {msg}"
+        );
+
+        let clean = "Engineer connected to name_001 and started a download.";
+        assert!(ensure_no_map_values(clean, &map).is_ok());
+    }
+}
+
 /// Kani formal-verification harnesses (S-4.02).
 ///
 /// These harnesses are compiled and run only when `cargo kani --harness …`

@@ -470,3 +470,180 @@ mod kani_proofs {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a ScrubMap from raw (pseudonym, real) pairs for each category.
+    ///
+    /// Moved verbatim from otsniff's `src/scrub.rs` per ADR-0016 (S-13.01
+    /// Task 2). Only the mechanics-layer tests move here — `build_map` /
+    /// `build_map_at` / `merge_map` (which walk otsniff's `Observations`)
+    /// stay in otsniff's own `src/scrub.rs` (AC-004).
+    fn scrub_map_from(
+        ips: &[(&str, &str)],
+        macs: &[(&str, &str)],
+        names: &[(&str, &str)],
+    ) -> ScrubMap {
+        ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: ips
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            macs: macs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            names: names
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    /// EC-001 / corrupted map: a ScrubMap with an empty-string pseudonym key
+    /// must be rejected by a validation function (BC-5.03.001 EC-001).
+    ///
+    /// The implementation is expected to provide a `ScrubMap::validate`
+    /// method (or equivalent) that returns `Err` for malformed maps. Until
+    /// that exists this test will fail to compile OR panic at the call site
+    /// — both count as red-state failures.
+    #[test]
+    fn test_bc_5_03_001_load_rejects_map_with_empty_pseudonym() {
+        // Construct a map that has an empty-string key in ips — this is the
+        // "corrupted pseudonym" scenario from EC-001.
+        let mut bad_ips = BTreeMap::new();
+        bad_ips.insert("".to_string(), "10.0.0.1".to_string());
+        let bad_map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: bad_ips,
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+
+        // The implementer must ensure ScrubMap::validate(&self) returns Err
+        // for empty-string pseudonym keys.
+        let result = bad_map.validate();
+        assert!(
+            result.is_err(),
+            "validate() must return Err for a map with an empty pseudonym key"
+        );
+    }
+
+    /// F-W1-002 (wave-1 adversarial review): the pseudonym regex must match
+    /// only what the population layer's `build_map` actually emits —
+    /// decimal-only suffixes (`{:03}`). The earlier `[0-9a-f]+` pattern would
+    /// spuriously match real values like `host_abc01` (a legitimate hostname
+    /// containing a hex-looking suffix), breaking the scrub round-trip for
+    /// those values.
+    #[test]
+    fn test_f_w1_002_pseudonym_regex_rejects_hex_only_suffix() {
+        let map = scrub_map_from(&[("host_001", "10.0.0.1")], &[], &[]);
+
+        // A token shaped like a hex pseudonym but not in the map. Under the
+        // old `[0-9a-f]+` pattern this would be classified as an unknown
+        // pseudonym (unmapped token); under the new `[0-9]+` pattern it is
+        // ignored entirely — the regex doesn't match it, so unscrub leaves
+        // it alone.
+        let text = "talk to host_abc01 over there";
+        let (out, replaced, unknowns) = unscrub_text(text, &map);
+        assert_eq!(out, text, "non-decimal suffix must not be touched");
+        assert_eq!(replaced, 0);
+        assert!(
+            unknowns.is_empty(),
+            "host_abc01 must NOT be flagged as an unknown pseudonym (it isn't one); got: {:?}",
+            unknowns
+        );
+
+        // Sanity: a real decimal pseudonym in the map still round-trips.
+        let text2 = "talk to host_001 over there";
+        let (out2, replaced2, _unknowns2) = unscrub_text(text2, &map);
+        assert_eq!(out2, "talk to 10.0.0.1 over there");
+        assert_eq!(replaced2, 1);
+    }
+
+    /// F-W1-003: `ScrubMap::validate()` must reject a map that maps two
+    /// different pseudonyms to the same real value. Without this check,
+    /// `forward()`'s inverse-map construction would silently keep only one
+    /// pseudonym (whichever inserted second), making the round-trip lossy
+    /// for the dropped pseudonym.
+    #[test]
+    fn test_f_w1_003_validate_rejects_duplicate_real_values_same_family() {
+        let mut bad_ips = BTreeMap::new();
+        bad_ips.insert("host_001".to_string(), "10.0.0.1".to_string());
+        bad_ips.insert("host_002".to_string(), "10.0.0.1".to_string()); // dup
+        let bad_map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: bad_ips,
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+        let result = bad_map.validate();
+        assert!(
+            result.is_err(),
+            "validate() must reject duplicate real values within the same family"
+        );
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("10.0.0.1"),
+            "error must name the duplicated real value; got: {err}"
+        );
+    }
+
+    /// F-W1-003 cross-family: duplicate detection spans `ips`/`macs`/`names`.
+    /// In practice the families have disjoint value-shapes (IP vs MAC vs
+    /// hostname), so cross-family duplicates are pathological — but the
+    /// invariant still applies and the validation must catch them.
+    #[test]
+    fn test_f_w1_003_validate_rejects_duplicate_real_values_cross_family() {
+        let mut ips = BTreeMap::new();
+        ips.insert("host_001".to_string(), "shared-value".to_string());
+        let mut names = BTreeMap::new();
+        names.insert("name_001".to_string(), "shared-value".to_string());
+        let bad_map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips,
+            macs: BTreeMap::new(),
+            names,
+        };
+        assert!(
+            bad_map.validate().is_err(),
+            "validate() must reject duplicate real values across families"
+        );
+    }
+
+    /// F-W1-003 regression guard: a valid map (no duplicates) still passes.
+    #[test]
+    fn test_f_w1_003_validate_accepts_unique_real_values() {
+        let map = scrub_map_from(
+            &[("host_001", "10.0.0.1"), ("host_002", "10.0.0.2")],
+            &[("mac_001", "AA:BB:CC:DD:EE:01")],
+            &[("name_001", "PLC-NORTH")],
+        );
+        assert!(
+            map.validate().is_ok(),
+            "validate() must accept a map with unique real values"
+        );
+    }
+
+    /// F-W1-002 follow-on: a decimal pseudonym that isn't in the map IS
+    /// surfaced as unknown, preserving the strict-mode safety property. We
+    /// didn't break that path by tightening the regex.
+    #[test]
+    fn test_f_w1_002_decimal_pseudonym_not_in_map_is_still_unknown() {
+        let map = scrub_map_from(&[("host_001", "10.0.0.1")], &[], &[]);
+        let text = "what about host_999?";
+        let (_out, _replaced, unknowns) = unscrub_text(text, &map);
+        assert!(
+            unknowns.iter().any(|u| u == "host_999"),
+            "host_999 (decimal, not in map) must be flagged as unknown; got: {:?}",
+            unknowns
+        );
+    }
+}
