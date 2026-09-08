@@ -99,7 +99,7 @@ pub(crate) fn parse_pseudonym_index(p: &str, prefix: &str) -> Option<u32> {
 
 /// Highest numeric index currently present in `map` for the given prefix,
 /// or `0` if the map is empty / no matching key exists.
-pub(crate) fn max_index(map: &BTreeMap<String, String>, prefix: &str) -> u32 {
+pub fn max_index(map: &BTreeMap<String, String>, prefix: &str) -> u32 {
     todo!(
         "BC-5.38.001: map.keys().filter_map(|k| parse_pseudonym_index(k, prefix)).max().unwrap_or(0)"
     )
@@ -127,7 +127,7 @@ pub fn is_canonical_pseudonym(pseudo: &str, prefix: &str) -> bool {
 /// pseudonyms are preserved. New real values are appended with fresh
 /// pseudonyms of the form `{prefix}{NNN:03}` continuing from
 /// `max_index(baseline, prefix) + 1`.
-pub(crate) fn merge_family(
+pub fn merge_family(
     baseline: &mut BTreeMap<String, String>,
     current_entries: impl Iterator<Item = (String, String)>,
     prefix: &str,
