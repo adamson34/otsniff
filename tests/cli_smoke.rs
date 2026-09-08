@@ -726,7 +726,16 @@ fn test_f_w1_001_unscrub_rejects_corrupted_map() {
         .failure()
         .code(70)
         .stderr(predicate::str::contains("pcap parse error"))
-        .stderr(predicate::str::contains("privacy invariant tripped").not());
+        .stderr(predicate::str::contains("privacy invariant tripped").not())
+        // F-ADV-P6 (S-13.01 sixth review, Observations): pins the entire
+        // reason `OtError::Privacy`'s `From<PrivacyError>` impl is
+        // hand-written instead of `#[from]` (which also derives `#[source]`,
+        // adding a "caused by: ..." stderr line main.rs would print via
+        // Error::source() -- see ADR-0016's "Decision refinement" and
+        // src/error.rs's doc comments). Without this assertion, a future
+        // refactor back to `#[from]` would pass all existing tests while
+        // silently reintroducing that stderr line.
+        .stderr(predicate::str::contains("caused by").not());
 }
 
 // ── S-10.01: capture-window sanity warning on stderr (AC-004) ────────────────
