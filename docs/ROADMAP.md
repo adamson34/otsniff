@@ -672,7 +672,8 @@ crate, `crates/otsniff-privacy`, leaving the otsniff-specific
 population logic (`build_map`/`merge_map`, which walks
 `Observations`/`HostObs`) in `src/`. All ~40 existing tests and both
 Kani proof modules (round-trip, leak-detector regex) move with the
-functions they cover; no observable behavior change.
+functions they cover; no observable behavior change (see ADR-0016 for
+one narrow, deliberate exception: a `u32`-overflow hardening fix).
 
 **Why:** a companion AI-powered OT threat-hunting tool
 ("otsniff-hunt") is being built as additional workspace crates in
