@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 LEAK_RS="${REPO_ROOT}/crates/otsniff-privacy/src/leak_detector.rs"
+LEAK_RS_REL="${LEAK_RS#"${REPO_ROOT}/"}"
 KANI_YML="${REPO_ROOT}/.github/workflows/kani.yml"
 PROOF_MD="${REPO_ROOT}/docs/proofs/ensure-no-map-values.md"
 
@@ -28,9 +29,9 @@ check_fail() {
 # AC-001a — #[kani::proof] fn map_value_substring exists in leak_detector.rs
 # ---------------------------------------------------------------------------
 if grep -qF 'fn map_value_substring' "${LEAK_RS}"; then
-  check_pass "AC-001a: #[kani::proof] fn map_value_substring declared in src/ai/leak_detector.rs"
+  check_pass "AC-001a: #[kani::proof] fn map_value_substring declared in ${LEAK_RS_REL}"
 else
-  check_fail "AC-001a: fn map_value_substring NOT found in src/ai/leak_detector.rs"
+  check_fail "AC-001a: fn map_value_substring NOT found in ${LEAK_RS_REL}"
 fi
 
 # ---------------------------------------------------------------------------

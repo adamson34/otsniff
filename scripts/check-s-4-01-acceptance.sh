@@ -27,10 +27,11 @@ check_fail() {
 # ---------------------------------------------------------------------------
 # AC-001a — Kani harness exists in code (BC-5.01.003)
 # ---------------------------------------------------------------------------
+SCRUB_RS_REL="${SCRUB_RS#"${REPO_ROOT}/"}"
 if grep -qF '#[kani::proof]' "${SCRUB_RS}"; then
-  check_pass "AC-001a: src/scrub.rs contains #[kani::proof] attribute"
+  check_pass "AC-001a: ${SCRUB_RS_REL} contains #[kani::proof] attribute"
 else
-  check_fail "AC-001a: src/scrub.rs does not contain #[kani::proof] — harness missing"
+  check_fail "AC-001a: ${SCRUB_RS_REL} does not contain #[kani::proof] — harness missing"
 fi
 
 # ---------------------------------------------------------------------------
