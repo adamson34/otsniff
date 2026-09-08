@@ -218,10 +218,9 @@ fn build_finding(kind: CredKind, events: &[&CredEvent], obs: &Observations) -> F
              managed switches that only support {kind_phrase}), place behind a jump host on a \
              hardened management VLAN. Document the exception with a revocation date."
         ),
-        format!(
-            "Record the credentials-exposed window in the change log so future investigations \
+        "Record the credentials-exposed window in the change log so future investigations \
              know which sessions to consider compromised. Capture window: see report header."
-        ),
+            .to_string(),
     ];
     if matches!(kind, CredKind::Snmpv1v2c) {
         playbook.insert(
