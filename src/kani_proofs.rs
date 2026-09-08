@@ -1,16 +1,22 @@
 //! Composed Kani proofs (cross-module).
 //!
 //! Wave-1 (S-4.01..03) shipped the three component proofs inline in
-//! `src/scrub.rs` and `src/ai/leak_detector.rs`. This module hosts
-//! proofs that compose those components — currently:
+//! `src/scrub.rs` and `src/ai/leak_detector.rs`. ADR-0016 (S-13.01) later
+//! moved those two modules into the `otsniff-privacy` crate
+//! (`crates/otsniff-privacy/src/scrub.rs` and
+//! `crates/otsniff-privacy/src/leak_detector.rs`); this module's proofs are
+//! standalone (they don't call across the crate boundary — see below) so
+//! they were unaffected by that move. This module hosts proofs that compose
+//! those components — currently:
 //! - `composed_privacy_invariant` (BC-5.02.003) — scrub then leak-check
 //!   either removes every real value OR returns Err.
 //!
 //! ## Proof-model architecture
 //!
-//! Following the wave-1 pattern, we do NOT call production `crate::scrub::scrub_text`
-//! (which uses `regex`) or `crate::ai::leak_detector::ensure_clean` (which also uses
-//! `regex`) directly under CBMC. Both would cause CBMC unwind/timeout failures.
+//! Following the wave-1 pattern, we do NOT call production
+//! `otsniff_privacy::scrub_text` (which uses `regex`) or
+//! `otsniff_privacy::leak_detector::ensure_clean` (which also uses `regex`)
+//! directly under CBMC. Both would cause CBMC unwind/timeout failures.
 //!
 //! Instead we use hand-rolled proof-model functions (`replace_first_model`,
 //! `byte_contains_model`, `symbolic_ascii_bytes`) that mirror the production
@@ -22,7 +28,8 @@
 //! There is no encoding gap or transformation between the two stages that could
 //! hide a leak.
 //!
-//! References: `crate::scrub`, `crate::ai::leak_detector`
+//! References: `otsniff_privacy::scrub::` (scrub mechanics),
+//! `otsniff_privacy::leak_detector::` (fail-closed leak check)
 
 #![allow(dead_code)] // Kani-only module
 

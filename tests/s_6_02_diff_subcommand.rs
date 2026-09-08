@@ -19,7 +19,7 @@ use predicates::prelude::*;
 use otsniff::diff::{compute, DiffInput, DEFAULT_FLOW_SHIFT_MULTIPLIER};
 use otsniff::findings::{Finding, Severity};
 use otsniff::observe::{FlowKey, FlowObs, HostObs, Observations};
-use otsniff::scrub::ScrubMap;
+use otsniff_privacy::ScrubMap;
 
 // ---------------------------------------------------------------------------
 // Test-only fixture helpers
@@ -1354,7 +1354,7 @@ fn test_f_adv_p3_001_run_scrub_output_passes_leak_detector() {
 #[test]
 fn test_f_adv_p3_004_scrub_text_no_shadowing_when_real_is_pseudonym_prefix() {
     use chrono::Utc;
-    use otsniff::scrub::{scrub_text, ScrubMap};
+    use otsniff_privacy::{scrub_text, ScrubMap};
 
     let mut ips = BTreeMap::new();
     ips.insert("host_001".to_string(), "10.0.0.1".to_string());
@@ -1405,7 +1405,7 @@ fn test_f_adv_p3_004_scrub_text_no_shadowing_when_real_is_pseudonym_prefix() {
 #[test]
 fn test_f_adv_p3_005_validate_rejects_non_canonical_pseudonym() {
     use chrono::Utc;
-    use otsniff::scrub::ScrubMap;
+    use otsniff_privacy::ScrubMap;
 
     let mut ips = BTreeMap::new();
     ips.insert("FOOBAR".to_string(), "10.0.0.1".to_string());
@@ -1435,7 +1435,7 @@ fn test_f_adv_p3_005_validate_rejects_non_canonical_pseudonym() {
 #[test]
 fn test_f_adv_p3_005_validate_accepts_canonical_pseudonyms() {
     use chrono::Utc;
-    use otsniff::scrub::ScrubMap;
+    use otsniff_privacy::ScrubMap;
 
     let mut ips = BTreeMap::new();
     ips.insert("host_001".to_string(), "10.0.0.1".to_string());
@@ -1651,7 +1651,8 @@ fn test_f_adv_p4_001_ldap_starttls_suppression_works_with_response_first() {
 fn test_f_adv_p4_009_merge_map_returns_result() {
     use chrono::Utc;
     use otsniff::observe::Observations;
-    use otsniff::scrub::{merge_map, ScrubMap};
+    use otsniff::scrub::merge_map;
+    use otsniff_privacy::ScrubMap;
 
     // Empty baseline + empty obs = trivial successful merge.
     let baseline = ScrubMap {
@@ -1711,7 +1712,7 @@ fn test_f_adv_p4_008_unscrub_strict_rejects_empty_map() {
 #[test]
 fn test_f_adv_p4_012_unscrub_handles_realistic_separators() {
     use chrono::Utc;
-    use otsniff::scrub::{unscrub_text, ScrubMap};
+    use otsniff_privacy::{unscrub_text, ScrubMap};
 
     let mut ips = BTreeMap::new();
     ips.insert("host_001".to_string(), "10.0.0.1".to_string());

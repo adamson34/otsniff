@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 use crate::findings::Finding;
 use crate::inventory::{self, Asset};
 use crate::observe::Observations;
-use crate::scrub::ScrubMap;
+use otsniff_privacy::{scrub_text, ScrubMap};
 use regex::Regex;
 use serde::Serialize;
 
@@ -1148,18 +1148,14 @@ fn scrub_finding(f: &Finding, map: &ScrubMap) -> Finding {
     Finding {
         id: f.id,
         severity: f.severity,
-        title: crate::scrub::scrub_text(&f.title, map),
-        summary: crate::scrub::scrub_text(&f.summary, map),
-        evidence: f
-            .evidence
-            .iter()
-            .map(|e| crate::scrub::scrub_text(e, map))
-            .collect(),
+        title: scrub_text(&f.title, map),
+        summary: scrub_text(&f.summary, map),
+        evidence: f.evidence.iter().map(|e| scrub_text(e, map)).collect(),
         recommendation: f.recommendation,
         playbook: f
             .playbook
             .iter()
-            .map(|step| crate::scrub::scrub_text(step, map))
+            .map(|step| scrub_text(step, map))
             .collect(),
     }
 }

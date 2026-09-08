@@ -230,7 +230,7 @@ mod tests {
         // The leak detector — the same one the analyze pipeline uses —
         // is what really enforces this; here we just sanity check that
         // a plain log doesn't carry any obvious leak.
-        assert!(crate::ai::leak_detector::scan(&json).is_none());
+        assert!(otsniff_privacy::leak_detector::scan(&json).is_none());
     }
 
     #[test]

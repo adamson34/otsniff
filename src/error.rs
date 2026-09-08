@@ -71,18 +71,18 @@ pub enum OtError {
     /// invariant. Previously these errors used `OtError::Parse` which is the
     /// same variant pcap-parse + askama-render + CLI-arg-validation use, so
     /// CI scripts couldn't branch on "privacy leak" vs "render bug." The
-    /// `pattern` field intentionally does NOT carry the raw leaked value —
-    /// see [`leak_detector::ensure_clean`] which redacts it before
-    /// constructing the error (F-ADV-P2-007).
-    #[error("privacy invariant tripped: {kind}: {message}")]
-    PrivacyLeak {
-        /// What kind of identifier shape triggered the leak detector
-        /// (e.g. "ipv4", "ipv6", "mac", "map_value").
-        kind: String,
-        /// User-facing diagnostic that does NOT contain the leaked value.
-        /// Length, byte offset, and hash prefix only.
-        message: String,
-    },
+    /// wrapped `otsniff_privacy::PrivacyError` intentionally does NOT carry
+    /// the raw leaked value — see
+    /// [`otsniff_privacy::leak_detector::ensure_clean`] which redacts it
+    /// before constructing the error (F-ADV-P2-007).
+    ///
+    /// **ADR-0016 (S-13.01):** the privacy/scrub mechanics moved to the
+    /// `otsniff-privacy` crate so a second consumer (otsniff-hunt) can reuse
+    /// them without depending on otsniff's `Observations` type. This variant
+    /// wraps that crate's own error type, mirroring the `Segmentation`
+    /// wrapper pattern below exactly.
+    #[error("privacy invariant tripped: {0}")]
+    Privacy(#[from] otsniff_privacy::PrivacyError),
 
     /// A Zonewarden segmentation policy failed to load/validate, or the
     /// conformance engine errored (ADR-0013).
@@ -104,7 +104,7 @@ impl OtError {
             // in sysexits.h — semantically "the action couldn't be completed
             // and a retry under different conditions might succeed" (e.g.
             // re-run after fixing the scrub map).
-            Self::PrivacyLeak { .. } => 75,
+            Self::Privacy(_) => 75,
             Self::Parse(_) | Self::Render(_) | Self::Json(_) => 70, // EX_SOFTWARE
             // Delegate to the wrapped error so the exit class matches the
             // underlying failure (e.g. Parse → 70, UnsupportedLinkType → 65).

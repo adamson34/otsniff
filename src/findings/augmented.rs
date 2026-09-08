@@ -17,7 +17,8 @@ use crate::findings::{Finding, Severity};
 use crate::inventory::Asset;
 use crate::observe::Observations;
 use crate::report_md::render_markdown;
-use crate::scrub::{build_map, scrub_text, unscrub_text};
+use crate::scrub::build_map;
+use otsniff_privacy::{leak_detector, scrub_text, unscrub_text};
 
 /// Cap on the number of augmented findings returned after confidence-based
 /// sort. Matches EC-002 / the test assertion in `augment_caps_findings_at_top_25`.
@@ -99,8 +100,8 @@ pub fn augment_findings(
     //    scrubbed context) is sufficient and avoids double-checking content
     //    that contains no identifiers (the prompt itself is a constant with
     //    no real-looking values, enforced by its own snapshot test).
-    crate::ai::leak_detector::ensure_clean(&scrubbed_md)?;
-    crate::ai::leak_detector::ensure_no_map_values(&scrubbed_md, &map)?;
+    leak_detector::ensure_clean(&scrubbed_md)?;
+    leak_detector::ensure_no_map_values(&scrubbed_md, &map)?;
 
     // 4. Compose the user message. AUGMENT_PROMPT is the *system* prompt
     //    (passed as the first argument to provider.augment); the user message

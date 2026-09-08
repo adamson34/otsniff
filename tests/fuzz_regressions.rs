@@ -44,14 +44,14 @@ fn fuzz_artifacts_dont_panic() {
                     let _ = otsniff::parse::dnp3::parse(&data);
                 }
                 "scrub_text" => {
-                    let map = otsniff::scrub::ScrubMap {
+                    let map = otsniff_privacy::ScrubMap {
                         version: 1,
                         created_at: chrono::Utc::now(),
                         ips: BTreeMap::new(),
                         macs: BTreeMap::new(),
                         names: BTreeMap::new(),
                     };
-                    let _ = otsniff::scrub::scrub_text(&String::from_utf8_lossy(&data), &map);
+                    let _ = otsniff_privacy::scrub_text(&String::from_utf8_lossy(&data), &map);
                 }
                 _ => panic!("unknown fuzz harness directory: {name}"),
             }

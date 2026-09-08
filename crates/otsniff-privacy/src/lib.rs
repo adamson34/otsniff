@@ -8,4 +8,7 @@ pub mod leak_detector;
 pub mod scrub;
 
 pub use error::PrivacyError;
-pub use scrub::ScrubMap;
+pub use scrub::{
+    is_canonical_pseudonym, max_index, merge_family, pseudonym_regex, scrub_text, unscrub_text,
+    ScrubMap,
+};
