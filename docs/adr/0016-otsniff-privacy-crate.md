@@ -118,10 +118,15 @@ ended up with two variants, not one:
   and `merge_family()`'s structural map-corruption checks (empty pseudonym,
   empty real value, non-canonical pseudonym, duplicate real value, pseudonym
   collision, or an exhausted `u32` pseudonym index space in `merge_family`).
-  Pre-extraction, these call sites constructed `OtError::Parse`
-  directly (exit code 70, `"pcap parse error: ..."`); they are a
-  data-integrity fault in a map loaded from disk, not a privacy-invariant
-  trip, and were never part of the `PrivacyLeak` surface this ADR scoped.
+  Pre-extraction, all but the `u32`-exhaustion cause already constructed
+  `OtError::Parse` directly (exit code 70, `"pcap parse error: ..."`) — the
+  `u32`-exhaustion cause is new hardening added during this story's review
+  cycles, not a preserved-behavior migration: pre-extraction it was a
+  debug-mode panic / release-mode silent wraparound, never `OtError::Parse`
+  (see `CHANGELOG.md`'s `### Fixed` entry, and "One narrow, deliberate
+  exception" above). All of these are a data-integrity fault in a map
+  loaded from disk, not a privacy-invariant trip, and were never part of
+  the `PrivacyLeak` surface this ADR scoped.
   A `kind` field (mirroring `Leak`'s) was considered and dropped (m-3, second
   review cycle): `message` alone already names the specific fault, nothing
   read `kind` for this variant, and keeping it would just be dead state kept
@@ -163,6 +168,17 @@ layout, not the plain-workspace layout `zonewarden` was added under) — and
 `.github/workflows/kani.yml` needed explicit `-p otsniff-privacy` added to
 every moved proof harness invocation, since Kani's own workflow enumerates
 harnesses per-package rather than discovering them workspace-wide.
+
+**One narrow, deliberate exception to the "no observable behavior change"
+bar.** The "Consequences" section below states that bar unconditionally, but
+the shipped extraction includes exactly one intentional departure from it:
+`merge_family`'s `u32`-overflow hardening changes behavior for a
+`u32::MAX`-indexed baseline family, from a pre-extraction debug-mode panic /
+release-mode silent-wraparound to a clean, typed `PrivacyError::MapCorrupt`
+routed to `OtError::Parse` (exit 70). This is a real, intentional, and
+desirable behavior change — not a preserved-behavior migration — uncovered
+and fixed during this story's review cycles. See `CHANGELOG.md`'s
+`### Fixed` entry for the specifics.
 
 ## Rationale
 - **Precedent already set.** ADR-0013 established that a formally-verified pure

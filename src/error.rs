@@ -89,9 +89,13 @@ pub enum OtError {
     /// trip). `PrivacyError::MapCorrupt` (raised by `ScrubMap::validate()` /
     /// `merge_family()` for a structurally-corrupted map) is a different
     /// error class — a data-integrity fault, not a privacy-invariant trip —
-    /// and is routed to `OtError::Parse` instead, preserving the exact
-    /// pre-extraction (pre-ADR-0016) exit code (70) and message shape
-    /// ("pcap parse error: …") for that case. See the hand-written `From`
+    /// and is routed to `OtError::Parse` instead. For `validate()`'s four
+    /// causes and `merge_family()`'s pseudonym-collision case, this
+    /// preserves the exact pre-extraction (pre-ADR-0016) exit code (70) and
+    /// message shape ("pcap parse error: …"); `merge_family()`'s `u32`
+    /// index-exhaustion case is new hardening with no pre-extraction
+    /// `OtError::Parse` precedent to preserve (see the `From` impl below and
+    /// `CHANGELOG.md`'s `### Fixed` entry). See the hand-written `From`
     /// impl below, which is why this variant no longer derives `#[from]`.
     #[error("privacy invariant tripped: {0}")]
     Privacy(otsniff_privacy::PrivacyError),
@@ -111,13 +115,19 @@ pub enum OtError {
 ///   original `#[from]` derive.
 /// - `PrivacyError::MapCorrupt` (a structurally-corrupted `ScrubMap` caught by
 ///   `validate()`/`merge_family()`) → `OtError::Parse`, exit code 70,
-///   `"pcap parse error: …"` — this reproduces byte-for-byte the pre-ADR-0016
-///   behavior, when these same call sites constructed `OtError::Parse`
-///   directly. Folding `MapCorrupt` into `OtError::Privacy` would have
-///   silently changed both the exit code and put messages that interpolate
-///   raw scrub-map values (real IPs/hostnames) under a "privacy invariant
-///   tripped" label that is supposed to mean the opposite: that no raw value
-///   is present.
+///   `"pcap parse error: …"` — for `validate()`'s four causes and
+///   `merge_family()`'s pseudonym-collision case, this reproduces
+///   byte-for-byte the pre-ADR-0016 behavior, since those call sites already
+///   constructed `OtError::Parse` directly. The exception is
+///   `merge_family()`'s `u32` pseudonym-index-exhaustion case: that's new
+///   hardening added during this story's review cycles, not a
+///   preserved-behavior migration — pre-ADR-0016 it was a debug-mode panic /
+///   release-mode silent wraparound, never `OtError::Parse` (see
+///   `CHANGELOG.md`'s `### Fixed` entry). Folding `MapCorrupt` into
+///   `OtError::Privacy` would have silently changed both the exit code and
+///   put messages that interpolate raw scrub-map values (real IPs/hostnames)
+///   under a "privacy invariant tripped" label that is supposed to mean the
+///   opposite: that no raw value is present.
 impl From<otsniff_privacy::PrivacyError> for OtError {
     fn from(err: otsniff_privacy::PrivacyError) -> Self {
         match err {
@@ -127,9 +137,14 @@ impl From<otsniff_privacy::PrivacyError> for OtError {
             // read it -- `message` alone already names the fault, e.g.
             // "scrub map has empty pseudonym key for real value '...'; the
             // map is corrupted (EC-001)."), so it was dropped from the
-            // variant entirely. The pre-ADR-0016 call sites constructed
-            // `OtError::Parse(message)` directly with no "kind" concept at
-            // all, so this preserves that message shape unchanged.
+            // variant entirely. `validate()`'s four causes and
+            // `merge_family()`'s pseudonym-collision case pre-date
+            // ADR-0016 and already constructed `OtError::Parse(message)`
+            // directly with no "kind" concept at all, so this preserves
+            // that message shape unchanged for them. The `u32`
+            // index-exhaustion case is new hardening (not preserved
+            // behavior) and never had a pre-ADR-0016 `OtError::Parse`
+            // message to preserve -- see the doc comment above.
             otsniff_privacy::PrivacyError::MapCorrupt { message } => OtError::Parse(message),
         }
     }
