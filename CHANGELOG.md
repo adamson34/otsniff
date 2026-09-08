@@ -22,10 +22,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and `leak_detector::{scan, ensure_clean, ensure_no_map_values}` moved out
   of `src/scrub.rs` and `src/ai/leak_detector.rs` along with their Kani
   proofs and unit tests — not verbatim: return types now use the new
-  crate's own `PrivacyError` instead of `OtError`/`anyhow`, and
-  `is_canonical_pseudonym`, `max_index`, and `merge_family` widened from
-  private to `pub` so otsniff's call sites (and a future otsniff-hunt) can
-  reach them across the crate boundary. `otsniff`'s own `src/scrub.rs` keeps
+  crate's own `PrivacyError` instead of `OtError`, and
+  `is_canonical_pseudonym`, `max_index`, `merge_family`, and
+  `pseudonym_regex` widened from private to `pub` (and
+  `parse_pseudonym_index` from private to `pub(crate)`) so otsniff's call
+  sites (and a future otsniff-hunt) can reach them across the crate
+  boundary. `otsniff`'s own `src/scrub.rs` keeps
   only the population functions (`build_map`, `build_map_at`, `merge_map`)
   that walk otsniff's `Observations` capture model.
   - No user-facing or CLI behavior change: `otsniff analyze`, `scrub`,
