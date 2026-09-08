@@ -113,7 +113,7 @@ ended up with two variants, not one:
   this ADR was written around. Maps to `OtError::Privacy`, exit code 75,
   `"privacy invariant tripped: ..."` — exactly what a `#[from]` derive would
   have produced.
-- `PrivacyError::MapCorrupt { kind, message }` — a new variant, not
+- `PrivacyError::MapCorrupt { message }` — a new variant, not
   anticipated by this ADR's original text, covering `ScrubMap::validate()`'s
   and `merge_family()`'s structural map-corruption checks (empty pseudonym,
   empty real value, non-canonical pseudonym, duplicate real value, pseudonym
@@ -121,6 +121,11 @@ ended up with two variants, not one:
   directly (exit code 70, `"pcap parse error: ..."`); they are a
   data-integrity fault in a map loaded from disk, not a privacy-invariant
   trip, and were never part of the `PrivacyLeak` surface this ADR scoped.
+  A `kind` field (mirroring `Leak`'s) was considered and dropped (m-3, second
+  review cycle): `message` alone already names the specific fault, nothing
+  read `kind` for this variant, and keeping it would just be dead state kept
+  in sync with `message` by hand — see the doc comment on
+  `crates/otsniff-privacy/src/error.rs`'s `MapCorrupt` variant.
 
 **Why a hand-written `From` impl instead of `#[from]`.** A literal `#[from]`
 derive on `OtError::Privacy(#[from] otsniff_privacy::PrivacyError)` also
