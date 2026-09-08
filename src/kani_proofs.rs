@@ -58,17 +58,20 @@ mod kani_proofs {
     // ── Proof-model helpers ───────────────────────────────────────────────────
     //
     // These are local copies of wave-1 helpers that live in private
-    // `#[cfg(kani)] mod kani_proofs` sub-modules of `src/scrub.rs` and
-    // `src/ai/leak_detector.rs`.  Because those sub-modules are private, we
-    // cannot reference them cross-module; copying is the approved strategy for
-    // Kani proof models (they are never compiled outside `#[cfg(kani)]`).
+    // `#[cfg(kani)] mod kani_proofs` sub-modules of
+    // `crates/otsniff-privacy/src/scrub.rs` and
+    // `crates/otsniff-privacy/src/leak_detector.rs`.  Because those
+    // sub-modules are private, we cannot reference them cross-module; copying
+    // is the approved strategy for Kani proof models (they are never
+    // compiled outside `#[cfg(kani)]`).
 
     /// Build a bounded symbolic ASCII byte slice.
     ///
     /// Returns a fixed-size array and its valid length (0..=N).  Every byte in
     /// the valid prefix is in the printable ASCII range (0x20..=0x7e).
     ///
-    // SEMPORT-REVIEW: mirrors wave-1 helper from src/scrub.rs kani_proofs; keep in sync.
+    // Mirrors the wave-1 helper that lived in
+    // crates/otsniff-privacy/src/scrub.rs's kani_proofs module.
     fn symbolic_ascii_bytes() -> ([u8; N], usize) {
         let len: usize = kani::any();
         kani::assume(len <= N);
@@ -90,7 +93,8 @@ mod kani_proofs {
     /// Mirrors the first-occurrence single-replacement logic in `scrub_text`
     /// without using `Regex` or heap `String`.
     ///
-    // SEMPORT-REVIEW: mirrors wave-1 helper from src/scrub.rs kani_proofs; keep in sync.
+    // Mirrors the wave-1 helper that lived in
+    // crates/otsniff-privacy/src/scrub.rs's kani_proofs module.
     fn replace_first_model(
         haystack: &[u8],
         needle: &[u8],
@@ -159,7 +163,8 @@ mod kani_proofs {
     /// Mirrors the substring-scan logic inside `ensure_no_map_values` without
     /// using `str::contains` or any UTF-8 paths that CBMC cannot unwind.
     ///
-    // SEMPORT-REVIEW: mirrors wave-1 helper from src/ai/leak_detector.rs kani_proofs; keep in sync.
+    // Mirrors the wave-1 helper that lived in
+    // crates/otsniff-privacy/src/leak_detector.rs's kani_proofs module.
     fn byte_contains_model(haystack: &[u8], needle: &[u8]) -> bool {
         if needle.is_empty() {
             return true;

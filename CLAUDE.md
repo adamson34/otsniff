@@ -129,7 +129,7 @@ and the report's conformance section.
 ```bash
 cargo build                        # debug build
 cargo build --release              # optimized (LTO, strip, single codegen unit)
-cargo test --workspace             # all tests (both crates)
+cargo test --workspace             # all tests (all three crates)
 cargo test --lib                   # unit tests only
 cargo test --test '*'              # integration tests only
 cargo clippy --all-targets --workspace -- -D warnings
