@@ -1,7 +1,13 @@
 # ADR-0016: Extract the privacy/scrub layer into `crates/otsniff-privacy`
 
 ## Status
-Proposed.
+Accepted — implemented (S-13.01). `crates/otsniff-privacy` exists with the
+mechanics half of the privacy layer (`ScrubMap`, `scrub_text`/`unscrub_text`,
+`leak_detector::{scan, ensure_clean, ensure_no_map_values}`) and both Kani
+proof modules; otsniff's `src/scrub.rs` keeps only the population functions.
+See "Decision refinement (S-13.01 implementation)" below for one deviation
+from this ADR's original text: `OtError::Privacy` ended up as a hand-written
+`From` impl, not the `#[from]` derive this ADR originally specified.
 
 ## Context
 otsniff's AI-assisted triage flow (ADR-0006, ADR-0007) depends on a fail-closed
@@ -75,6 +81,10 @@ gains a wrapping variant, following the exact pattern already established for
 Privacy(#[from] otsniff_privacy::PrivacyError),
 ```
 
+> **As shipped, this is a hand-written `From` impl, not `#[from]`** — see
+> "Decision refinement (S-13.01 implementation)" below for why. Kept here
+> unedited as the original proposal for historical accuracy.
+
 `exit_code()` keeps returning 75 for this variant, and the `Display` output must
 still satisfy the existing tests' assertions (`.contains("privacy invariant
 tripped")`, kind name present, hash-prefix present, raw value absent —
@@ -87,6 +97,55 @@ implementation detail for the story, not this ADR — the observable contract
 `sha2`, `thiserror` (all already workspace dependencies at the otsniff-root
 level; pin the same versions). It does not depend on otsniff or on
 `zonewarden`.
+
+## Decision refinement (S-13.01 implementation)
+
+The implementation deviates from one detail of the "Error boundary" section
+above, correctly: `OtError::Privacy` is a **hand-written `From` impl**, not
+the `#[from]` derive this ADR originally showed. This section records why,
+since the original PR text (and the story spec's AC-003) still described
+`#[from]` as the requirement until this fix-up.
+
+**What changed from the original plan.** `otsniff-privacy`'s `PrivacyError`
+ended up with two variants, not one:
+
+- `PrivacyError::Leak { kind, message }` — the fail-closed leak-detector trip
+  this ADR was written around. Maps to `OtError::Privacy`, exit code 75,
+  `"privacy invariant tripped: ..."` — exactly what a `#[from]` derive would
+  have produced.
+- `PrivacyError::MapCorrupt { kind, message }` — a new variant, not
+  anticipated by this ADR's original text, covering `ScrubMap::validate()`'s
+  and `merge_family()`'s structural map-corruption checks (empty pseudonym,
+  empty real value, non-canonical pseudonym, duplicate real value, pseudonym
+  collision). Pre-extraction, these call sites constructed `OtError::Parse`
+  directly (exit code 70, `"pcap parse error: ..."`); they are a
+  data-integrity fault in a map loaded from disk, not a privacy-invariant
+  trip, and were never part of the `PrivacyLeak` surface this ADR scoped.
+
+**Why a hand-written `From` impl instead of `#[from]`.** A literal `#[from]`
+derive on `OtError::Privacy(#[from] otsniff_privacy::PrivacyError)` also
+derives `#[source]` (that is what `#[from]` does under `thiserror`). But
+`src/main.rs` walks `Error::source()` to print `caused by:` lines to stderr,
+and pre-extraction, `OtError::PrivacyLeak` had no `#[source]` at all (it
+carried `kind`/`message` as plain fields, not a wrapped source error). Adding
+`#[source]` would therefore add a new, previously-absent `caused by: ...`
+stderr line for every privacy-invariant trip and every map-corruption error —
+an observable behavior change, which this ADR's own "Consequences" section
+sets as the acceptance bar to avoid ("the extraction must ship with ... no
+observable behavior change"). The hand-written `From<otsniff_privacy::
+PrivacyError> for OtError` impl (`src/error.rs`) avoids this: it matches on
+the two `PrivacyError` variants and routes `Leak` to `OtError::Privacy`
+(exit 75) and `MapCorrupt` to `OtError::Parse` (exit 70, pre-extraction
+message shape preserved byte-for-byte), with no `#[source]` chain on either
+path — reproducing the pre-extraction CLI output exactly.
+
+This is *not* a deviation from the "typed, matchable error surface" rationale
+the original "Alternatives considered" section argued for (see below) — the
+error surface is still a distinct, matchable `OtError::Privacy` variant with
+a `kind`/exit-code contract. The only change is *how* the wrapping happens
+(hand-written `From` vs. derive), driven by the `#[source]`-side-effect
+constraint above, which the original ADR text did not anticipate because it
+did not yet know `PrivacyError` would need a second variant.
 
 ## Rationale
 - **Precedent already set.** ADR-0013 established that a formally-verified pure
@@ -166,5 +225,7 @@ otsniff/                              (host repo; unchanged root binary)
 - **Keep `PrivacyLeak` as a flat variant on `OtError` and have the new crate
   return `Result<T, String>` or similar.** Rejected: loses the typed, matchable
   error surface (`kind`, `exit_code`) that F-ADV-P2-004 specifically introduced
-  a distinct variant to provide; the `#[from]`-wrapper pattern is the existing,
-  proven convention (`Segmentation`) for exactly this situation.
+  a distinct variant to provide; a wrapper variant is the existing, proven
+  convention (`Segmentation`) for exactly this situation. (The wrapper ended
+  up hand-written rather than `#[from]`-derived like `Segmentation` — see
+  "Decision refinement (S-13.01 implementation)" above for why.)
