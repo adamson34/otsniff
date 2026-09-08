@@ -256,9 +256,19 @@ pub fn merge_family(
 /// Replace every real IP/MAC/hostname in `text` with its pseudonym.
 ///
 /// Single-pass replacement using a regex alternation, ordered by descending
-/// length, so the longest matching real value wins at each position
-/// (F-ADV-P3-004: avoids substring-shadowing bugs a sequential replace loop
-/// would introduce).
+/// length. The regex crate's leftmost-first matching means at each position
+/// the longest matching real value is chosen, and the cursor advances past
+/// the entire match (not past a single character). This avoids the
+/// substring-shadowing bug from the sequential-replace implementation.
+///
+/// **F-ADV-P3-004:** the previous sequential `String::replace` loop was
+/// vulnerable to shadowing when a real value was a prefix substring of a
+/// pseudonym. E.g. map `{"host_001" → "10.0.0.1", "name_001" → "host"}`:
+/// sequential replace of `10.0.0.1` produced `host_001`, then sequential
+/// replace of `host` (a real value) corrupted the just-inserted pseudonym
+/// to `name_001_001`. Single-pass replacement avoids this because the
+/// regex alternation matches one real at each position, and the cursor
+/// advances past the entire matched span.
 ///
 /// Safe by construction: only values present in the map (i.e., things
 /// actually observed, or carried in via a baseline map) are eligible for
@@ -346,6 +356,15 @@ pub fn unscrub_text(text: &str, map: &ScrubMap) -> (String, usize, Vec<String>) 
 /// `[0-9]+` (decimal-only), matching what the population layer's
 /// `build_map`/`merge_family` actually emit via `format!("{prefix}{:03}",
 /// idx)` (F-W1-002).
+///
+/// F-ADV-P4-012: trailing `\b` retained for safety. The Rust `regex`
+/// crate doesn't support lookahead, so we can't express "end at word
+/// boundary OR start of next pseudonym". The pathological case
+/// `host_001host_002` (zero-separator concatenation) only resolves the
+/// first pseudonym; the trailing `host_002` remains as text. Documented
+/// in `tests/s_6_02_diff_subcommand.rs::test_f_adv_p4_012_*`. AIs in
+/// practice emit separated tokens (space/comma/newline), all of which
+/// do produce word boundaries and resolve correctly.
 pub fn pseudonym_regex() -> Regex {
     Regex::new(r"\b(?:host|mac|name)_[0-9]+\b").expect("valid regex")
 }
