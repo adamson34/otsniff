@@ -661,6 +661,36 @@ renderers, `cli.rs` (`--policy` on `diff`), snapshot tests. Likely
 warrants its own ADR or spec. **Deps:** P1-3 (shipped), ADR-0013
 (shipped).
 
+### P1-14: Extract privacy/scrub layer into `crates/otsniff-privacy` (M) — 🔵 spec written
+
+Decision record: [ADR-0016](adr/0016-otsniff-privacy-crate.md).
+
+Extract the pure, formally-verified mechanics of the privacy layer
+(`ScrubMap`, `scrub_text`/`unscrub_text`, the pseudonym-counter
+internals, and the fail-closed `leak_detector`) into a new workspace
+crate, `crates/otsniff-privacy`, leaving the otsniff-specific
+population logic (`build_map`/`merge_map`, which walks
+`Observations`/`HostObs`) in `src/`. All ~40 existing tests and both
+Kani proof modules (round-trip, leak-detector regex) move with the
+functions they cover; no observable behavior change.
+
+**Why:** a companion AI-powered OT threat-hunting tool
+("otsniff-hunt") is being built as additional workspace crates in
+this repo (same pattern as `zonewarden`, ADR-0013) and needs the
+identical never-see-real-identifiers guarantee over data it discovers
+from sources otsniff never touches (platform APIs, threat feeds,
+otsniff's own JSON output). The population/mechanics split already
+exists structurally in `scrub.rs`; this just draws the crate boundary
+where the code already divides.
+
+**Touches:** new `crates/otsniff-privacy/` crate; `src/scrub.rs`
+(keeps only `build_map`/`build_map_at`/`merge_map`); `src/ai/leak_detector.rs`
+(removed, call sites use `otsniff_privacy::leak_detector`);
+`src/error.rs` (`OtError::PrivacyLeak{..}` → `OtError::Privacy(#[from]
+otsniff_privacy::PrivacyError)`, same wrapping pattern as
+`Segmentation`); workspace `Cargo.toml`. **Deps:** none — pure
+refactor of already-shipped code.
+
 ### P1-8: IOC matching against curated OT threat-intel feeds (M)
 
 Embedded offline database of OT-relevant IOCs (IPs, domains, file
