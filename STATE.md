@@ -15,6 +15,7 @@ phase_1_status: complete-converged
 phase_2_status: complete-approved
 phase_2_approval: human-approved 2026-05-11
 next_phase: run /wave-gate wave-1 for v0.7.0-feature (S-13.01 merged via PR #164, 9f54a6b); a separate, already-spec'd P1-12 (trusted-writer, ADR-0015) on branch feat/trusted-writer-impl is not yet sequenced into a wave
+otsniff_hunt_phase_1_status: in-progress  # separate, parallel work-stream — see "otsniff-hunt spec crystallization" below. Does NOT supersede phase/current_cycle above, which track the v0.7.0-feature implementation cycle.
 ---
 
 # otsniff factory state
@@ -24,6 +25,27 @@ The factory is on cycle v0.7.0-feature; its first (and so far only) story,
 S-13.01, merged via PR #164 (9f54a6b) after a 10-pass adversarial
 convergence loop (converged: 3 consecutive NITPICK_ONLY passes, zero
 BLOCKING/MAJOR findings in the final 5). Wave 1 gate has not been run yet.
+
+## otsniff-hunt spec crystallization (phase-1, in-progress, started 2026-09-08)
+
+A separate, parallel work-stream from the v0.7.0-feature cycle above: the
+maintainer wants to add a directed CVE/threat-exposure "hunt" capability
+(`otsniff hunt <pcap> --concern "..."`) to the SAME otsniff product/binary —
+not a separate product, refining ADR-0016's original "second, separate
+product" framing down to "one binary, new subcommand, new crates
+internally." S-13.01 (above) was the enabling prerequisite (the shared
+`crates/otsniff-privacy` core hunt will reuse).
+
+- `.factory/specs/product-brief.md` amended in place (commit `f63a04f`) via
+  guided discovery: MVP = CLI-only, single-PCAP, CVE/threat-concern exposure
+  verdict, sentinel-tested against known ground truth. Live platform
+  (Claroty/Dragos/Nozomi) integration, an app/GUI, and interactive
+  multi-turn investigation are explicitly deferred (see OQ-6..OQ-9 in the
+  brief).
+- **Not yet started:** domain spec, PRD elaboration, architecture, stories.
+  Next step is `/vsdd-factory:create-prd` (or `/vsdd-factory:create-domain-spec`
+  first if the CVE-to-device-matching mechanism, OQ-6, needs deeper modeling
+  before PRD).
 
 ## Completed cycles
 
