@@ -661,7 +661,7 @@ renderers, `cli.rs` (`--policy` on `diff`), snapshot tests. Likely
 warrants its own ADR or spec. **Deps:** P1-3 (shipped), ADR-0013
 (shipped).
 
-### P1-14: Extract privacy/scrub layer into `crates/otsniff-privacy` (M) — 🔵 spec written
+### P1-14: Extract privacy/scrub layer into `crates/otsniff-privacy` (M) — ✅ shipped
 
 Decision record: [ADR-0016](adr/0016-otsniff-privacy-crate.md).
 
@@ -686,10 +686,10 @@ where the code already divides.
 **Touches:** new `crates/otsniff-privacy/` crate; `src/scrub.rs`
 (keeps only `build_map`/`build_map_at`/`merge_map`); `src/ai/leak_detector.rs`
 (removed, call sites use `otsniff_privacy::leak_detector`);
-`src/error.rs` (`OtError::PrivacyLeak{..}` → `OtError::Privacy(#[from]
-otsniff_privacy::PrivacyError)`, same wrapping pattern as
-`Segmentation`); workspace `Cargo.toml`. **Deps:** none — pure
-refactor of already-shipped code.
+`src/error.rs` (`OtError::PrivacyLeak{..}` → `OtError::Privacy(...)`,
+a hand-written `From` impl rather than `#[from]` — see ADR-0016's
+"Decision refinement" section); workspace `Cargo.toml`. **Deps:** none
+— pure refactor of already-shipped code.
 
 ### P1-8: IOC matching against curated OT threat-intel feeds (M)
 
