@@ -779,10 +779,16 @@ mod tests {
             result.is_err(),
             "validate() must reject duplicate real values within the same family"
         );
-        let err = format!("{}", result.unwrap_err());
+        let err = result.unwrap_err();
         assert!(
-            err.contains("10.0.0.1"),
-            "error must name the duplicated real value; got: {err}"
+            matches!(err, PrivacyError::MapCorrupt { .. }),
+            "F-002 (S-13.01 review): duplicate_real_value must construct \
+             PrivacyError::MapCorrupt, not Leak: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("10.0.0.1"),
+            "error must name the duplicated real value; got: {msg}"
         );
     }
 
@@ -803,9 +809,11 @@ mod tests {
             macs: BTreeMap::new(),
             names,
         };
+        let err = bad_map.validate().unwrap_err();
         assert!(
-            bad_map.validate().is_err(),
-            "validate() must reject duplicate real values across families"
+            matches!(err, PrivacyError::MapCorrupt { .. }),
+            "F-002 (S-13.01 review): cross-family duplicate_real_value must \
+             construct PrivacyError::MapCorrupt, not Leak: {err:?}"
         );
     }
 
@@ -835,6 +843,104 @@ mod tests {
             unknowns.iter().any(|u| u == "host_999"),
             "host_999 (decimal, not in map) must be flagged as unknown; got: {:?}",
             unknowns
+        );
+    }
+
+    /// M-2 (S-13.01 second review): `validate()`'s `empty_real_value` check
+    /// (an entry whose *real* value is the empty string) had no test at all
+    /// prior to this — only `empty_pseudonym`, `duplicate_real_value`, and
+    /// (in `tests/s_6_02_diff_subcommand.rs`) `non_canonical_pseudonym` were
+    /// covered, and none of those asserted the error was specifically
+    /// `PrivacyError::MapCorrupt` rather than `Leak`. A future edit that
+    /// flipped this construction site to `Leak` by mistake would still pass
+    /// an `is_err()`-only test while silently regressing the exit code
+    /// (75 -> was 70) and mislabeling a data-integrity fault as a privacy
+    /// invariant trip.
+    #[test]
+    fn test_f_002_validate_rejects_map_with_empty_real_value() {
+        let mut bad_ips = BTreeMap::new();
+        bad_ips.insert("host_001".to_string(), String::new());
+        let bad_map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: bad_ips,
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+        let err = bad_map.validate().unwrap_err();
+        assert!(
+            matches!(err, PrivacyError::MapCorrupt { .. }),
+            "F-002: empty_real_value must construct PrivacyError::MapCorrupt, \
+             not Leak: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("host_001"),
+            "error must name the offending pseudonym; got: {msg}"
+        );
+    }
+
+    /// M-2 (S-13.01 second review): `validate()`'s `non_canonical_pseudonym`
+    /// check (F-ADV-P3-005) is exercised by
+    /// `tests/s_6_02_diff_subcommand.rs::test_f_adv_p3_005_validate_rejects_non_canonical_pseudonym`,
+    /// but that test only asserted `is_err()` / message-substring on the
+    /// `PrivacyError` itself, never that the variant is specifically
+    /// `MapCorrupt`. Duplicated here (in-crate) with the discriminating
+    /// assertion so the check lives next to the other four MapCorrupt sites.
+    #[test]
+    fn test_f_002_validate_rejects_non_canonical_pseudonym() {
+        let mut bad_ips = BTreeMap::new();
+        bad_ips.insert("FOOBAR".to_string(), "10.0.0.1".to_string());
+        let bad_map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: bad_ips,
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+        let err = bad_map.validate().unwrap_err();
+        assert!(
+            matches!(err, PrivacyError::MapCorrupt { .. }),
+            "F-002: non_canonical_pseudonym must construct PrivacyError::MapCorrupt, \
+             not Leak: {err:?}"
+        );
+    }
+
+    /// M-2 (S-13.01 second review): `merge_family`'s `pseudonym_collision`
+    /// guard (EC-002 / F-ADV-P4-009) had no direct test at all.
+    ///
+    /// Investigated whether a real call to `merge_family` can reach this
+    /// branch: it cannot, for any well-typed `BTreeMap<String, String>`
+    /// input. `start = max_index(baseline, prefix) + 1`, and `max_index`
+    /// scans *every* baseline key that starts with `prefix` and parses as
+    /// `u32` after stripping it -- which is exactly the shape of any key
+    /// that could later collide (`format!("{prefix}{idx:03}")` also has that
+    /// shape and also parses). So any baseline entry that could collide with
+    /// a future `pseudo` is, by construction, already counted in `max_index`,
+    /// which pushes `start` past it. This matches the surrounding code
+    /// comment ("unreachable in correct code"); this test therefore pins the
+    /// *shape* of the error the guard constructs (kind + variant), directly,
+    /// rather than exercising the unreachable call site -- so a future
+    /// refactor that changes `PrivacyError::MapCorrupt { kind: "pseudonym_collision", .. }`
+    /// to `PrivacyError::Leak` at that call site is still only caught by
+    /// code review, not by this test. See the M-2 fix-up report for the
+    /// full reachability analysis.
+    #[test]
+    fn test_f_002_pseudonym_collision_error_shape() {
+        let err = PrivacyError::MapCorrupt {
+            kind: "pseudonym_collision".to_string(),
+            message: "EC-002: pseudonym collision in baseline map — 'host_002' \
+                      maps to both 'A' (baseline) and 'B' (current)."
+                .to_string(),
+        };
+        assert!(
+            matches!(err, PrivacyError::MapCorrupt { .. }),
+            "pseudonym_collision must be a MapCorrupt variant, not Leak: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("collision"),
+            "error message should name the fault; got: {msg}"
         );
     }
 }

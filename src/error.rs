@@ -188,8 +188,9 @@ mod tests {
     }
 
     /// AC-003 regression (moved from `src/ai/leak_detector.rs::ensure_clean_returns_descriptive_error`,
-    /// pre-S-13.01): the `OtError::Privacy(#[from] otsniff_privacy::PrivacyError)`
-    /// wrapper must reproduce the exact message shape and exit code the
+    /// pre-S-13.01): the `OtError::Privacy(otsniff_privacy::PrivacyError)`
+    /// wrapper (a hand-written `From` impl, not `#[from]` -- see the impl
+    /// above) must reproduce the exact message shape and exit code the
     /// pre-extraction `OtError::PrivacyLeak` variant produced -- this is the
     /// one level of assertion the new crate's own tests can't make, since
     /// `otsniff_privacy` has no `OtError` to wrap with.
@@ -324,6 +325,96 @@ mod tests {
             msg.contains("10.0.0.1"),
             "F-002: map-corruption message should still name the offending value \
              (unchanged from pre-move behavior): {msg}"
+        );
+    }
+
+    /// M-2 (S-13.01 second review): `map_corrupt_is_routed_to_parse_not_privacy`
+    /// above only exercised one of `ScrubMap::validate()`'s four `MapCorrupt`
+    /// construction sites (`empty_pseudonym`). A variant regression at any of
+    /// the other three (`empty_real_value`, `non_canonical_pseudonym`,
+    /// `duplicate_real_value`) -- or at `merge_family`'s `pseudonym_collision`
+    /// -- would still pass every other test in the suite, since those tests
+    /// only assert `is_err()` / message-substring on the `PrivacyError`
+    /// itself and never exercise the `OtError` conversion boundary. This
+    /// test and the one below close that gap for two more sites by asserting
+    /// the full `OtError::Parse` / exit-70 / no-"privacy invariant
+    /// tripped" contract, matching `map_corrupt_is_routed_to_parse_not_privacy`.
+    #[test]
+    fn map_corrupt_empty_real_value_is_routed_to_parse_not_privacy() {
+        use chrono::Utc;
+        use otsniff_privacy::ScrubMap;
+        use std::collections::BTreeMap;
+
+        let mut ips = BTreeMap::new();
+        // Empty real value for a well-formed pseudonym — EC-001.
+        ips.insert("host_001".to_string(), String::new());
+        let map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips,
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+
+        let inner = map.validate().unwrap_err();
+        let err: OtError = inner.into();
+        let msg = err.to_string();
+
+        assert!(
+            matches!(err, OtError::Parse(_)),
+            "F-002: empty_real_value MapCorrupt must convert to OtError::Parse, \
+             not OtError::Privacy: {err:?}"
+        );
+        assert_eq!(
+            err.exit_code(),
+            70,
+            "F-002: empty_real_value must keep exit code 70 (EX_SOFTWARE): {msg}"
+        );
+        assert!(
+            !msg.contains("privacy invariant tripped"),
+            "F-002: empty_real_value message must NOT be labeled 'privacy \
+             invariant tripped': {msg}"
+        );
+    }
+
+    /// M-2 (S-13.01 second review): see
+    /// `map_corrupt_empty_real_value_is_routed_to_parse_not_privacy` above --
+    /// this covers the `duplicate_real_value` construction site.
+    #[test]
+    fn map_corrupt_duplicate_real_value_is_routed_to_parse_not_privacy() {
+        use chrono::Utc;
+        use otsniff_privacy::ScrubMap;
+        use std::collections::BTreeMap;
+
+        let mut ips = BTreeMap::new();
+        ips.insert("host_001".to_string(), "10.0.0.9".to_string());
+        ips.insert("host_002".to_string(), "10.0.0.9".to_string()); // dup (F-W1-003)
+        let map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips,
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+
+        let inner = map.validate().unwrap_err();
+        let err: OtError = inner.into();
+        let msg = err.to_string();
+
+        assert!(
+            matches!(err, OtError::Parse(_)),
+            "F-002: duplicate_real_value MapCorrupt must convert to OtError::Parse, \
+             not OtError::Privacy: {err:?}"
+        );
+        assert_eq!(
+            err.exit_code(),
+            70,
+            "F-002: duplicate_real_value must keep exit code 70 (EX_SOFTWARE): {msg}"
+        );
+        assert!(
+            !msg.contains("privacy invariant tripped"),
+            "F-002: duplicate_real_value message must NOT be labeled 'privacy \
+             invariant tripped': {msg}"
         );
     }
 

@@ -1423,7 +1423,16 @@ fn test_f_adv_p3_005_validate_rejects_non_canonical_pseudonym() {
         "F-ADV-P3-005: validate() must reject non-canonical pseudonym 'FOOBAR' \
          in the ips family"
     );
-    let msg = format!("{}", result.unwrap_err());
+    let err = result.unwrap_err();
+    // M-2 (S-13.01 second review): this test previously only asserted
+    // is_err() / message-substring, which would still pass if this
+    // construction site were flipped from MapCorrupt to Leak by mistake.
+    assert!(
+        matches!(err, otsniff_privacy::PrivacyError::MapCorrupt { .. }),
+        "F-002: non_canonical_pseudonym must construct PrivacyError::MapCorrupt, \
+         not Leak: {err:?}"
+    );
+    let msg = format!("{err}");
     assert!(
         msg.contains("non-canonical") || msg.contains("F-ADV-P3-005"),
         "F-ADV-P3-005: error must reference the policy: {msg}"
