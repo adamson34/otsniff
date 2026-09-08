@@ -38,8 +38,9 @@ use crate::oui;
 ///   fresh pseudonyms; the counter resumes at `baseline.max_index() + 1`.
 /// - Returns a merged map containing all identifiers from both sources.
 /// - If the same pseudonym name would be assigned to two different real values,
-///   the implementation must panic (EC-002 from S-6.01: impossible if invariant
-///   holds; indicates a bug).
+///   returns `Err(OtError::Parse)` via `PrivacyError::MapCorrupt` (EC-002 from
+///   S-6.01 / F-ADV-P4-009: impossible if invariant holds; indicates a bug) --
+///   never panics.
 ///
 /// # Ownership
 ///
