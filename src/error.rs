@@ -239,6 +239,13 @@ mod tests {
             "F-ADV-P2-004: Privacy must have exit code 75, matching the pre-extraction \
              PrivacyLeak variant"
         );
+        assert!(
+            std::error::Error::source(&err).is_none(),
+            "AC-003/ADR-0016: OtError::Privacy must have no source chain -- a #[source] \
+             here would add a `caused by:` stderr line (see src/main.rs) that did not \
+             exist pre-extraction, which is the entire reason this From impl is \
+             hand-written instead of a `#[from]` derive"
+        );
     }
 
     /// AC-003 regression (moved from
