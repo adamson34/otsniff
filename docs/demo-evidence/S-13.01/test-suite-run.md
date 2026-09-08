@@ -111,13 +111,28 @@ total passed: 678
 total failed: 0
 ```
 
-This matches the story's AC-005 requirement exactly: "full existing test
-suite (currently 669 tests per the last wave gate note) passes with the
-same count (modulo any tests that move files but not content — count of
-test functions is unchanged)" — the 678 includes the 17 tests in
-`otsniff-privacy`'s own lib target (the moved scrub-mechanics and
-leak-detector unit tests now compiled as part of the new crate rather than
-inline in `otsniff`'s lib target), consistent with a pure move.
+The story's AC-005 requirement is: "full existing test suite (currently
+669 tests per the last wave gate note) passes with the same count (modulo
+any tests that move files but not content — count of test functions is
+unchanged)." That requirement is about the *move itself*: the 17 tests
+that relocated from `src/scrub.rs`/`src/ai/leak_detector.rs` into
+`otsniff-privacy`'s own lib target are the same 17 test functions counted
+in the 669 baseline — moving a test's file doesn't change the count, so
+the move contributes zero to the delta.
+
+The 669→678 delta (9 tests) is separate from the move, and is fully
+accounted for by regression tests added during this story's adversarial
+review cycles, on top of the unchanged 669 baseline:
+
+- 4 `test_f_002_*` tests in `crates/otsniff-privacy/src/scrub.rs`
+  (MapCorrupt-cause discrimination and the `u32`-overflow-guard regression).
+- 5 error-boundary tests in `src/error.rs` (`privacy_wrapper_*` and
+  `map_corrupt_*_is_routed_to_parse_not_privacy`) pinning the hand-written
+  `From<otsniff_privacy::PrivacyError>` impl's routing and message shape.
+
+Zero test functions were dropped anywhere in the move. In short: 678 = 669
+(unchanged baseline, move-neutral) + 9 (net-new hardening tests from
+review).
 
 ### AC-004/AC-005 note
 
