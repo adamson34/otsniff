@@ -16,11 +16,6 @@
 //! `otsniff::error::Result<()>` — this crate has no dependency on otsniff's
 //! `OtError`. Everything else (function names, `scan`'s return shape,
 //! `Leak`/`LeakKind`) is verbatim from the original.
-//!
-//! STUB NOTICE (S-13.01 / BC-5.38.001): every function body below is
-//! `todo!()`. This file is a Red Gate scaffold — the test-writer will add
-//! failing tests against these signatures, then the implementer will fill in
-//! the bodies one at a time. Do not add business logic here.
 
 use regex::Regex;
 
@@ -57,10 +52,28 @@ impl LeakKind {
 /// We return only the first leak by design — if there's one, the calling
 /// code aborts; we don't need to enumerate them all.
 pub fn scan(text: &str) -> Option<Leak> {
-    todo!(
-        "BC-5.38.001: try ipv4_regex(), then ipv6_regex(), then mac_regex(); \
-         return the first match as a Leak with its byte offset"
-    )
+    if let Some(m) = ipv4_regex().find(text) {
+        return Some(Leak {
+            kind: LeakKind::Ipv4,
+            pattern: m.as_str().to_string(),
+            byte_offset: m.start(),
+        });
+    }
+    if let Some(m) = ipv6_regex().find(text) {
+        return Some(Leak {
+            kind: LeakKind::Ipv6,
+            pattern: m.as_str().to_string(),
+            byte_offset: m.start(),
+        });
+    }
+    if let Some(m) = mac_regex().find(text) {
+        return Some(Leak {
+            kind: LeakKind::Mac,
+            pattern: m.as_str().to_string(),
+            byte_offset: m.start(),
+        });
+    }
+    None
 }
 
 /// Convenience wrapper used at the boundary in an `--ai` pipeline.
@@ -72,10 +85,23 @@ pub fn scan(text: &str) -> Option<Leak> {
 /// of the leaked pattern (collision-resistant for grep/log correlation but
 /// non-reversible).
 pub fn ensure_clean(text: &str) -> Result<(), PrivacyError> {
-    todo!(
-        "BC-5.38.001: if scan(text) finds a leak, return Err(PrivacyError::Leak) \
-         with kind/length/offset/hash-prefix but never the raw pattern"
-    )
+    if let Some(leak) = scan(text) {
+        return Err(PrivacyError::Leak {
+            kind: leak.kind.label().to_string(),
+            message: format!(
+                "refusing to send {} pattern (length {} bytes, byte offset {}, \
+                 hash-prefix {}) to AI provider. This is a bug — the scrub layer \
+                 is supposed to remove this before the leak detector runs. The raw \
+                 value is intentionally NOT logged (F-ADV-P2-007); rerun with \
+                 OTSNIFF_LEAK_DEBUG=1 if you need to inspect it.",
+                leak.kind.label(),
+                leak.pattern.len(),
+                leak.byte_offset,
+                leak_hash_prefix(&leak.pattern),
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// Verify that none of the real values in the scrub map appear verbatim in
@@ -87,18 +113,36 @@ pub fn ensure_clean(text: &str) -> Result<(), PrivacyError> {
 /// For IPs and MACs this duplicates the regex check, which is fine —
 /// defense in depth, and the runtime cost is bounded by map size.
 pub fn ensure_no_map_values(text: &str, map: &ScrubMap) -> Result<(), PrivacyError> {
-    todo!(
-        "BC-5.38.001: for each real value in map.real_values(), if text \
-         contains it, return Err(PrivacyError::Leak{{kind: \"map_value\", ..}}) \
-         with a hash-prefix but never the raw value"
-    )
+    for real in map.real_values() {
+        if real.is_empty() {
+            continue;
+        }
+        if text.contains(real) {
+            return Err(PrivacyError::Leak {
+                kind: "map_value".to_string(),
+                message: format!(
+                    "refusing to send unscrubbed identifier from scrub map (length {} bytes, \
+                     hash-prefix {}) to AI provider. This is a bug — the value was in the \
+                     scrub map but wasn't substituted in the rendered report. The raw value \
+                     is intentionally NOT logged (F-ADV-P2-007).",
+                    real.len(),
+                    leak_hash_prefix(real),
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Produce a short non-reversible hash prefix for use in leak diagnostics.
 /// SHA-256 truncated to 4 hex chars — enough for grep/log correlation but
 /// not enough to bracket a small candidate space.
 fn leak_hash_prefix(s: &str) -> String {
-    todo!("BC-5.38.001: sha2::Sha256 digest of s.as_bytes(), format first 2 bytes as hex")
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(s.as_bytes());
+    let digest = hasher.finalize();
+    format!("{:02x}{:02x}", digest[0], digest[1])
 }
 
 // F-W1-004: regexes are compiled once via `LazyLock` (stable since Rust 1.80,

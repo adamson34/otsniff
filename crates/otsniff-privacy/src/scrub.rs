@@ -17,11 +17,6 @@
 //!   4. `unscrub_text(llm_response, &map)` replaces pseudonym → real.
 //!
 //! See ADR-0006 (design rationale) and ADR-0016 (extraction rationale).
-//!
-//! STUB NOTICE (S-13.01 / BC-5.38.001): every function body below is
-//! `todo!()`. This file is a Red Gate scaffold — the test-writer will add
-//! failing tests against these signatures, then the implementer will fill in
-//! the bodies one at a time. Do not add business logic here.
 
 use std::collections::BTreeMap;
 
