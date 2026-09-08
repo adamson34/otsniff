@@ -202,8 +202,7 @@ mod tests {
         };
 
         let leaky = "Engineer connected to LINE-3-PLC and started a download.";
-        let inner =
-            otsniff_privacy::leak_detector::ensure_no_map_values(leaky, &map).unwrap_err();
+        let inner = otsniff_privacy::leak_detector::ensure_no_map_values(leaky, &map).unwrap_err();
         let err: OtError = inner.into();
         let msg = err.to_string();
         assert!(

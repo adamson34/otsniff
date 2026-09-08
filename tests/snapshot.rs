@@ -3196,8 +3196,8 @@ fn augmented_findings_markdown_section_snapshot() {
 // Red Gate: panics on `todo!()` in `augment_findings`.
 #[test]
 fn invariant_no_real_values_reach_ai_provider_augment() {
-    use otsniff_privacy::leak_detector;
     use otsniff::findings::augmented::augment_findings;
+    use otsniff_privacy::leak_detector;
 
     // AC-005 — privacy invariant for the augment path.
     let mut obs = build_fixture();
