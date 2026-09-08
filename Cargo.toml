@@ -3,7 +3,7 @@
 # is set explicitly: a workspace with a root package otherwise defaults to
 # resolver "1".
 [workspace]
-members = ["crates/zonewarden"]
+members = ["crates/zonewarden", "crates/otsniff-privacy"]
 resolver = "2"
 
 [package]
@@ -31,6 +31,7 @@ regex = "1.11"
 sha2 = "0.11"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 zonewarden = { path = "crates/zonewarden" }
+otsniff-privacy = { path = "crates/otsniff-privacy" }
 serde_norway = "0.9"   # YAML parser for Zonewarden segmentation policies (ADR-0013)
 
 [dev-dependencies]
