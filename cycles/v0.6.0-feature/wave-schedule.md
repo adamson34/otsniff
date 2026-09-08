@@ -25,7 +25,7 @@ full per-story pipeline with its own wave gate.
 | 2 | S-9.01 — Multi-PCAP / rotated-capture analyze | P0-10 | 5 | BC-1.01.003, BC-1.01.004, BC-7.01.005 | ✅ gated (PR #140, merge 030a279) |
 | 3 | S-10.01 — Capture-window sanity warning | P1-9 | 5 | BC-4.01.004, BC-4.01.005 | ✅ gated (PR #143, merge 668d704) |
 | 4 | S-11.01 — Diff capture-window normalization | P1-11 | 5 | BC-3.08.004, BC-3.08.005 | ✅ gated (PR #145, merge ad37626) |
-| 5 | S-12.01 — MITRE ATT&CK for ICS technique mapping | P1-6 | 8 | BC-3.06.006, BC-8.05.001 | in-progress (phase-3 delivery) |
+| 5 | S-12.01 — MITRE ATT&CK for ICS technique mapping | P1-6 | 8 | BC-3.06.006, BC-8.05.001 | ✅ gated (PR #147, merge 5525b5c) |
 
 ## Wave 5 — S-12.01
 

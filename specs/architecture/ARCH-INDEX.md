@@ -92,6 +92,10 @@ All ADRs in `docs/adr/`:
 | ADR-0010 | Roll up plaintext-cred findings by kind | Accepted |
 | ADR-0011 | pulldown-cmark with raw-HTML event filter for AI markdown | Accepted |
 | ADR-0012 | Audit log auto-derives path from `-o` | Accepted |
+| ADR-0013 | Zonewarden segmentation-conformance module | Accepted |
+| ADR-0014 | MITRE mapping in catalog | Accepted |
+| ADR-0015 | Operator-declared trusted writers | Accepted |
+| ADR-0016 | Extract privacy/scrub layer into `crates/otsniff-privacy` | Proposed |
 
 ## Component inventory (top-level)
 

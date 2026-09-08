@@ -1,14 +1,14 @@
 ---
 document_type: story-index
 project: otsniff
-cycle: v0.6.0-feature
+cycle: v0.7.0-feature
 phase: 2
 generated: 2026-05-11T20:40:00Z
 producer: phase-2-story-decomposition (inline)
-updated: 2026-06-30T00:00:00Z
-updater: story-writer (S-12.01 MITRE ATT&CK for ICS technique mapping)
-total_stories: 45
-total_epics: 12
+updated: 2026-09-07T00:00:00Z
+updater: story-writer (S-13.01 otsniff-privacy crate extraction)
+total_stories: 46
+total_epics: 13
 status: active
 ---
 
@@ -59,13 +59,22 @@ status: active
 | S-7.02 | Segmentation drift — `diff --policy` | E-7 | — | — | completed-backfill (#136; v0.5.0) | S-7.01, S-6.02, S-6.03 | S.4, S.8, S.9 |
 | S-8.01 | mDNS / NetBIOS-NS / LLMNR hostname extraction | E-8 | 1 | 5 | completed | #138 (6334e36) | S.1 |
 
+<!-- NOTE: S-9.01..S-12.01 (v0.6.0-feature waves 2-5, all completed per
+     .factory/stories/sprint-state.yaml and STATE.md) are not yet backfilled
+     as rows in this table — pre-existing drift from before S-13.01, not
+     introduced by it. sprint-state.yaml is the authoritative record for
+     those five stories in the meantime. -->
+
+| S-13.01 | Extract privacy/scrub layer into `crates/otsniff-privacy` | E-13 | 1 | 8 | ready | — | S.5, build |
+
 **Total points (v0.4.0-feature):** 125 (Wave 1: ~88, Wave 2: ~24, Wave 3: ~13)
 **Total stories (v0.4.0-feature):** 38 (Wave 1: 30, Wave 2: 6, Wave 3: 2)
 **Math check:** E-1=14, E-2=32, E-3=22, E-4=18, E-5=24, E-6=15 → 125.
 **Story-count check (v0.4.0-feature):** E-1=6, E-2=12, E-3=6, E-4=4, E-5=7, E-6=3 → 38.
 **v0.5.0 backfill:** E-7=2 stories (delivered outside VSDD pipeline — see story files).
-**v0.6.0-feature:** E-8=1 story (S-8.01, P0-9 mDNS/NetBIOS-NS/LLMNR hostname extraction, 5 points, Wave 1).
-**Cumulative story count:** 41. **E-7** stories have no point values (not tracked through the pipeline).
+**v0.6.0-feature:** E-8..E-12=5 stories (S-8.01..S-12.01, all completed & gated — see sprint-state.yaml).
+**v0.7.0-feature:** E-13=1 story so far (S-13.01, P1-14 otsniff-privacy crate extraction, 8 points, Wave 1, status ready).
+**Cumulative story count:** 46 (per frontmatter `total_stories`; this table's rows lag behind — see the S-9.01..S-12.01 backfill note above). **E-7** stories have no point values (not tracked through the pipeline).
 
 ## Epic rollup
 

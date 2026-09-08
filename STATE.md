@@ -3,10 +3,10 @@ pipeline: CYCLE-OPEN
 phase: phase-3
 product: otsniff
 mode: brownfield
-timestamp: 2026-06-29T00:00:00Z
-current_cycle: v0.6.0-feature
-current_cycle_status: ready-for-delivery
-previous_cycle: v0.4.0-feature
+timestamp: 2026-09-07T00:00:00Z
+current_cycle: v0.7.0-feature
+current_cycle_status: open — S-13.01 ready for phase-3 delivery
+previous_cycle: v0.6.0-feature
 previous_cycle_status: complete
 v050_backfill_status: complete
 v050_backfill_stories: [S-7.01, S-7.02]
@@ -14,17 +14,32 @@ phase_0_status: complete
 phase_1_status: complete-converged
 phase_2_status: complete-approved
 phase_2_approval: human-approved 2026-05-11
-next_phase: idle — v0.6.0-feature waves 1 (S-8.01) + 2 (S-9.01) + 3 (S-10.01) + 4 (S-11.01) + 5 (S-12.01) delivered & gated; awaiting next story or release
+next_phase: S-13.01 (otsniff-privacy crate extraction, P1-14, ADR-0016) ready on branch feat/otsniff-privacy-crate — awaiting phase-3 delivery
 ---
 
 # otsniff factory state
 
-All three waves of v0.4.0-feature are delivered and gated. Two v0.5.0
-items shipped outside the VSDD pipeline are backfilled as S-7.01 + S-7.02.
-The factory is now open on cycle v0.6.0-feature, ready for per-story
-phase-3 delivery.
+v0.6.0-feature closed with all 5 waves gated; develop bumped to 0.7.0-dev.1.
+The factory is now open on cycle v0.7.0-feature with its first story,
+S-13.01, sprint-ready.
 
 ## Completed cycles
+
+### v0.6.0-feature (closed 2026-09-07)
+
+5 stories, 28 points, 5 waves — all wave gates passed.
+Full wave schedule + gate notes: `cycles/v0.6.0-feature/wave-schedule.md` and
+`cycles/v0.6.0-feature/sprint-state.yaml`.
+
+| Wave | Story | PR | Merge SHA |
+|---|---|---|---|
+| 1 | S-8.01 mDNS/NetBIOS-NS/LLMNR hostname extraction | #138 | 6334e36 |
+| 2 | S-9.01 Multi-PCAP / rotated-capture analyze | #140 | 030a279 |
+| 3 | S-10.01 Capture-window sanity warning | #143 | 668d704 |
+| 4 | S-11.01 Diff capture-window normalization | #145 | ad37626 |
+| 5 | S-12.01 MITRE ATT&CK for ICS technique mapping | #147 | 5525b5c |
+
+Sprint-state archived: `cycles/v0.6.0-feature/sprint-state.yaml`
 
 ### v0.4.0-feature (closed 2026-06-18)
 
@@ -52,18 +67,30 @@ Two items delivered outside the VSDD pipeline; backfilled for traceability.
 
 Both stories are in `stories/sprint-state.yaml` with `semantics: backfill`.
 
-## Current cycle: v0.6.0-feature
+## Current cycle: v0.7.0-feature
 
-**Status: OPEN — ready for phase-3 per-story delivery.**
+**Status: OPEN — S-13.01 ready for phase-3 per-story delivery.**
 
 | File | Purpose |
 |---|---|
-| `stories/sprint-state.yaml` | Live sprint tracking (contains S-7.01/S-7.02 backfills + placeholder for new stories) |
-| `cycles/v0.6.0-feature/wave-schedule.md` | Wave plan placeholder (to be authored at phase-2) |
-| `cycles/current-cycle` | Symlink → `v0.6.0-feature` |
+| `stories/sprint-state.yaml` | Live sprint tracking (S-13.01, wave 1, status ready) |
+| `stories/S-13.01-otsniff-privacy-crate-extraction.md` | Sprint-ready story spec |
+| `cycles/v0.7.0-feature/wave-schedule.md` | Wave 1 plan |
+| `cycles/current-cycle` | Symlink → `v0.7.0-feature` |
+| `docs/adr/0016-otsniff-privacy-crate.md` | Decision record for S-13.01 |
+| `docs/ROADMAP.md` (P1-14) | Roadmap entry |
 
-First story to be added: **P0-9** (hostname extraction). Additional roadmap
-items will be scoped during phase-2 wave planning for this cycle.
+**S-13.01** (P1-14, 8 pts): extract the privacy/scrub layer's pure mechanics
+into a new workspace crate `crates/otsniff-privacy`, so the planned
+otsniff-hunt companion tool can reuse the same never-see-real-identifiers
+guarantee without duplicating it. Pure refactor, no observable behavior
+change. Branch `feat/otsniff-privacy-crate` (off `develop`) already exists and
+is empty — ready for phase-3 delivery. Run `/vsdd-factory:deliver-story
+S-13.01` to start.
+
+A separate, already-spec'd P1-12 (trusted-writer/engineering-allowlist,
+ADR-0015) has its own branch `feat/trusted-writer-impl` and is not yet
+sequenced into this cycle's wave schedule — no file overlap with S-13.01.
 
 ## Permanent artifacts
 

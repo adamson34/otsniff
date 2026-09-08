@@ -1,140 +1,29 @@
-# Sprint state — otsniff v0.6.0-feature cycle
-# Produced by state-manager at cycle open (2026-06-29).
-# Previous cycle (v0.4.0-feature) sprint-state archived at:
-#   cycles/v0.4.0-feature/sprint-state.yaml
-# v0.5.0 work backfilled as S-7.01 (Zonewarden) + S-7.02 (segmentation drift),
-# delivered outside the VSDD pipeline — see story files for evidence.
+# Sprint state — otsniff v0.7.0-feature cycle
+# Produced at cycle open (2026-09-07).
+# Previous cycle (v0.6.0-feature) sprint-state archived at:
+#   cycles/v0.6.0-feature/sprint-state.yaml
+# v0.6.0-feature closed with all 5 waves gated; develop bumped to 0.7.0-dev.1.
 
-cycle: v0.6.0-feature
-current_wave: 5
-total_waves: 5  # w1 S-8.01; w2 S-9.01; w3 S-10.01; w4 S-11.01; w5 S-12.01 (MITRE ICS mapping)
-total_stories: 7   # 2 backfill records + S-8.01 + S-9.01 + S-10.01 + S-11.01 + S-12.01
-wave_5_status: completed  # S-12.01 delivered via full per-story pipeline (PR #147, merge 5525b5c)
-wave_5_gate: passed
-wave_5_gate_passed_at: 2026-06-30T00:00:00Z
-wave_5_gate_notes: "Full suite 669/0 on develop 5525b5c; per-story adversary CONVERGED (3 passes, pass-1 zero findings, only doc-precision nits); HS-013 holdout PASS 1.00 (catalog coverage — 20 detection rules mapped, 3 zonewarden exempt; per-finding MITRE surfaced in HTML+MD+JSON; all 12 distinct technique URLs curl'd → HTTP 200, zero 404s); demo present (per-finding + coverage VHS). See holdout-scenarios/evaluations/wave-5-v0.6.0-2026-06-30.md."
-wave_4_status: completed  # S-11.01 delivered via full per-story pipeline (PR #145, merge ad37626)
-wave_4_gate: passed
-wave_4_gate_passed_at: 2026-06-30T00:00:00Z
-wave_4_gate_notes: "Full suite 668/0 on develop ad37626; per-story adversary CONVERGED (5 passes, 2 fix rounds — rate-vs-volume labeling + >=2× threshold spec contradiction, then 3 clean); HS-012 holdout PASS 1.00 (duration artifact suppressed [identical 48→48 bytes NOT flagged], real rate doubling preserved [48→48 bytes flagged at 2.17×], window-mismatch + degenerate banners both correct, comparable windows quiet); demo present (artifact vs real-shift VHS). See holdout-scenarios/evaluations/wave-4-v0.6.0-2026-06-30.md."
-wave_3_status: completed  # S-10.01 delivered via full per-story pipeline (PR #143, merge 668d704)
-wave_3_gate: passed
-wave_3_gate_passed_at: 2026-06-30T00:00:00Z
-wave_3_gate_notes: "Full suite 659/0 on develop 668d704; per-story adversary CONVERGED (3 passes, all clean, novelty LOW); HS-011 holdout PASS 1.00 (each degenerate class — epoch / sub-second / non-monotonic — warns on stderr + HTML/MD banner; sane capture provably silent + structurally unchanged); demo present (degenerate vs sane VHS). See holdout-scenarios/evaluations/wave-3-v0.6.0-2026-06-30.md."
-wave_2_status: completed  # S-9.01 delivered via full per-story pipeline (PR #140, merge 030a279)
-wave_2_gate: passed
-wave_2_gate_passed_at: 2026-06-30T00:00:00Z
-wave_2_gate_notes: "Full suite 644/0 on develop 030a279; per-story adversary CONVERGED (4 passes — M-1 major fixed + regression-locked, passes 2/3/4 clean, novelty LOW); HS-010 holdout PASS 0.98 (union ingestion + link-type guard + per-file basename audit attribution, schema_version 2, SHA-256s verified bit-for-bit via headless claude CLI); demos present (union + guard VHS). One cosmetic deferral: capture-window inversion on out-of-chronological-order input (TD-S901-002, per-spec EC-005)."
-wave_1_status: completed  # S-8.01 delivered via full per-story pipeline (PR #138, merge 6334e36)
-wave_1_gate: passed
-wave_1_gate_passed_at: 2026-06-30T00:00:00Z
-wave_1_gate_notes: "Full suite 514/0 on develop 6334e36; per-story adversary CONVERGED (6 passes); HS-003 holdout PASS 1.00 (privacy invariant survives new mDNS/NetBIOS/LLMNR extractors); consistency via pass-6 anchoring + CI rule-catalog test; demos present. See holdout-scenarios/evaluations/wave-1-v0.6.0-2026-06-30.md."
+cycle: v0.7.0-feature
+current_wave: 1
+total_waves: 1  # w1 S-13.01 (otsniff-privacy crate extraction); more waves added as scoped
+total_stories: 1
+wave_1_status: not_started
+wave_1_gate: pending
 
 stories:
-  # ===== v0.5.0 Backfill (delivered outside VSDD pipeline) =====
-  # These stories are NOT part of the v0.6.0-feature wave structure.
-  # They record v0.5.0 work so the factory reflects shipped reality.
-  S-7.01:
-    status: completed
-    wave: null
-    branch: null
-    worktree: null
-    merge_sha: null  # delivered across PRs #123–#130; no single merge SHA
-    pr: [123, 124, 125, 126, 127, 128, 129, 130]
-    completed_at: 2026-06-29T00:00:00Z  # backfill timestamp (actual delivery: v0.5.0 release cycle)
-    semantics: backfill (delivered outside VSDD pipeline — no red-gate, no per-story adversarial review)
-    notes: "ADR-0013 Zonewarden segmentation module. 8 PRs (#123–#130): workspace conversion, policy loader + bridge, subcommand skeleton, findings + egress dedup, report renderers, analyze --policy, zonewarden suggest, 7 Kani proofs in CI. Part of v0.5.0 release."
-
-  S-7.02:
-    status: completed
-    wave: null
-    branch: null
-    worktree: null
-    merge_sha: null  # PR #136
-    pr: 136
-    completed_at: 2026-06-29T00:00:00Z  # backfill timestamp (actual delivery: v0.5.0 release cycle)
-    semantics: backfill (delivered outside VSDD pipeline — no red-gate, no per-story adversarial review)
-    notes: "P1-13 segmentation drift. diff --policy: SegmentationDrift + TallyDelta + ViolationRef (pseudonymized at construction) + tally deltas + per-violation new/resolved/persisting + policy_digest anchor + HTML/MD/JSON renderers. Privacy invariant: canary-IP no-leak test. Part of v0.5.0 release."
-
-  # ===== v0.6.0-feature stories =====
-
-  S-8.01:
-    status: completed
+  S-13.01:
+    status: ready
     wave: 1
-    branch: feature/S-8.01-hostname-extraction  # merged + deleted
-    worktree: removed
-    merge_sha: 6334e36
-    pr: 138
-    completed_at: 2026-06-29T00:00:00Z
-    points: 5
-    epic: E-8
-    adversary_convergence: met (6 passes; cycles/v0.6.0-feature/S-8.01/adversary-convergence-state.json; F-201 false-positive overturned with evidence)
-    red_gate: verified (cycles/v0.6.0-feature/S-8.01/implementation/red-gate-log.md)
-    bcs: [BC-1.02.010, BC-1.02.011, BC-1.02.012, BC-1.02.013]
-    traces_to: P0-9
-    notes: "mDNS/NetBIOS-NS/LLMNR hostname extraction; completes the deferred half of P0-3 (DHCP only). Three new src/parse/ modules; observe.rs wiring; zero display or privacy changes needed."
-
-  S-9.01:
-    status: completed
-    wave: 2
-    branch: feature/S-9.01-multi-pcap-analyze  # merged + deleted
-    worktree: removed
-    merge_sha: 030a279
-    pr: 140
-    completed_at: 2026-06-30T00:00:00Z
-    points: 5
-    epic: E-9
-    adversary_convergence: met (4 passes; cycles/v0.6.0-feature/S-9.01/adversary-convergence-state.json; M-1 major fixed + regression-locked, passes 2/3/4 CONVERGED)
-    red_gate: verified (cycles/v0.6.0-feature/S-9.01/implementation/red-gate-log.md)
-    bcs: [BC-1.01.003, BC-1.01.004, BC-7.01.005]
-    traces_to: P0-10
-    notes: "Multi-PCAP / rotated-capture analyze: `analyze a.pcap b.pcap …` concatenates captures in CLI order (append semantics, no timestamp sort), one report over the union window. iter_packets_multi + peek_link_type link-layer guard (OtError::MixedLinkTypes); audit log input_pcap→input_pcaps (SCHEMA_VERSION 1→2); single-file output byte-identical (zero snapshot churn). analyze-only; scrub/diff unchanged."
-
-  S-10.01:
-    status: completed
-    wave: 3
-    branch: feature/S-10.01-capture-sanity-warning  # merged + deleted
-    worktree: removed
-    merge_sha: 668d704
-    pr: 143
-    completed_at: 2026-06-30T00:00:00Z
-    points: 5
-    epic: E-10
-    adversary_convergence: met (3 passes; cycles/v0.6.0-feature/S-10.01/adversary-convergence-state.json; all CONVERGED, novelty LOW, no blocker/major)
-    red_gate: verified (cycles/v0.6.0-feature/S-10.01/implementation/red-gate-log.md)
-    bcs: [BC-4.01.004, BC-4.01.005]
-    traces_to: P1-9
-    notes: "Capture-window sanity warning: pure capture_sanity::assess(obs) detects EpochZeroTimestamps / SubSecondWindow / NonMonotonicTimestamps from observer-tracked min_ts/max_ts/monotonic; surfaced as an HTML+MD report banner and stderr WARNING (mirrors Classification::guard_warning). Rendered ONLY when degenerate → sane captures byte-identical (zero snapshot churn). Also explains the TD-S901-002 out-of-order multi-file window inversion."
-
-  S-11.01:
-    status: completed
-    wave: 4
-    branch: feature/S-11.01-diff-window-normalization  # merged + deleted
-    worktree: removed
-    merge_sha: ad37626
-    pr: 145
-    completed_at: 2026-06-30T00:00:00Z
-    points: 5
-    epic: E-11
-    adversary_convergence: met (5 passes, 2 fix rounds; cycles/v0.6.0-feature/S-11.01/adversary-convergence-state.json; pass-1 rate-vs-volume labeling + pass-2 >=2× threshold contradiction fixed, passes 3/4/5 CONVERGED)
-    red_gate: verified (cycles/v0.6.0-feature/S-11.01/implementation/red-gate-log.md)
-    bcs: [BC-3.08.004, BC-3.08.005]
-    traces_to: P1-11
-    depends_on: [S-10.01]
-    notes: "Diff capture-window normalization: compute_with_multiplier rate-normalizes the flow-shift ratio by each side's capture-window duration (from S-10.01 min_ts/max_ts) so equal-rate flows over unequal-duration captures aren't flagged; raw fallback when a window is degenerate (<1s). New Diff fields rate_normalized + baseline/current_window_secs; stderr WARNING + diff-report banner on >2x window mismatch or degenerate window. Intentionally changes diff snapshots (ratio now rate-based); analyze/scrub output unaffected."
-
-  S-12.01:
-    status: completed
-    wave: 5
-    branch: feature/S-12.01-mitre-ics-mapping  # merged + deleted
-    worktree: removed
-    merge_sha: 5525b5c
-    pr: 147
-    completed_at: 2026-06-30T00:00:00Z
+    branch: feat/otsniff-privacy-crate  # created off develop, currently empty (0 commits)
+    worktree: null
+    merge_sha: null
+    pr: null
+    completed_at: null
     points: 8
-    epic: E-12
-    adversary_convergence: met (3 passes; cycles/v0.6.0-feature/S-12.01/adversary-convergence-state.json; all CONVERGED, pass-1 zero findings, only doc-precision nits)
-    red_gate: verified (cycles/v0.6.0-feature/S-12.01/implementation/red-gate-log.md)
-    bcs: [BC-3.06.006, BC-8.05.001]
-    traces_to: P1-6
-    notes: "MITRE ATT&CK for ICS technique mapping. Catalog already holds MITRE refs (MitreIcsAttack kind) for 8/15 rules; S-12.01 (a) maps the 7 unmapped rules (creds→T0859, smbv1→T0866, tls→T0830, dns/ntp→T0884, some 'supporting'), and (b) surfaces per-finding techniques in HTML/MD/JSON via metadata_for(id) catalog lookup (mirrors the trigger enrichment). ADR-0014: MITRE stays in the catalog (single source of truth), NOT duplicated onto Finding. Regenerates docs/RULES.md. M-sized (8 pts)."
+    epic: E-13
+    adversary_convergence: not_started
+    red_gate: not_started
+    bcs: [BC-5.01.001, BC-5.01.002, BC-5.01.003, BC-5.01.004, BC-5.02.001, BC-5.02.002, BC-5.02.003, BC-5.03.001]
+    traces_to: P1-14
+    notes: "otsniff-privacy crate extraction (ADR-0016). Pure refactor: moves ScrubMap/scrub_text/unscrub_text/pseudonym mechanics + leak_detector into crates/otsniff-privacy; build_map/merge_map (Observations-dependent) stay in otsniff/src. Enables the planned otsniff-hunt companion tool to reuse the privacy core. No observable behavior change — see stories/S-13.01-otsniff-privacy-crate-extraction.md."
