@@ -3,7 +3,7 @@
 **Story:** S-13.01 — Extract privacy/scrub layer into `crates/otsniff-privacy`
 **Story ID:** S-13.01
 **Behavioral Contracts:** BC-5.01.001, BC-5.01.002, BC-5.01.003, BC-5.01.004, BC-5.02.001, BC-5.02.002, BC-5.02.003, BC-5.03.001
-**Worktree HEAD SHA:** 29461e0fb4c210419168437e6aab07e2533ad651
+**Worktree HEAD SHA:** c3c59a82e0b4b64aadc854ef75ce00fe86755331
 **Date:** 2026-09-08
 **Branch:** feature/S-13.01-otsniff-privacy-crate
 
