@@ -55,7 +55,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     `OtError::Parse` by that same hand-written `From` impl — preserving the
     pre-extraction exit code (70) and `"pcap parse error: ..."` message
     prefix for that class of error exactly, rather than folding it into the
-    75/"privacy invariant tripped" shape above.
+    75/"privacy invariant tripped" shape above — except the `u32`-exhaustion
+    cause, which is new hardening with no pre-extraction `OtError::Parse`
+    precedent (see `### Fixed` below).
 
 ### Fixed
 
