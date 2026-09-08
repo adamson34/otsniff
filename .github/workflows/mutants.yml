@@ -151,7 +151,15 @@ jobs:
                   # generated under crates/otsniff-privacy/ -- the exact
                   # thing `--workspace` fixes and a config-only fix (globs
                   # with no matching candidates) can silently fail to catch.
-                  if 'crates/otsniff-privacy/' in json.dumps(o.get('scenario', o)):
+                  # Match on either a workspace-relative file path or a
+                  # package-name field -- cargo-mutants' scenario JSON shape
+                  # isn't pinned across versions, and a substring match on
+                  # only the path would silently never fire (permanently
+                  # red job) if a future version records the mutant's
+                  # location package-relative with a sibling `package` field
+                  # instead.
+                  scenario_str = json.dumps(o.get('scenario', o))
+                  if 'crates/otsniff-privacy/' in scenario_str or '"otsniff-privacy"' in scenario_str:
                       privacy_mutants += 1
           # Unviable mutations did not compile, so they never got a test result
           # and stay out of the denominator.
