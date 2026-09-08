@@ -5,9 +5,10 @@ extraction. This check exercises `ScrubMap::validate()`'s map-corruption
 detection (`PrivacyError::MapCorrupt`, routed to `OtError::Parse`, exit
 code 70) through the live `otsniff unscrub` CLI path, distinct from the
 leak-detector's `PrivacyError::Leak` path (routed to `OtError::Privacy`,
-exit code 75). This proves both branches of the new hand-written `From`
-impl described in AC-003 preserve their pre-extraction exit codes and
-message shapes.
+exit code 75). This proves the `MapCorrupt` branch live through the
+compiled binary; the `Leak` branch (exit 75, `"privacy invariant
+tripped: ..."`) is pinned by `src/error.rs`'s `privacy_wrapper_*` unit
+tests, not re-demonstrated here.
 
 ## Setup
 
