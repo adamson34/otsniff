@@ -83,7 +83,6 @@ impl ScrubMap {
             for (pseudo, real) in entries {
                 if pseudo.is_empty() {
                     return Err(PrivacyError::MapCorrupt {
-                        kind: "empty_pseudonym".to_string(),
                         message: format!(
                             "scrub map has empty pseudonym key for real value '{}'; \
                              the map is corrupted (EC-001). \
@@ -94,7 +93,6 @@ impl ScrubMap {
                 }
                 if real.is_empty() {
                     return Err(PrivacyError::MapCorrupt {
-                        kind: "empty_real_value".to_string(),
                         message: format!(
                             "scrub map has empty real value for pseudonym '{}'; \
                              the map is corrupted (EC-001). \
@@ -107,7 +105,6 @@ impl ScrubMap {
                 // NNN is one or more decimal digits.
                 if !is_canonical_pseudonym(pseudo, prefix) {
                     return Err(PrivacyError::MapCorrupt {
-                        kind: "non_canonical_pseudonym".to_string(),
                         message: format!(
                             "scrub map has non-canonical pseudonym '{pseudo}' in \
                              family '{family}'; expected '{prefix}NNN' where NNN \
@@ -119,7 +116,6 @@ impl ScrubMap {
                 // F-W1-003: duplicate real-value detection.
                 if let Some(first_pseudo) = seen_reals.insert(real.as_str(), pseudo.as_str()) {
                     return Err(PrivacyError::MapCorrupt {
-                        kind: "duplicate_real_value".to_string(),
                         message: format!(
                             "scrub map maps two pseudonyms ('{}' and '{}') to the same \
                              real value '{}'; the map is corrupted (F-W1-003 / duplicate \
@@ -237,7 +233,6 @@ pub fn merge_family(
         if let Some(existing_real) = baseline.get(&pseudo) {
             if existing_real != &real {
                 return Err(PrivacyError::MapCorrupt {
-                    kind: "pseudonym_collision".to_string(),
                     message: format!(
                         "EC-002: pseudonym collision in baseline map — '{pseudo}' \
                          maps to both '{existing_real}' (baseline) and '{real}' \
@@ -919,16 +914,15 @@ mod tests {
     /// a future `pseudo` is, by construction, already counted in `max_index`,
     /// which pushes `start` past it. This matches the surrounding code
     /// comment ("unreachable in correct code"); this test therefore pins the
-    /// *shape* of the error the guard constructs (kind + variant), directly,
-    /// rather than exercising the unreachable call site -- so a future
-    /// refactor that changes `PrivacyError::MapCorrupt { kind: "pseudonym_collision", .. }`
-    /// to `PrivacyError::Leak` at that call site is still only caught by
-    /// code review, not by this test. See the M-2 fix-up report for the
-    /// full reachability analysis.
+    /// *shape* of the error the guard constructs (the `MapCorrupt` variant),
+    /// directly, rather than exercising the unreachable call site -- so a
+    /// future refactor that changes the `pseudonym_collision` construction
+    /// site from `PrivacyError::MapCorrupt` to `PrivacyError::Leak` is still
+    /// only caught by code review, not by this test. See the M-2 fix-up
+    /// report for the full reachability analysis.
     #[test]
     fn test_f_002_pseudonym_collision_error_shape() {
         let err = PrivacyError::MapCorrupt {
-            kind: "pseudonym_collision".to_string(),
             message: "EC-002: pseudonym collision in baseline map — 'host_002' \
                       maps to both 'A' (baseline) and 'B' (current)."
                 .to_string(),

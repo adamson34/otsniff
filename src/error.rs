@@ -79,8 +79,10 @@ pub enum OtError {
     /// **ADR-0016 (S-13.01):** the privacy/scrub mechanics moved to the
     /// `otsniff-privacy` crate so a second consumer (otsniff-hunt) can reuse
     /// them without depending on otsniff's `Observations` type. This variant
-    /// wraps that crate's own error type, mirroring the `Segmentation`
-    /// wrapper pattern below exactly.
+    /// wraps that crate's own error type, following the same "wrap the
+    /// sub-crate's error type" shape as the `Segmentation` wrapper below --
+    /// but via a hand-written `From` impl rather than `#[from]` (see F-002
+    /// below and ADR-0016's "Decision refinement" section for why).
     ///
     /// **F-002 (S-13.01 review):** this variant carries ONLY
     /// `otsniff_privacy::PrivacyError::Leak` (the leak-detector's fail-closed
@@ -120,14 +122,15 @@ impl From<otsniff_privacy::PrivacyError> for OtError {
     fn from(err: otsniff_privacy::PrivacyError) -> Self {
         match err {
             leak @ otsniff_privacy::PrivacyError::Leak { .. } => OtError::Privacy(leak),
-            // `kind` is dropped here (not prefixed onto the message): the
-            // pre-ADR-0016 call sites constructed `OtError::Parse(message)`
-            // directly with no "kind" concept at all, and `message` alone
-            // already names the fault (e.g. "scrub map has empty pseudonym
-            // key for real value '...'; the map is corrupted (EC-001)."").
-            // Prefixing `kind` here would change the message shape from what
-            // pre-move byte-for-byte compatibility requires.
-            otsniff_privacy::PrivacyError::MapCorrupt { message, .. } => OtError::Parse(message),
+            // `MapCorrupt` carries only `message` (m-3, S-13.01 second
+            // review: the field previously also had a `kind`, but nothing
+            // read it -- `message` alone already names the fault, e.g.
+            // "scrub map has empty pseudonym key for real value '...'; the
+            // map is corrupted (EC-001)."), so it was dropped from the
+            // variant entirely. The pre-ADR-0016 call sites constructed
+            // `OtError::Parse(message)` directly with no "kind" concept at
+            // all, so this preserves that message shape unchanged.
+            otsniff_privacy::PrivacyError::MapCorrupt { message } => OtError::Parse(message),
         }
     }
 }

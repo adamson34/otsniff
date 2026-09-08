@@ -19,6 +19,13 @@ pub enum PrivacyError {
     /// message shape than `Leak` (F-ADV: a corrupted-map message that
     /// interpolates a raw value must never be labeled "privacy invariant
     /// tripped").
+    ///
+    /// m-3 (S-13.01 second review): unlike `Leak`, this variant carries no
+    /// `kind` field -- `message` alone already names the specific fault
+    /// (e.g. "scrub map has empty pseudonym key ..."), and nothing reads a
+    /// `kind` for `MapCorrupt` (it was excluded from `Display` and discarded
+    /// by `OtError`'s `From` impl), so a `kind` field here would just be
+    /// dead state kept in sync with the `message` text by hand.
     #[error("{message}")]
-    MapCorrupt { kind: String, message: String },
+    MapCorrupt { message: String },
 }
