@@ -86,7 +86,7 @@ fn test_ac_001_cargo_mutants_config_exists_and_is_valid_toml() {
 /// these module paths also appears in the config's comment block, so a
 /// substring check passes even when examine_globs is empty or misparsed.
 #[test]
-fn test_ac_001_examine_globs_cover_the_four_high_value_modules() {
+fn test_ac_001_examine_globs_cover_the_high_value_modules() {
     let config = load_mutants_config();
 
     for module in &[

@@ -99,7 +99,7 @@ fn test_bc_1_02_001_ac001_each_harness_calls_parser_and_bounds_input() {
         ("parse_s7comm.rs", "otsniff::parse::s7comm::"),
         ("parse_dhcp.rs", "otsniff::parse::dhcp::"),
         ("parse_dnp3.rs", "otsniff::parse::dnp3::"),
-        ("scrub_text.rs", "otsniff_privacy::"),
+        ("scrub_text.rs", "otsniff_privacy::scrub_text"),
     ];
 
     for (filename, module) in parsers {
