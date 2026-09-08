@@ -14,10 +14,15 @@
 #                     a mutation that silences a finding could miss a real attack.
 #   src/parse/      — protocol parsers; wrong function-code handling leads to
 #                     false-negative findings.
-#   src/scrub.rs    — privacy invariant; a missed mutation could leak real IPs
-#                     to the AI provider.
-#   src/ai/leak_detector.rs — fail-closed kill switch; must never allow a
-#                             scrub bypass through.
+#   src/scrub.rs    — otsniff-specific population layer (build_map/merge_map);
+#                     a missed mutation here could feed the scrub map wrong data.
+#   crates/otsniff-privacy/src/scrub.rs — privacy invariant mechanics
+#                     (ScrubMap, scrub_text/unscrub_text); a missed mutation
+#                     could leak real IPs to the AI provider. Moved here from
+#                     src/scrub.rs by ADR-0016 (S-13.01).
+#   crates/otsniff-privacy/src/leak_detector.rs — fail-closed kill switch;
+#                     must never allow a scrub bypass through. Moved here from
+#                     src/ai/leak_detector.rs by ADR-0016 (S-13.01).
 #   src/diff.rs     — cross-capture diff carries the same privacy logic
 #                     (scrub_finding / unmapped_label / resolve_endpoint);
 #                     a missed mutation could leak a real IP into diff output.
@@ -33,7 +38,8 @@ examine_globs = [
     "src/findings/**/*.rs",
     "src/parse/**/*.rs",
     "src/scrub.rs",
-    "src/ai/leak_detector.rs",
+    "crates/otsniff-privacy/src/scrub.rs",
+    "crates/otsniff-privacy/src/leak_detector.rs",
     "src/diff.rs",
 ]
 

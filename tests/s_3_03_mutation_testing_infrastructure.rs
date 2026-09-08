@@ -93,7 +93,12 @@ fn test_ac_001_examine_globs_cover_the_four_high_value_modules() {
         "src/findings/",
         "src/parse/",
         "src/scrub.rs",
-        "src/ai/leak_detector.rs",
+        // ADR-0016 (S-13.01): the privacy mechanics moved from
+        // src/ai/leak_detector.rs / (parts of) src/scrub.rs into
+        // crates/otsniff-privacy — examine_globs must follow them so
+        // mutation coverage isn't silently dropped (EC-004).
+        "crates/otsniff-privacy/src/scrub.rs",
+        "crates/otsniff-privacy/src/leak_detector.rs",
     ] {
         assert!(
             config.examine_globs.iter().any(|g| g.starts_with(module)),
