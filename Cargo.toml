@@ -1,7 +1,8 @@
 # otsniff is the workspace root package; `crates/zonewarden` is the imported,
-# formally-verified segmentation-conformance engine (ADR-0013). resolver = "2"
-# is set explicitly: a workspace with a root package otherwise defaults to
-# resolver "1".
+# formally-verified segmentation-conformance engine (ADR-0013), and
+# `crates/otsniff-privacy` is the imported, formally-verified privacy/scrub
+# core (ADR-0016). resolver = "2" is set explicitly: a workspace with a root
+# package otherwise defaults to resolver "1".
 [workspace]
 members = ["crates/zonewarden", "crates/otsniff-privacy"]
 resolver = "2"
