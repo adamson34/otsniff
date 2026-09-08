@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-LEAK_RS="${REPO_ROOT}/src/ai/leak_detector.rs"
+LEAK_RS="${REPO_ROOT}/crates/otsniff-privacy/src/leak_detector.rs"
 KANI_YML="${REPO_ROOT}/.github/workflows/kani.yml"
 PROOF_MD="${REPO_ROOT}/docs/proofs/leak-detector-regex.md"
 
@@ -115,8 +115,8 @@ if [[ ! -f "${KANI_YML}" ]]; then
   check_fail "AC-002a: .github/workflows/kani.yml does not exist — cannot check harness invocations"
 else
   for harness in leak_regex_ipv4 leak_regex_ipv6 leak_regex_mac; do
-    if grep -v '^\s*#' "${KANI_YML}" | grep -qF "cargo kani --harness ${harness}"; then
-      check_pass "AC-002a: kani.yml invokes 'cargo kani --harness ${harness}' on a non-comment line"
+    if grep -v '^\s*#' "${KANI_YML}" | grep -qE "cargo kani( -p [A-Za-z0-9_-]+)? --harness ${harness}\b"; then
+      check_pass "AC-002a: kani.yml invokes 'cargo kani --harness ${harness}' (optionally with -p <crate>) on a non-comment line"
     else
       check_fail "AC-002a: kani.yml does NOT invoke 'cargo kani --harness ${harness}' on a non-comment line"
     fi

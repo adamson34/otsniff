@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-LEAK_RS="${REPO_ROOT}/src/ai/leak_detector.rs"
+LEAK_RS="${REPO_ROOT}/crates/otsniff-privacy/src/leak_detector.rs"
 KANI_YML="${REPO_ROOT}/.github/workflows/kani.yml"
 PROOF_MD="${REPO_ROOT}/docs/proofs/ensure-no-map-values.md"
 
@@ -66,8 +66,8 @@ fi
 if [[ ! -f "${KANI_YML}" ]]; then
   check_fail "AC-001d: .github/workflows/kani.yml does not exist — cannot check harness invocation"
 else
-  if grep -v '^\s*#' "${KANI_YML}" | grep -qF 'cargo kani --harness map_value_substring'; then
-    check_pass "AC-001d: kani.yml invokes 'cargo kani --harness map_value_substring' on a non-comment line"
+  if grep -v '^\s*#' "${KANI_YML}" | grep -qE 'cargo kani( -p [A-Za-z0-9_-]+)? --harness map_value_substring\b'; then
+    check_pass "AC-001d: kani.yml invokes 'cargo kani --harness map_value_substring' (optionally with -p <crate>) on a non-comment line"
   else
     check_fail "AC-001d: kani.yml does NOT invoke 'cargo kani --harness map_value_substring' on a non-comment line"
   fi

@@ -17,7 +17,7 @@ jobs:
         run: cargo kani setup
       # Each harness runs independently; per-step continue-on-error so a
       # single timeout/failure doesn't mask the status of subsequent harnesses.
-      # The final summary step asserts all 5 succeeded.
+      # The final summary step asserts all 8 succeeded.
       #
       # ADR-0016 (S-13.01): the scrub round-trip harness and the four
       # leak-detector harnesses below moved from src/scrub.rs and
