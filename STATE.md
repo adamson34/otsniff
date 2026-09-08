@@ -42,10 +42,23 @@ internally." S-13.01 (above) was the enabling prerequisite (the shared
   (Claroty/Dragos/Nozomi) integration, an app/GUI, and interactive
   multi-turn investigation are explicitly deferred (see OQ-6..OQ-9 in the
   brief).
-- **Not yet started:** domain spec, PRD elaboration, architecture, stories.
-  Next step is `/vsdd-factory:create-prd` (or `/vsdd-factory:create-domain-spec`
-  first if the CVE-to-device-matching mechanism, OQ-6, needs deeper modeling
-  before PRD).
+- PRD elaborated (commit `32a6a87`): new Subsystem S.10 — Hunt, 15 FRs
+  (FR-1001..1015) / 15 BCs (BC-10.01.001..BC-10.04.002) added to `prd.md` and
+  `behavioral-contracts/BC-INDEX.md`. OQ-6 resolved during PRD work: a curated
+  in-tree `hunt_catalog()` (CVE→vendor/protocol signature table, mirrors the
+  MITRE-mapping/rule-catalog pattern) does deterministic matching; AI narrates
+  the verdict — chosen specifically so the MVP stays sentinel-testable per the
+  brief's success criteria. These BCs are marked "planned, not yet
+  implemented" and excluded from the shipped-BC confidence-summary tally
+  (same treatment as ADR-0015's "spec-written, not implemented" precedent).
+- **Not yet started:** architecture design, story decomposition. Next step is
+  `/vsdd-factory:create-architecture`.
+- **Noted, not fixed (pre-existing, unrelated drift):** `BC-INDEX.md`'s
+  Confidence-summary section states invariants ("HIGH count must equal 99")
+  that no longer match a direct grep of the file (actual: 115) — verified
+  this drift predates this session's edits (confirmed via `git show HEAD`
+  before touching the file) and none of the new S.10 lines are the cause.
+  Not in scope for this PRD amendment; flagging for a future cleanup pass.
 
 ## Completed cycles
 
