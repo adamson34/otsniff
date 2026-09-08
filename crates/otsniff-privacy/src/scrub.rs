@@ -82,7 +82,7 @@ impl ScrubMap {
         ] {
             for (pseudo, real) in entries {
                 if pseudo.is_empty() {
-                    return Err(PrivacyError::Leak {
+                    return Err(PrivacyError::MapCorrupt {
                         kind: "empty_pseudonym".to_string(),
                         message: format!(
                             "scrub map has empty pseudonym key for real value '{}'; \
@@ -93,7 +93,7 @@ impl ScrubMap {
                     });
                 }
                 if real.is_empty() {
-                    return Err(PrivacyError::Leak {
+                    return Err(PrivacyError::MapCorrupt {
                         kind: "empty_real_value".to_string(),
                         message: format!(
                             "scrub map has empty real value for pseudonym '{}'; \
@@ -106,7 +106,7 @@ impl ScrubMap {
                 // F-ADV-P3-005: pseudonym shape must be `<prefix>NNN` where
                 // NNN is one or more decimal digits.
                 if !is_canonical_pseudonym(pseudo, prefix) {
-                    return Err(PrivacyError::Leak {
+                    return Err(PrivacyError::MapCorrupt {
                         kind: "non_canonical_pseudonym".to_string(),
                         message: format!(
                             "scrub map has non-canonical pseudonym '{pseudo}' in \
@@ -118,7 +118,7 @@ impl ScrubMap {
                 }
                 // F-W1-003: duplicate real-value detection.
                 if let Some(first_pseudo) = seen_reals.insert(real.as_str(), pseudo.as_str()) {
-                    return Err(PrivacyError::Leak {
+                    return Err(PrivacyError::MapCorrupt {
                         kind: "duplicate_real_value".to_string(),
                         message: format!(
                             "scrub map maps two pseudonyms ('{}' and '{}') to the same \
@@ -236,7 +236,7 @@ pub fn merge_family(
         // panic on user input," we return a typed error instead.
         if let Some(existing_real) = baseline.get(&pseudo) {
             if existing_real != &real {
-                return Err(PrivacyError::Leak {
+                return Err(PrivacyError::MapCorrupt {
                     kind: "pseudonym_collision".to_string(),
                     message: format!(
                         "EC-002: pseudonym collision in baseline map — '{pseudo}' \

@@ -21,10 +21,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     `unscrub`, and `diff` all produce byte-identical output to before this
     change.
   - `OtError::PrivacyLeak { kind, message }` is now
-    `OtError::Privacy(#[from] otsniff_privacy::PrivacyError)`, mirroring the
-    existing `OtError::Segmentation` wrapper pattern. The error message
-    shape (`"privacy invariant tripped: ..."`) and exit code (75) are
-    unchanged.
+    `OtError::Privacy(otsniff_privacy::PrivacyError)`, mirroring the
+    existing `OtError::Segmentation` wrapper pattern, for the fail-closed
+    leak-detector trip specifically. The error message shape
+    (`"privacy invariant tripped: ..."`) and exit code (75) are unchanged
+    for that path.
+  - `ScrubMap::validate()` / `merge_family()`'s structural map-corruption
+    errors (empty pseudonym, empty real value, non-canonical pseudonym,
+    duplicate real value, pseudonym collision) are a distinct
+    `otsniff_privacy::PrivacyError::MapCorrupt` variant, routed back to
+    `OtError::Parse` by a hand-written `From` impl — preserving the
+    pre-extraction exit code (70) and `"pcap parse error: ..."` message
+    prefix for that class of error exactly, rather than folding it into the
+    75/"privacy invariant tripped" shape above.
   - This exists to support a planned companion tool ("otsniff-hunt") that
     will reuse the same never-see-real-identifiers guarantee over data from
     sources otsniff itself never touches, without forking or duplicating

@@ -711,13 +711,22 @@ fn test_f_w1_001_unscrub_rejects_corrupted_map() {
     std::fs::write(&map_path, corrupted_map).unwrap();
     let input = tmp.path().join("ai.txt");
     std::fs::write(&input, "host_001 saw the leak").unwrap();
+    // F-002 (S-13.01 review): pin the exit code and message shape, not just
+    // bare failure. A corrupted map is a data-integrity fault
+    // (`PrivacyError::MapCorrupt` → `OtError::Parse`), NOT a privacy-invariant
+    // trip -- it must exit 70 with a "pcap parse error" prefix, never exit 75
+    // with "privacy invariant tripped" (which would both change observable
+    // exit-code behavior and mislabel a message that names a raw value).
     Command::cargo_bin("otsniff")
         .unwrap()
         .args(["unscrub", "--map"])
         .arg(&map_path)
         .arg(&input)
         .assert()
-        .failure();
+        .failure()
+        .code(70)
+        .stderr(predicate::str::contains("pcap parse error"))
+        .stderr(predicate::str::contains("privacy invariant tripped").not());
 }
 
 // ── S-10.01: capture-window sanity warning on stderr (AC-004) ────────────────

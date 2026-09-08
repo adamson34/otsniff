@@ -81,13 +81,55 @@ pub enum OtError {
     /// them without depending on otsniff's `Observations` type. This variant
     /// wraps that crate's own error type, mirroring the `Segmentation`
     /// wrapper pattern below exactly.
+    ///
+    /// **F-002 (S-13.01 review):** this variant carries ONLY
+    /// `otsniff_privacy::PrivacyError::Leak` (the leak-detector's fail-closed
+    /// trip). `PrivacyError::MapCorrupt` (raised by `ScrubMap::validate()` /
+    /// `merge_family()` for a structurally-corrupted map) is a different
+    /// error class — a data-integrity fault, not a privacy-invariant trip —
+    /// and is routed to `OtError::Parse` instead, preserving the exact
+    /// pre-extraction (pre-ADR-0016) exit code (70) and message shape
+    /// ("pcap parse error: …") for that case. See the hand-written `From`
+    /// impl below, which is why this variant no longer derives `#[from]`.
     #[error("privacy invariant tripped: {0}")]
-    Privacy(#[from] otsniff_privacy::PrivacyError),
+    Privacy(otsniff_privacy::PrivacyError),
 
     /// A Zonewarden segmentation policy failed to load/validate, or the
     /// conformance engine errored (ADR-0013).
     #[error("segmentation policy error: {0}")]
     Segmentation(#[from] ::zonewarden::errors::ZonewardenError),
+}
+
+/// **F-002 (S-13.01 review):** hand-written instead of `#[from]` on a single
+/// variant because the two `otsniff_privacy::PrivacyError` variants must map
+/// to *different* `OtError` outcomes:
+///
+/// - `PrivacyError::Leak` (fail-closed leak-detector trip) → `OtError::Privacy`,
+///   exit code 75, `"privacy invariant tripped: …"` — unchanged from the
+///   original `#[from]` derive.
+/// - `PrivacyError::MapCorrupt` (a structurally-corrupted `ScrubMap` caught by
+///   `validate()`/`merge_family()`) → `OtError::Parse`, exit code 70,
+///   `"pcap parse error: …"` — this reproduces byte-for-byte the pre-ADR-0016
+///   behavior, when these same call sites constructed `OtError::Parse`
+///   directly. Folding `MapCorrupt` into `OtError::Privacy` would have
+///   silently changed both the exit code and put messages that interpolate
+///   raw scrub-map values (real IPs/hostnames) under a "privacy invariant
+///   tripped" label that is supposed to mean the opposite: that no raw value
+///   is present.
+impl From<otsniff_privacy::PrivacyError> for OtError {
+    fn from(err: otsniff_privacy::PrivacyError) -> Self {
+        match err {
+            leak @ otsniff_privacy::PrivacyError::Leak { .. } => OtError::Privacy(leak),
+            // `kind` is dropped here (not prefixed onto the message): the
+            // pre-ADR-0016 call sites constructed `OtError::Parse(message)`
+            // directly with no "kind" concept at all, and `message` alone
+            // already names the fault (e.g. "scrub map has empty pseudonym
+            // key for real value '...'; the map is corrupted (EC-001)."").
+            // Prefixing `kind` here would change the message shape from what
+            // pre-move byte-for-byte compatibility requires.
+            otsniff_privacy::PrivacyError::MapCorrupt { message, .. } => OtError::Parse(message),
+        }
+    }
 }
 
 impl OtError {
@@ -218,6 +260,71 @@ mod tests {
             "F-ADV-P2-007: raw hostname must NOT appear in the wrapped error message: {msg}"
         );
         assert_eq!(err.exit_code(), 75, "F-ADV-P2-004: Privacy exit code 75");
+    }
+
+    /// F-002 regression (S-13.01 review): `PrivacyError::MapCorrupt` — raised
+    /// by `ScrubMap::validate()` for a structurally-corrupted map (here: an
+    /// empty pseudonym key, EC-001) — is a data-integrity fault, not a
+    /// privacy-invariant trip, and must NOT be routed through
+    /// `OtError::Privacy`. Pre-ADR-0016 (on `develop`), this exact call site
+    /// constructed `OtError::Parse(message)` directly: exit code 70, message
+    /// prefixed `"pcap parse error: "`. The `From<PrivacyError> for OtError`
+    /// impl above must reproduce that byte-for-byte, or a corrupted baseline
+    /// map would silently change exit code (70 → 75) and put a message that
+    /// embeds a raw real value ('10.0.0.1' below) under a
+    /// "privacy invariant tripped" label — exactly the class of bug this
+    /// test pins down.
+    #[test]
+    fn map_corrupt_is_routed_to_parse_not_privacy() {
+        use chrono::Utc;
+        use otsniff_privacy::ScrubMap;
+        use std::collections::BTreeMap;
+
+        let mut ips = BTreeMap::new();
+        // Empty pseudonym key mapping to a real value — EC-001.
+        ips.insert(String::new(), "10.0.0.1".to_string());
+        let map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips,
+            macs: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+
+        let inner = map.validate().unwrap_err();
+        let err: OtError = inner.into();
+        let msg = err.to_string();
+
+        assert!(
+            matches!(err, OtError::Parse(_)),
+            "F-002: MapCorrupt must convert to OtError::Parse, not OtError::Privacy: {err:?}"
+        );
+        assert_eq!(
+            err.exit_code(),
+            70,
+            "F-002: map-corruption must keep the pre-move exit code 70 (EX_SOFTWARE), \
+             matching pre-ADR-0016 behavior: {msg}"
+        );
+        assert!(
+            msg.starts_with("pcap parse error: "),
+            "F-002: map-corruption message must keep the pre-move 'pcap parse error: ' \
+             prefix, not 'privacy invariant tripped': {msg}"
+        );
+        assert!(
+            !msg.contains("privacy invariant tripped"),
+            "F-002: map-corruption message must NOT be labeled 'privacy invariant \
+             tripped' — that label is reserved for genuine leak-detector trips: {msg}"
+        );
+        // The raw real value legitimately appears here (this mirrors the
+        // pre-move behavior exactly — EC-001 messages always named the
+        // offending real value so the user could find it in the map file).
+        // What matters is that this message is NOT mislabeled as a privacy
+        // invariant trip.
+        assert!(
+            msg.contains("10.0.0.1"),
+            "F-002: map-corruption message should still name the offending value \
+             (unchanged from pre-move behavior): {msg}"
+        );
     }
 
     #[test]
