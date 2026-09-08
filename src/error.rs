@@ -145,6 +145,82 @@ mod tests {
         assert!(msg.contains("LINUX_SLL"));
     }
 
+    /// AC-003 regression (moved from `src/ai/leak_detector.rs::ensure_clean_returns_descriptive_error`,
+    /// pre-S-13.01): the `OtError::Privacy(#[from] otsniff_privacy::PrivacyError)`
+    /// wrapper must reproduce the exact message shape and exit code the
+    /// pre-extraction `OtError::PrivacyLeak` variant produced -- this is the
+    /// one level of assertion the new crate's own tests can't make, since
+    /// `otsniff_privacy` has no `OtError` to wrap with.
+    #[test]
+    fn privacy_wrapper_preserves_message_shape_and_exit_code() {
+        let inner = otsniff_privacy::leak_detector::ensure_clean("see 10.0.0.5").unwrap_err();
+        let err: OtError = inner.into();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("privacy invariant tripped"),
+            "F-ADV-P2-004: wrapped error display must include 'privacy invariant tripped': {msg}"
+        );
+        assert!(
+            msg.contains("IPv4"),
+            "F-ADV-P2-004: error should name the leak kind: {msg}"
+        );
+        assert!(
+            !msg.contains("10.0.0.5"),
+            "F-ADV-P2-007: raw leaked value MUST NOT appear in the wrapped error message: {msg}"
+        );
+        assert!(
+            msg.contains("hash-prefix"),
+            "F-ADV-P2-007: error must include hash-prefix for correlation: {msg}"
+        );
+        assert_eq!(
+            err.exit_code(),
+            75,
+            "F-ADV-P2-004: Privacy must have exit code 75, matching the pre-extraction \
+             PrivacyLeak variant"
+        );
+    }
+
+    /// AC-003 regression (moved from
+    /// `src/ai/leak_detector.rs::ensure_no_map_values_catches_hostname_leak_that_regex_misses`,
+    /// pre-S-13.01): same wrapper-shape assertions, for the map-value leak
+    /// path (the primary defense for hostnames, which have no clean regex
+    /// shape).
+    #[test]
+    fn privacy_wrapper_hostname_leak_via_map_value() {
+        use chrono::Utc;
+        use otsniff_privacy::ScrubMap;
+        use std::collections::BTreeMap;
+
+        let mut names = BTreeMap::new();
+        names.insert("name_001".to_string(), "LINE-3-PLC".to_string());
+        let map = ScrubMap {
+            version: 1,
+            created_at: Utc::now(),
+            ips: BTreeMap::new(),
+            macs: BTreeMap::new(),
+            names,
+        };
+
+        let leaky = "Engineer connected to LINE-3-PLC and started a download.";
+        let inner =
+            otsniff_privacy::leak_detector::ensure_no_map_values(leaky, &map).unwrap_err();
+        let err: OtError = inner.into();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("privacy invariant tripped"),
+            "F-ADV-P2-004: wrapped error display must include 'privacy invariant tripped': {msg}"
+        );
+        assert!(
+            msg.contains("map_value"),
+            "F-ADV-P2-004: must name the kind as map_value: {msg}"
+        );
+        assert!(
+            !msg.contains("LINE-3-PLC"),
+            "F-ADV-P2-007: raw hostname must NOT appear in the wrapped error message: {msg}"
+        );
+        assert_eq!(err.exit_code(), 75, "F-ADV-P2-004: Privacy exit code 75");
+    }
+
     #[test]
     fn write_failure_is_73() {
         let e = OtError::WriteOutput {
