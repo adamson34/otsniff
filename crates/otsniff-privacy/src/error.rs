@@ -11,8 +11,9 @@ pub enum PrivacyError {
 
     /// A `ScrubMap`'s internal structure is corrupted -- empty pseudonym or
     /// real value, a non-canonically-shaped pseudonym, a duplicate real
-    /// value across pseudonyms (`ScrubMap::validate`), or a pseudonym
-    /// collision while merging a baseline map (`merge_family`). This is a
+    /// value across pseudonyms (`ScrubMap::validate`), a pseudonym
+    /// collision while merging a baseline map, or an exhausted `u32`
+    /// pseudonym index space (`merge_family`). This is a
     /// distinct error class from `Leak`: it is a structural/data-integrity
     /// fault in a map loaded from disk, not a privacy-invariant trip, and
     /// callers (otsniff's `OtError`) route it to a different exit code /

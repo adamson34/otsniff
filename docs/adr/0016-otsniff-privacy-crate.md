@@ -117,7 +117,8 @@ ended up with two variants, not one:
   anticipated by this ADR's original text, covering `ScrubMap::validate()`'s
   and `merge_family()`'s structural map-corruption checks (empty pseudonym,
   empty real value, non-canonical pseudonym, duplicate real value, pseudonym
-  collision). Pre-extraction, these call sites constructed `OtError::Parse`
+  collision, or an exhausted `u32` pseudonym index space in `merge_family`).
+  Pre-extraction, these call sites constructed `OtError::Parse`
   directly (exit code 70, `"pcap parse error: ..."`); they are a
   data-integrity fault in a map loaded from disk, not a privacy-invariant
   trip, and were never part of the `PrivacyLeak` surface this ADR scoped.

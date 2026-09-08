@@ -47,7 +47,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     for that path. See ADR-0016's "Decision refinement" section.
   - `ScrubMap::validate()` / `merge_family()`'s structural map-corruption
     errors (empty pseudonym, empty real value, non-canonical pseudonym,
-    duplicate real value, pseudonym collision) are a distinct
+    duplicate real value, pseudonym collision, or an exhausted `u32`
+    pseudonym index space in `merge_family`) are a distinct
     `otsniff_privacy::PrivacyError::MapCorrupt` variant, routed back to
     `OtError::Parse` by that same hand-written `From` impl — preserving the
     pre-extraction exit code (70) and `"pcap parse error: ..."` message
