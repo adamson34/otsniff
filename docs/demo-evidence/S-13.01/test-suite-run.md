@@ -114,11 +114,14 @@ total failed: 0
 The story's AC-005 requirement is: "full existing test suite (currently
 669 tests per the last wave gate note) passes with the same count (modulo
 any tests that move files but not content — count of test functions is
-unchanged)." That requirement is about the *move itself*: the 17 tests
-that relocated from `src/scrub.rs`/`src/ai/leak_detector.rs` into
-`otsniff-privacy`'s own lib target are the same 17 test functions counted
-in the 669 baseline — moving a test's file doesn't change the count, so
-the move contributes zero to the delta.
+unchanged)." That requirement is about the *move itself*: 13 tests
+relocated from `src/scrub.rs`/`src/ai/leak_detector.rs` into
+`otsniff-privacy`'s own lib target (6 from `src/scrub.rs`, 7 from
+`src/ai/leak_detector.rs`) — the same 13 test functions counted in the 669
+baseline. Moving a test's file doesn't change the count, so the move
+contributes zero to the delta. (`otsniff-privacy`'s lib target has 17
+total tests: those 13 relocated plus 4 net-new `test_f_002_*` tests — see
+below.)
 
 The 669→678 delta (9 tests) is separate from the move, and is fully
 accounted for by regression tests added during this story's adversarial

@@ -26,8 +26,8 @@ path-fix story).
 | AC | Description | Evidence File | Result |
 |----|-------------|---------------|--------|
 | AC-001 | `otsniff-privacy` crate exists with moved mechanics; deps limited to regex/serde/chrono/sha2/thiserror | `dependency-tree.md` | PASS |
-| AC-001 | Scrub round-trip Kani proof moves verbatim and still proves | `acceptance-script-run.md` (structural), `kani-proof-verification.md` (actual proof run) | PASS |
-| AC-002 | `leak_detector` moves with its proofs; error type is `PrivacyError`, not `OtError` | `acceptance-script-run.md` | PASS (2 pre-existing, unrelated grep-heuristic failures — see note below) |
+| AC-001 | Scrub round-trip Kani proofs move verbatim and still prove | `acceptance-script-run.md` (structural), `kani-proof-verification.md` (both scrub harnesses actually run) | PASS |
+| AC-002 | `leak_detector` moves with its proofs; error type is `PrivacyError`, not `OtError` | `acceptance-script-run.md` (structural), `kani-proof-verification.md` (all 4 leak-detector harnesses actually run) | PASS (2 pre-existing, unrelated grep-heuristic failures — see note below) |
 | AC-003 | Error boundary preserves message shape and exit code (`Leak` → exit 75, `MapCorrupt` → exit 70) | `cli-behavior-check.md` | PASS |
 | AC-004 | otsniff's population logic and all call sites compile and pass; zero new warnings | `test-suite-run.md` | PASS |
 | AC-005 | No observable behavior change; full test suite passes with same function count | `test-suite-run.md`, `cli-behavior-check.md` | PASS |
@@ -58,23 +58,28 @@ path-fix story).
    is identical on `develop` prior to this story's changes and is not a
    regression introduced by the crate extraction.
 
-3. **Kani proof execution** (`kani-proof-verification.md`) — actually ran
-   `cargo kani -p otsniff-privacy --harness scrub_roundtrip_bounded`
-   (`cargo-kani 0.67.0` is available in this environment) against the
-   moved harness. Result: `VERIFICATION:- SUCCESSFUL`, 0 of 117 checks
-   failed. Every check's location points into
-   `crates/otsniff-privacy/src/scrub.rs`, confirming the harness runs
-   against the moved code, not the old `src/scrub.rs`.
+3. **Kani proof execution, all 6 moved harnesses** (`kani-proof-verification.md`)
+   — actually ran all 6 harnesses that moved under ADR-0016
+   (`cargo-kani 0.67.0` is available in this environment):
+   `scrub_roundtrip_bounded` and `scrub_roundtrip_single_replacement`
+   (AC-001), plus `leak_regex_ipv4`, `leak_regex_ipv6`, `leak_regex_mac`,
+   and `map_value_substring` (AC-002). Every harness reports
+   `VERIFICATION:- SUCCESSFUL` with 0 failed checks, and every check's
+   location points into `crates/otsniff-privacy/src/{scrub,leak_detector}.rs`
+   (or the standard library, for the two harnesses that call `u8::is_ascii_*`
+   helpers), confirming each harness runs against the moved code, not the
+   old `src/scrub.rs` / `src/ai/leak_detector.rs` locations.
 
 4. **Build / test / lint / format** (`test-suite-run.md`) —
    `cargo build --workspace` is clean with zero warnings.
    `cargo test --workspace` reports **678 passed, 0 failed** across all
    33 test binaries in the three-member workspace (`otsniff`,
-   `otsniff-privacy`, `zonewarden`), including the 17 unit tests now
-   compiled as part of `otsniff-privacy`'s own lib target (the moved
-   scrub-mechanics and leak-detector tests). `cargo clippy --workspace
-   --all-targets --all-features -- -D warnings` and `cargo fmt --all --
-   --check` both exit clean with no output.
+   `otsniff-privacy`, `zonewarden`). `otsniff-privacy`'s own lib target has
+   17 total tests: 13 relocated (6 from `src/scrub.rs`, 7 from
+   `src/ai/leak_detector.rs`) plus 4 net-new `test_f_002_*` regression
+   tests added during review. `cargo clippy --workspace --all-targets
+   --all-features -- -D warnings` and `cargo fmt --all -- --check` both
+   exit clean with no output.
 
 5. **Live CLI map-corruption check** (`cli-behavior-check.md`) —
    constructed a scrub map JSON with an empty pseudonym key and ran
@@ -92,7 +97,7 @@ path-fix story).
 
 - `dependency-tree.md` — `cargo tree -p otsniff-privacy` output + analysis (AC-001)
 - `acceptance-script-run.md` — S-4.01/S-4.02/S-4.03 acceptance script output against the moved code (AC-001, AC-002)
-- `kani-proof-verification.md` — actual `cargo kani` execution of the moved round-trip harness (AC-001)
+- `kani-proof-verification.md` — actual `cargo kani` execution of all 6 moved harnesses (AC-001, AC-002)
 - `test-suite-run.md` — `cargo build`/`cargo test`/`cargo clippy`/`cargo fmt` output (AC-004, AC-005)
 - `cli-behavior-check.md` — live CLI map-corruption check proving the error boundary is unchanged (AC-003, AC-005)
 - `evidence-report.md` — this file
