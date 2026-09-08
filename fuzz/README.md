@@ -12,7 +12,7 @@ scrub layer.
 | `parse_s7comm` | `otsniff::parse::s7comm::parse` |
 | `parse_dhcp` | `otsniff::parse::dhcp::parse` |
 | `parse_dnp3` | `otsniff::parse::dnp3::parse` |
-| `scrub_text` | `otsniff::scrub::scrub_text` |
+| `scrub_text` | `otsniff_privacy::scrub_text` |
 
 ## Corpus seeding
 

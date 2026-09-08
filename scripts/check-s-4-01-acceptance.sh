@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-SCRUB_RS="${REPO_ROOT}/src/scrub.rs"
+SCRUB_RS="${REPO_ROOT}/crates/otsniff-privacy/src/scrub.rs"
 KANI_YML="${REPO_ROOT}/.github/workflows/kani.yml"
 PROOF_MD="${REPO_ROOT}/docs/proofs/scrub-roundtrip.md"
 
@@ -27,10 +27,11 @@ check_fail() {
 # ---------------------------------------------------------------------------
 # AC-001a — Kani harness exists in code (BC-5.01.003)
 # ---------------------------------------------------------------------------
+SCRUB_RS_REL="${SCRUB_RS#"${REPO_ROOT}/"}"
 if grep -qF '#[kani::proof]' "${SCRUB_RS}"; then
-  check_pass "AC-001a: src/scrub.rs contains #[kani::proof] attribute"
+  check_pass "AC-001a: ${SCRUB_RS_REL} contains #[kani::proof] attribute"
 else
-  check_fail "AC-001a: src/scrub.rs does not contain #[kani::proof] — harness missing"
+  check_fail "AC-001a: ${SCRUB_RS_REL} does not contain #[kani::proof] — harness missing"
 fi
 
 # ---------------------------------------------------------------------------
@@ -86,8 +87,8 @@ fi
 if [[ ! -f "${KANI_YML}" ]]; then
   check_fail "AC-002b: .github/workflows/kani.yml does not exist — cannot check for real invocation"
 else
-  if grep -v '^\s*#' "${KANI_YML}" | grep -qF 'cargo kani --harness'; then
-    check_pass "AC-002b: kani.yml contains 'cargo kani --harness' on a non-comment line"
+  if grep -v '^\s*#' "${KANI_YML}" | grep -qE 'cargo kani( -p [A-Za-z0-9_-]+)? --harness'; then
+    check_pass "AC-002b: kani.yml contains 'cargo kani --harness' (optionally with -p <crate>) on a non-comment line"
   else
     check_fail "AC-002b: kani.yml does not contain 'cargo kani --harness' on a non-comment line — stub uses echo \"TODO\""
   fi

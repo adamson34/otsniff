@@ -842,6 +842,7 @@ dependencies = [
  "etherparse",
  "insta",
  "ipnet",
+ "otsniff-privacy",
  "pcap-parser",
  "predicates",
  "pretty_assertions",
@@ -855,6 +856,17 @@ dependencies = [
  "thiserror",
  "toml",
  "zonewarden",
+]
+
+[[package]]
+name = "otsniff-privacy"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "regex",
+ "serde",
+ "sha2",
+ "thiserror",
 ]
 
 [[package]]

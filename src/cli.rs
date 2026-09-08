@@ -6,7 +6,6 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use ipnet::IpNet;
 
 use crate::ai::claude_cli::ClaudeCliProvider;
-use crate::ai::leak_detector;
 use crate::ai::prompts;
 use crate::ai::AiProvider;
 use crate::audit::{
@@ -16,6 +15,7 @@ use crate::audit::{
 use crate::capture_source::DeclaredSource;
 use crate::error::{OtError, Result};
 use crate::findings::augmented::augment_findings;
+use otsniff_privacy::leak_detector;
 
 /// Source-label sentinel used in the markdown payload sent to the AI
 /// provider.
@@ -58,7 +58,8 @@ use crate::pcap::iter_packets_multi;
 use crate::progress::ProgressReporter;
 use crate::report::render_html;
 use crate::report_md::render_markdown;
-use crate::scrub::{build_map, merge_map, scrub_text, unscrub_text, ScrubMap};
+use crate::scrub::{build_map, merge_map};
+use otsniff_privacy::{scrub_text, unscrub_text, ScrubMap};
 
 /// One-shot OT-aware PCAP triage.
 ///
@@ -474,9 +475,9 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     // scrub map would emit raw IPs straight into the JSON output via the
     // `unwrap_or(ip_str)` fallback in `ip_to_pseudo` (diff.rs). This pass
     // catches the residue before any write happens.
-    crate::ai::leak_detector::ensure_clean(&content)?;
-    crate::ai::leak_detector::ensure_no_map_values(&content, &base_map)?;
-    crate::ai::leak_detector::ensure_no_map_values(&content, &curr_map)?;
+    leak_detector::ensure_clean(&content)?;
+    leak_detector::ensure_no_map_values(&content, &base_map)?;
+    leak_detector::ensure_no_map_values(&content, &curr_map)?;
 
     std::fs::write(&output, content).map_err(|source| OtError::WriteOutput {
         path: output.clone(),
@@ -674,8 +675,8 @@ fn run_scrub(args: ScrubArgs) -> Result<()> {
     // `scrub_text` would silently produce output containing real IPs/
     // MACs/hostnames — exactly the bytes the user is about to paste into
     // an external AI provider.
-    crate::ai::leak_detector::ensure_clean(&md)?;
-    crate::ai::leak_detector::ensure_no_map_values(&md, &map)?;
+    leak_detector::ensure_clean(&md)?;
+    leak_detector::ensure_no_map_values(&md, &map)?;
 
     std::fs::write(&args.output, md).map_err(|source| OtError::WriteOutput {
         path: args.output.clone(),

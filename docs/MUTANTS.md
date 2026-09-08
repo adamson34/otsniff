@@ -6,15 +6,16 @@ interpreting cargo-mutants output and responding to kill-rate regressions.
 
 ## Scope
 
-Mutation testing is scoped to four modules where a weakly-tested mutation
-would represent a real security regression:
+Mutation testing is scoped to modules where a weakly-tested mutation would
+represent a real security regression:
 
 | Module | Why in scope |
 |--------|--------------|
 | `src/findings/` | Detection rules for security findings. A mutation that silences a finding could cause a real attack to go unnoticed. All condition branches and severity assignments must be tested. |
 | `src/parse/` | Protocol parsers for Modbus, EtherNet/IP, and S7Comm. Wrong function-code handling produces false-negative findings; every encoding branch must be covered. |
-| `src/scrub.rs` | Privacy-critical pseudonym minting and scrub/unscrub round-trip. A missed mutation here could leak real IP addresses or MAC addresses to the AI provider, violating the privacy invariant enforced by ADR-0006. |
-| `src/ai/leak_detector.rs` | Fail-closed kill switch that sits between scrub output and any AI call. It must fail closed on any unrecognised address pattern; mutations here are the highest-risk category. |
+| `src/scrub.rs` | otsniff-specific population layer (`build_map`/`build_map_at`/`merge_map`) that walks `Observations` to discover identifiers. A missed mutation here could feed the scrub map wrong data. Narrowed to this by ADR-0016 (S-13.01); the mechanics moved out (see next two rows). |
+| `crates/otsniff-privacy/src/scrub.rs` | Privacy-critical pseudonym mechanics (`ScrubMap`, `scrub_text`/`unscrub_text`, pseudonym-counter internals). A missed mutation here could leak real IP addresses or MAC addresses to the AI provider, violating the privacy invariant enforced by ADR-0006. Moved from `src/scrub.rs` by ADR-0016 (S-13.01). |
+| `crates/otsniff-privacy/src/leak_detector.rs` | Fail-closed kill switch that sits between scrub output and any AI call. It must fail closed on any unrecognised address pattern; mutations here are the highest-risk category. Moved from `src/ai/leak_detector.rs` by ADR-0016 (S-13.01). |
 
 Modules **excluded** from scope:
 
@@ -62,9 +63,17 @@ Per BC-6.21.002, only A-class survivors count against the kill rate.
 |--------|-----------|---------------|--------|-------------------|-------------|
 | `src/findings/` | 86.2% | 58 | 50 | 4 | 4 |
 | `src/parse/` | 83.3% | 48 | 40 | 5 | 3 |
-| `src/scrub.rs` | 82.1% | 39 | 32 | 3 | 4 |
-| `src/ai/leak_detector.rs` | 85.7% | 35 | 30 | 2 | 3 |
+| `src/scrub.rs` / `crates/otsniff-privacy/src/scrub.rs` | 82.1% | 39 | 32 | 3 | 4 |
+| `src/ai/leak_detector.rs` / `crates/otsniff-privacy/src/leak_detector.rs` | 85.7% | 35 | 30 | 2 | 3 |
 | **Overall** | **84.1%** | **180** | **152** | **14** | **14** |
+
+> The rows above pre-date ADR-0016 (S-13.01), which split `src/scrub.rs` into
+> an otsniff-specific population half (staying at `src/scrub.rs`) and a pure
+> mechanics half (moved to `crates/otsniff-privacy/src/scrub.rs`), and moved
+> `src/ai/leak_detector.rs` to `crates/otsniff-privacy/src/leak_detector.rs`
+> wholesale. Per-module numbers have not been re-measured against the new
+> split; the next full sharded run (see the re-derivation note above) should
+> report them separately.
 
 Baseline established: 2026-05-22  
 Baseline commit: `4680e66`  
@@ -172,8 +181,9 @@ When the kill-rate falls more than 5% below 84.1% (i.e. below 79.1%):
 
 ### Adding new code to in-scope modules
 
-When adding new code to `src/findings/`, `src/parse/`, `src/scrub.rs`, or
-`src/ai/leak_detector.rs`:
+When adding new code to `src/findings/`, `src/parse/`, `src/scrub.rs`,
+`crates/otsniff-privacy/src/scrub.rs`, or
+`crates/otsniff-privacy/src/leak_detector.rs`:
 
 - The new code is automatically picked up by cargo-mutants on the next
   weekly run.

@@ -10,6 +10,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 otsniff = { path = ".." }
+# ADR-0016 (S-13.01): scrub/leak-detector mechanics moved to otsniff-privacy;
+# scrub_text.rs now targets that crate directly instead of otsniff's re-export.
+otsniff-privacy = { path = "../crates/otsniff-privacy" }
 # scrub_text harness constructs a ScrubMap (created_at: DateTime<Utc>).
 # chrono is transitive via otsniff but must be a direct dep to be named here.
 chrono = "0.4"

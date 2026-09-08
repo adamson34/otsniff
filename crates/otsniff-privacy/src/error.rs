@@ -1,0 +1,32 @@
+//! Error type for the `otsniff-privacy` crate.
+
+#[derive(thiserror::Error, Debug)]
+pub enum PrivacyError {
+    /// The fail-closed leak detector caught a real value that reached (or
+    /// was about to reach) an AI provider. `message` is redacted before
+    /// construction (see `leak_detector::ensure_clean`) so it never carries
+    /// the raw leaked value.
+    #[error("{kind}: {message}")]
+    Leak { kind: String, message: String },
+
+    /// A `ScrubMap`'s internal structure is corrupted -- empty pseudonym or
+    /// real value, a non-canonically-shaped pseudonym, a duplicate real
+    /// value across pseudonyms (`ScrubMap::validate`), a pseudonym
+    /// collision while merging a baseline map, or an exhausted `u32`
+    /// pseudonym index space (`merge_family`). This is a
+    /// distinct error class from `Leak`: it is a structural/data-integrity
+    /// fault in a map loaded from disk, not a privacy-invariant trip, and
+    /// callers (otsniff's `OtError`) route it to a different exit code /
+    /// message shape than `Leak` (F-ADV: a corrupted-map message that
+    /// interpolates a raw value must never be labeled "privacy invariant
+    /// tripped").
+    ///
+    /// m-3 (S-13.01 second review): unlike `Leak`, this variant carries no
+    /// `kind` field -- `message` alone already names the specific fault
+    /// (e.g. "scrub map has empty pseudonym key ..."), and nothing reads a
+    /// `kind` for `MapCorrupt` (it was excluded from `Display` and discarded
+    /// by `OtError`'s `From` impl), so a `kind` field here would just be
+    /// dead state kept in sync with the `message` text by hand.
+    #[error("{message}")]
+    MapCorrupt { message: String },
+}

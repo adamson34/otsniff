@@ -50,7 +50,7 @@ fuzz_target!(|data: &[u8]| {
         ips.insert("host_002".to_string(), real_2.clone());
     }
 
-    let map = otsniff::scrub::ScrubMap {
+    let map = otsniff_privacy::ScrubMap {
         version: 1,
         created_at: chrono::Utc::now(),
         ips,
@@ -67,12 +67,12 @@ fuzz_target!(|data: &[u8]| {
     // Input = arbitrary fuzzer bytes (panic coverage) + the framed real
     // values (so the substitution branch has real work to do, F-ADV-P1-004).
     let text = format!("{}{}{}", String::from_utf8_lossy(data), real_1, real_2);
-    let scrubbed = otsniff::scrub::scrub_text(&text, &map);
+    let scrubbed = otsniff_privacy::scrub_text(&text, &map);
 
     // F-ADV-P2-005 leak oracle. Every map real value is SENTINEL-framed, so
     // any occurrence in the output is a genuine un-scrubbed leak — never a
     // pseudonym artifact. Unconditional: no skip-guard needed.
-    if let Err(e) = otsniff::ai::leak_detector::ensure_no_map_values(&scrubbed, &map) {
+    if let Err(e) = otsniff_privacy::leak_detector::ensure_no_map_values(&scrubbed, &map) {
         panic!("F-ADV-P2-005 oracle: scrub_text left a real value from the map in its output: {e}");
     }
 });

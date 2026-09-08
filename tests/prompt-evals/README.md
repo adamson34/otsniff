@@ -100,5 +100,6 @@ response) and must never be relaxed.
 `run_all.sh` runs a lightweight leak detector on every AI response before
 scoring. If the response contains an IPv4 address or MAC address pattern,
 the eval is marked FAIL regardless of rubric score. This mirrors the
-compile-time invariant in `src/ai/leak_detector.rs` and ensures the
-eval harness itself cannot be used to exfiltrate real identifiers.
+compile-time invariant in `crates/otsniff-privacy/src/leak_detector.rs`
+and ensures the eval harness itself cannot be used to exfiltrate real
+identifiers.

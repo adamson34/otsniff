@@ -17,35 +17,43 @@ jobs:
         run: cargo kani setup
       # Each harness runs independently; per-step continue-on-error so a
       # single timeout/failure doesn't mask the status of subsequent harnesses.
-      # The final summary step asserts all 5 succeeded.
+      # The final summary step asserts all 8 succeeded.
+      #
+      # ADR-0016 (S-13.01): the scrub round-trip harness and the four
+      # leak-detector harnesses below moved from src/scrub.rs and
+      # src/ai/leak_detector.rs into crates/otsniff-privacy — `-p
+      # otsniff-privacy` follows them there (EC-003) so they keep running.
+      # `composed_privacy_invariant*` further down stayed in the root
+      # otsniff crate (src/kani_proofs.rs is self-contained; see its doc
+      # comment) and needs no `-p`.
       - name: Run scrub round-trip (vacuous) proof
         id: scrub_roundtrip
-        run: cargo kani --harness scrub_roundtrip_bounded
+        run: cargo kani -p otsniff-privacy --harness scrub_roundtrip_bounded
         timeout-minutes: 15
         continue-on-error: true
       - name: Run scrub single-replacement proof
         id: scrub_single
-        run: cargo kani --harness scrub_roundtrip_single_replacement
+        run: cargo kani -p otsniff-privacy --harness scrub_roundtrip_single_replacement
         timeout-minutes: 15
         continue-on-error: true
       - name: Run leak detector IPv4 proof
         id: leak_ipv4
-        run: cargo kani --harness leak_regex_ipv4
+        run: cargo kani -p otsniff-privacy --harness leak_regex_ipv4
         timeout-minutes: 15
         continue-on-error: true
       - name: Run leak detector IPv6 proof
         id: leak_ipv6
-        run: cargo kani --harness leak_regex_ipv6
+        run: cargo kani -p otsniff-privacy --harness leak_regex_ipv6
         timeout-minutes: 15
         continue-on-error: true
       - name: Run leak detector MAC proof
         id: leak_mac
-        run: cargo kani --harness leak_regex_mac
+        run: cargo kani -p otsniff-privacy --harness leak_regex_mac
         timeout-minutes: 15
         continue-on-error: true
       - name: Run map value substring proof
         id: map_value
-        run: cargo kani --harness map_value_substring
+        run: cargo kani -p otsniff-privacy --harness map_value_substring
         timeout-minutes: 15
         continue-on-error: true
       - name: Run composed privacy invariant proof

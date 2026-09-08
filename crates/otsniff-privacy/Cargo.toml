@@ -1,0 +1,23 @@
+[package]
+name = "otsniff-privacy"
+version = "0.0.1"
+description = "Pseudonym scrub / unscrub and fail-closed leak detection for otsniff (ADR-0006)."
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Luke Adamson"]
+repository = "https://github.com/adamson34/otsniff"
+rust-version = "1.85"
+
+[dependencies]
+regex = "1.11"
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.11"
+thiserror = "2"
+
+# `kani` is a known cfg: the formal-verification harnesses (moved from otsniff's
+# src/scrub.rs and src/ai/leak_detector.rs, ADR-0016) are compiled only under
+# `cargo kani` (--cfg kani). Declaring it here silences the unexpected-cfgs lint,
+# matching the precedent set for crates/zonewarden (ADR-0013).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

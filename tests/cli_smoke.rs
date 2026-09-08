@@ -711,13 +711,47 @@ fn test_f_w1_001_unscrub_rejects_corrupted_map() {
     std::fs::write(&map_path, corrupted_map).unwrap();
     let input = tmp.path().join("ai.txt");
     std::fs::write(&input, "host_001 saw the leak").unwrap();
+    // F-002 (S-13.01 review): pin the exit code and message shape, not just
+    // bare failure. A corrupted map is a data-integrity fault
+    // (`PrivacyError::MapCorrupt` → `OtError::Parse`), NOT a privacy-invariant
+    // trip -- it must exit 70 with a "pcap parse error" prefix, never exit 75
+    // with "privacy invariant tripped" (which would both change observable
+    // exit-code behavior and mislabel a message that names a raw value).
     Command::cargo_bin("otsniff")
         .unwrap()
         .args(["unscrub", "--map"])
         .arg(&map_path)
         .arg(&input)
         .assert()
-        .failure();
+        .failure()
+        .code(70)
+        .stderr(predicate::str::contains("pcap parse error"))
+        .stderr(predicate::str::contains("privacy invariant tripped").not())
+        // F-ADV-P6 (S-13.01 sixth review) / corrected by F-P7-001 (seventh
+        // review): this pins that the `MapCorrupt` -> `OtError::Parse` path
+        // (exit 70, asserted above) never grows a "caused by: ..." stderr
+        // line. It does NOT pin anything about the unrelated `Leak` ->
+        // `OtError::Privacy` path (exit 75) or `OtError::Privacy`'s
+        // hand-written `From<PrivacyError>` impl -- `OtError::Parse` has no
+        // `#[source]` regardless of what that other variant does, so a
+        // hypothetical revert of `Privacy` to `#[from]` would NOT be caught
+        // by this assertion. (The earlier version of this comment claimed
+        // otherwise; that claim was false and has been corrected.) A revert
+        // like that would still be caught by other tests that assert
+        // `OtError::Privacy`'s exit code / message shape directly (see
+        // src/error.rs) and, ideally, by a CLI-level test exercising the
+        // `Leak` path -- S-13.01's seventh review investigated adding one
+        // here and found no simple, non-contrived way to trigger
+        // `PrivacyError::Leak` via the `otsniff` binary without invoking
+        // the real `--ai` flow (which needs the `claude` CLI): every
+        // finding in this codebase routes identifier text through
+        // `host_label`/the scrub map before it reaches a report, so there
+        // is no free-text field left for a crafted PCAP to smuggle an
+        // unscrubbed IP/MAC-shaped string past `ensure_clean` on a
+        // realistic input. `Leak` construction and its message shape stay
+        // covered at the unit level (`crates/otsniff-privacy/src/
+        // leak_detector.rs`, `src/error.rs`).
+        .stderr(predicate::str::contains("caused by").not());
 }
 
 // ── S-10.01: capture-window sanity warning on stderr (AC-004) ────────────────

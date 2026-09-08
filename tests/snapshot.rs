@@ -11,7 +11,6 @@ use std::net::{IpAddr, Ipv4Addr};
 use chrono::{TimeZone, Utc};
 use ipnet::IpNet;
 
-use otsniff::ai::leak_detector;
 use otsniff::ai::prompts;
 use otsniff::audit;
 use otsniff::capture_source::{classify, CaptureSource, Classification, Confidence};
@@ -25,7 +24,9 @@ use otsniff::observe::{
 use otsniff::report::render_html;
 use otsniff::report_md::render_markdown;
 use otsniff::rule_catalog::{render, CatalogFormat};
-use otsniff::scrub::{build_map_at, scrub_text, unscrub_text};
+use otsniff::scrub::build_map_at;
+use otsniff_privacy::leak_detector;
+use otsniff_privacy::{scrub_text, unscrub_text};
 
 fn fixed_ts() -> chrono::DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap()
@@ -2836,11 +2837,11 @@ fn augment_request_invokes_provider_with_scrubbed_payload() {
         .expect("BC-6.05.001: mock augment must have been called");
 
     // Verify the sent bytes do not contain any real identifiers from the fixture.
-    otsniff::ai::leak_detector::ensure_clean(&sent)
+    otsniff_privacy::leak_detector::ensure_clean(&sent)
         .expect("BC-6.05.001: bytes sent to augment provider must pass regex leak check");
 
     let map = build_map_at(&obs, fixed_ts());
-    otsniff::ai::leak_detector::ensure_no_map_values(&sent, &map)
+    otsniff_privacy::leak_detector::ensure_no_map_values(&sent, &map)
         .expect("BC-6.05.001: bytes sent to augment provider must pass map-value leak check");
 }
 
@@ -3195,8 +3196,8 @@ fn augmented_findings_markdown_section_snapshot() {
 // Red Gate: panics on `todo!()` in `augment_findings`.
 #[test]
 fn invariant_no_real_values_reach_ai_provider_augment() {
-    use otsniff::ai::leak_detector;
     use otsniff::findings::augmented::augment_findings;
+    use otsniff_privacy::leak_detector;
 
     // AC-005 — privacy invariant for the augment path.
     let mut obs = build_fixture();
@@ -3960,7 +3961,7 @@ fn test_bc_8_04_001_determinism_with_shared_rule_id() {
     use otsniff::diff::{compute, DiffInput};
     use otsniff::findings::{Finding, Severity};
     use otsniff::observe::Observations;
-    use otsniff::scrub::ScrubMap;
+    use otsniff_privacy::ScrubMap;
     use std::collections::BTreeMap;
 
     // Build two findings sharing rule id "ics.modbus_writes" but with
@@ -4199,7 +4200,7 @@ fn test_flow_shift_label_reflects_actual_multiplier() {
 use otsniff::diff::{compute, DiffInput, SegmentationDrift, TallyDelta, ViolationRef};
 use otsniff::report::render_segmentation_drift_section;
 use otsniff::report_md::render_segmentation_drift_md;
-use otsniff::scrub::ScrubMap;
+use otsniff_privacy::ScrubMap;
 
 /// Build a deterministic `SegmentationDrift` covering: a tally with up / down /
 /// unchanged movements, and all three violation-delta lists.

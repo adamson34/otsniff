@@ -52,10 +52,12 @@ list with rationale per item.
 
 ## Architecture
 
-otsniff is a two-member Cargo workspace: the `otsniff` binary crate at the
-root and the pure, Kani-verified `zonewarden` engine under `crates/`
+otsniff is a three-member Cargo workspace: the `otsniff` binary crate at the
+root, the pure, Kani-verified `zonewarden` engine under `crates/`
 (ADR-0013 keeps it a crate boundary so its no-I/O guarantee and proofs stay
-isolated).
+isolated), and the pure, Kani-verified `otsniff-privacy` crate (ADR-0016,
+same rationale — a formally-verified pure core that a second, not-yet-started
+consumer needs).
 
 ```
 src/
@@ -80,20 +82,30 @@ src/
 ├── oui.rs             # Embedded OT-vendor OUI lookup
 ├── report.rs          # askama HTML rendering (templates/report.html, diff.html)
 ├── report_md.rs       # Markdown rendering (LLM-friendly text)
-├── scrub.rs           # Pseudonym minting + scrub/unscrub round-trip
+├── scrub.rs           # Population only: build_map/build_map_at/merge_map walk
+│                      #   otsniff's Observations to discover identifiers; the
+│                      #   pseudonym mechanics live in crates/otsniff-privacy
+│                      #   (ADR-0016)
 ├── audit.rs           # Privacy chain-of-custody audit log (ADR-0012)
 ├── progress.rs        # Verbose-mode progress reporting
-├── kani_proofs.rs     # Privacy-invariant proof harnesses (CBMC-friendly models)
+├── kani_proofs.rs     # Composed privacy-invariant proof harnesses (CBMC-friendly
+│                      #   models; the component proofs moved to
+│                      #   crates/otsniff-privacy per ADR-0016)
 └── ai/
     ├── mod.rs              # AiProvider trait
     ├── claude_cli.rs       # Provider that shells out to `claude -p ...` (tool-sandboxed)
-    ├── leak_detector.rs    # Fail-closed kill switch — enforces privacy
     ├── html_render.rs      # render_safe — strips raw HTML from the AI response
     └── prompts.rs          # Committed system prompt + default task
 
 crates/
-└── zonewarden/        # Pure segmentation engine (resolver, classifier, idmz,
-                       #   multicast, aggregator, digest, validator) + 7 Kani proofs
+├── zonewarden/         # Pure segmentation engine (resolver, classifier, idmz,
+│                       #   multicast, aggregator, digest, validator) + 7 Kani proofs
+└── otsniff-privacy/    # Pure privacy/scrub core (ScrubMap, scrub_text/
+                        #   unscrub_text, leak_detector) + Kani proofs (ADR-0016).
+                        #   otsniff-specific population (build_map/merge_map)
+                        #   stays in src/scrub.rs; this crate has zero
+                        #   otsniff-specific types so a second consumer
+                        #   ("otsniff-hunt") can depend on it directly.
 
 tests/
 ├── cli_smoke.rs       # End-to-end binary tests (assert_cmd + predicates)
@@ -102,7 +114,7 @@ tests/
 ├── prompt_evals.rs    # Structural rubrics for the AI flow
 └── fixtures/          # Real PCAPs (gitignored — see fixtures/README.md)
 
-docs/adr/              # Architecture Decision Records, numbered (0001–0013)
+docs/adr/              # Architecture Decision Records, numbered (0001–0016)
 ```
 
 The data flow is: PCAP → `Packet` stream → `Observer` accumulator →
@@ -117,7 +129,7 @@ and the report's conformance section.
 ```bash
 cargo build                        # debug build
 cargo build --release              # optimized (LTO, strip, single codegen unit)
-cargo test --workspace             # all tests (both crates)
+cargo test --workspace             # all tests (all three crates)
 cargo test --lib                   # unit tests only
 cargo test --test '*'              # integration tests only
 cargo clippy --all-targets --workspace -- -D warnings
@@ -182,10 +194,11 @@ manual two-step counterpart to `analyze --ai`.
 `rules` prints the detection catalog (same content as `docs/RULES.md`).
 
 **The privacy invariant is enforced by code, not convention.** See ADR-0007.
-`src/ai/leak_detector.rs` sits between scrub and any AI provider call and
-fails closed via two checks: a regex scan for IPv4/IPv6/MAC patterns and
-a map-value check that catches anything in the scrub map (notably
-hostnames, which have no clean regex shape). The AI's markdown response
+`crates/otsniff-privacy/src/leak_detector.rs` (moved from `src/ai/leak_detector.rs`
+by ADR-0016) sits between scrub and any AI provider call and fails closed via
+two checks: a regex scan for IPv4/IPv6/MAC patterns and a map-value check
+that catches anything in the scrub map (notably hostnames, which have no
+clean regex shape). The AI's markdown response
 is rendered through `src/ai/html_render.rs::render_safe`, which strips
 raw HTML events so a Claude response containing `<script>` can't XSS
 the rendered report. Any change that adds a code path bypassing scrub
@@ -210,6 +223,11 @@ See `docs/adr/` for rationale:
 - **ADR-0011** — pulldown-cmark with a raw-HTML event filter for the AI markdown
 - **ADR-0012** — Audit log auto-derives its path from `-o`
 - **ADR-0013** — Fold Zonewarden in as a segmentation module (pure engine as a workspace sub-crate)
+- **ADR-0014** — MITRE ATT&CK for ICS mapping lives in the rule catalog
+- **ADR-0016** — Extract the privacy/scrub layer into `crates/otsniff-privacy`
+
+(ADR-0015 — operator-declared trusted writers — is spec-written but not yet
+implemented; see `docs/adr/0015-operator-declared-trusted-writers.md`.)
 
 When adding a non-trivial feature or making an architectural decision, add a new ADR.
 

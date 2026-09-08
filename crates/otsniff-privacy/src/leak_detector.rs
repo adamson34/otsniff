@@ -1,17 +1,25 @@
 //! Fail-closed leak detection.
 //!
-//! Sits between the scrub layer and any AI provider call as a kill switch.
-//! Even if the scrub layer has a bug — missed an observation, didn't
-//! recognize a payload field, processed an unanticipated PCAP shape — this
-//! verifier prevents real network identifiers from reaching the AI.
+//! Extracted from otsniff's `src/ai/leak_detector.rs` per ADR-0016. Sits
+//! between the scrub layer and any AI provider call as a kill switch. Even
+//! if the scrub layer has a bug — missed an observation, didn't recognize a
+//! payload field, processed an unanticipated input shape — this verifier
+//! prevents real network identifiers from reaching the AI.
 //!
 //! It scans for IPv4-, IPv6-, and MAC-shaped patterns and refuses to
 //! return clean if any are found. The error includes the offending
-//! pattern so the user can file a precise bug report.
+//! pattern's shape/length/hash-prefix — never the raw value (F-ADV-P2-007)
+//! — so the caller can file a precise bug report.
+//!
+//! **Signature change from the original (AC-003):** `ensure_clean` and
+//! `ensure_no_map_values` now return `Result<(), PrivacyError>` instead of
+//! `otsniff::error::Result<()>` — this crate has no dependency on otsniff's
+//! `OtError`. Everything else (function names, `scan`'s return shape,
+//! `Leak`/`LeakKind`) is verbatim from the original.
 
 use regex::Regex;
 
-use crate::error::{OtError, Result};
+use crate::error::PrivacyError;
 use crate::scrub::ScrubMap;
 
 #[derive(Debug, Clone)]
@@ -68,17 +76,17 @@ pub fn scan(text: &str) -> Option<Leak> {
     None
 }
 
-/// Convenience wrapper used at the boundary in the `analyze` pipeline.
-/// Returns `Ok(())` if the text is clean, otherwise an
-/// `OtError::PrivacyLeak` with enough detail for the user to diagnose
-/// **WITHOUT** the raw leaked value (F-ADV-P2-007).
+/// Convenience wrapper used at the boundary in an `--ai` pipeline.
+/// Returns `Ok(())` if the text is clean, otherwise a `PrivacyError::Leak`
+/// with enough detail for the caller to diagnose **WITHOUT** the raw leaked
+/// value (F-ADV-P2-007).
 ///
 /// Diagnostics: kind, byte offset, length, and a 4-character SHA-256 prefix
 /// of the leaked pattern (collision-resistant for grep/log correlation but
 /// non-reversible).
-pub fn ensure_clean(text: &str) -> Result<()> {
+pub fn ensure_clean(text: &str) -> Result<(), PrivacyError> {
     if let Some(leak) = scan(text) {
-        return Err(OtError::PrivacyLeak {
+        return Err(PrivacyError::Leak {
             kind: leak.kind.label().to_string(),
             message: format!(
                 "refusing to send {} pattern (length {} bytes, byte offset {}, \
@@ -104,13 +112,13 @@ pub fn ensure_clean(text: &str) -> Result<()> {
 ///
 /// For IPs and MACs this duplicates the regex check, which is fine —
 /// defense in depth, and the runtime cost is bounded by map size.
-pub fn ensure_no_map_values(text: &str, map: &ScrubMap) -> Result<()> {
+pub fn ensure_no_map_values(text: &str, map: &ScrubMap) -> Result<(), PrivacyError> {
     for real in map.real_values() {
         if real.is_empty() {
             continue;
         }
         if text.contains(real) {
-            return Err(OtError::PrivacyLeak {
+            return Err(PrivacyError::Leak {
                 kind: "map_value".to_string(),
                 message: format!(
                     "refusing to send unscrubbed identifier from scrub map (length {} bytes, \
@@ -138,9 +146,9 @@ fn leak_hash_prefix(s: &str) -> String {
 }
 
 // F-W1-004: regexes are compiled once via `LazyLock` (stable since Rust 1.80,
-// our MSRV is 1.85). The previous implementation re-compiled all three regexes
-// on every `scan()` call — which `ensure_clean` invokes multiple times during
-// the --ai pipeline. The compile is cheap individually but the cost adds up.
+// our MSRV is 1.85). Re-compiling all three regexes on every `scan()` call
+// is cheap individually but the cost adds up across an --ai pipeline that
+// calls `ensure_clean` multiple times.
 //
 // Conservative: dotted-quad with each octet 0-255 isn't strictly necessary;
 // we want to catch anything dotted-quad-shaped. The only false-positive risk
@@ -178,6 +186,12 @@ fn mac_regex() -> &'static Regex {
 mod tests {
     use super::*;
 
+    // Moved from otsniff's `src/ai/leak_detector.rs` per ADR-0016
+    // (S-13.01 Task 2) — this whole file has no otsniff-specific logic. 5 of
+    // the 7 original unit tests move verbatim; the two `ensure_*` tests are
+    // adapted (see the per-test notes below) since their `OtError`-wrapper-
+    // layer assertions belong one level up, in otsniff's own `src/error.rs`.
+
     #[test]
     fn flags_ipv4_in_otherwise_clean_text() {
         let leak = scan("the host was 192.168.1.5 doing things").unwrap();
@@ -209,37 +223,40 @@ mod tests {
         assert!(scan(prose).is_none());
     }
 
+    /// AC-003 regression test. Adapted from otsniff's
+    /// `src/ai/leak_detector.rs::ensure_clean_returns_descriptive_error`:
+    /// the original asserted through `OtError`'s `Display`, which added a
+    /// "privacy invariant tripped: " prefix and an `exit_code()` of 75 — both
+    /// belong to otsniff's error-wrapping layer, one level above this crate.
+    /// `ensure_clean` here returns `PrivacyError` directly (one layer below
+    /// that wrapper), which has neither concept, so those two assertions are
+    /// dropped; everything else is unchanged.
     #[test]
     fn ensure_clean_returns_descriptive_error() {
         let err = ensure_clean("see 10.0.0.5").unwrap_err();
         let msg = err.to_string();
-        // F-ADV-P2-004: error is now OtError::PrivacyLeak (distinct variant).
+        // F-ADV-P2-004: error is the PrivacyError::Leak variant.
         // F-ADV-P2-007: raw value MUST NOT appear in error message; only
         // length + offset + hash prefix.
-        assert!(
-            msg.contains("privacy invariant tripped"),
-            "F-ADV-P2-004: error display must include 'privacy invariant tripped': {msg}"
-        );
         assert!(
             msg.contains("IPv4"),
             "F-ADV-P2-004: error should name the leak kind: {msg}"
         );
         assert!(
             !msg.contains("10.0.0.5"),
-            "F-ADV-P2-007: raw leaked value MUST NOT appear in stderr-bound error message: {msg}"
+            "F-ADV-P2-007: raw leaked value MUST NOT appear in the error message: {msg}"
         );
         assert!(
             msg.contains("hash-prefix"),
             "F-ADV-P2-007: error must include hash-prefix for correlation: {msg}"
         );
-        // Exit code must be the new PrivacyLeak code (75), not the old 70.
-        assert_eq!(
-            err.exit_code(),
-            75,
-            "F-ADV-P2-004: PrivacyLeak must have its own exit code distinct from Parse(70)"
-        );
     }
 
+    /// AC-003 regression test. Adapted from otsniff's
+    /// `src/ai/leak_detector.rs::ensure_no_map_values_catches_hostname_leak_that_regex_misses`
+    /// — see the note on `ensure_clean_returns_descriptive_error` above for
+    /// why the `OtError`-wrapper assertions ("privacy invariant tripped",
+    /// `exit_code()`) are dropped here.
     #[test]
     fn ensure_no_map_values_catches_hostname_leak_that_regex_misses() {
         use chrono::Utc;
@@ -262,10 +279,6 @@ mod tests {
         let err = ensure_no_map_values(leaky, &map).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("privacy invariant tripped"),
-            "F-ADV-P2-004: must use PrivacyLeak variant: {msg}"
-        );
-        assert!(
             msg.contains("map_value"),
             "F-ADV-P2-004: must name the kind as map_value: {msg}"
         );
@@ -273,11 +286,6 @@ mod tests {
         assert!(
             !msg.contains("LINE-3-PLC"),
             "F-ADV-P2-007: raw hostname must NOT appear in error message: {msg}"
-        );
-        assert_eq!(
-            err.exit_code(),
-            75,
-            "F-ADV-P2-004: PrivacyLeak exit code 75"
         );
 
         let clean = "Engineer connected to name_001 and started a download.";
@@ -288,7 +296,7 @@ mod tests {
 /// Kani formal-verification harnesses (S-4.02).
 ///
 /// These harnesses are compiled and run only when `cargo kani --harness …`
-/// is invoked.  Under normal `cargo build` / `cargo test` / `cargo check`
+/// is invoked. Under normal `cargo build` / `cargo test` / `cargo check`
 /// the entire module is elided by the `#[cfg(kani)]` gate.
 ///
 /// See `docs/proofs/leak-detector-regex.md` for bounds rationale and
@@ -297,7 +305,7 @@ mod tests {
 /// # Proof-model architecture
 ///
 /// The `regex` crate uses heap-allocated NFA/DFA state machines that CBMC
-/// cannot unwind within a reasonable budget.  Instead of calling the
+/// cannot unwind within a reasonable budget. Instead of calling the
 /// production `scan()` function, each harness uses a hand-rolled byte-level
 /// *model function* (`is_ipv4_shaped_model`, `is_ipv6_shaped_model`,
 /// `is_mac_shaped_model`, `byte_contains_model`) that implements the same
@@ -308,9 +316,13 @@ mod tests {
 /// verified separately by the fuzz suite (S-3.04); that step is out of scope
 /// here and is documented in `docs/proofs/leak-detector-regex.md`.
 ///
+/// Moved verbatim from otsniff's `src/ai/leak_detector.rs` per ADR-0016.
 /// Production code (regex-based `scan`, `ensure_clean`,
 /// `ensure_no_map_values`) is never modified; all changes are inside this
-/// `#[cfg(kani)]` module.
+/// `#[cfg(kani)]` module. The model functions below are self-contained and
+/// do not call into the production functions above -- they implement the
+/// same algorithm independently so Kani can unwind them without hitting
+/// the `regex` crate's heap-allocated state machines.
 #[cfg(kani)]
 mod kani_proofs {
     use super::*;
@@ -318,7 +330,7 @@ mod kani_proofs {
     // ── Model functions ───────────────────────────────────────────────────────
     //
     // Each model mirrors the detection logic of the corresponding regex without
-    // using the `regex` crate.  They are private to this module and exist only
+    // using the `regex` crate. They are private to this module and exist only
     // to give CBMC a tractable proof obligation.
 
     /// Returns `true` if `bytes` is exactly a dotted-quad IPv4 shape:
@@ -365,7 +377,7 @@ mod kani_proofs {
     /// Returns `true` if `bytes` is the zero-elision loopback form `"::1"`.
     ///
     /// Full 8-group IPv6 enumeration is out of scope (128 symbolic bits blow
-    /// up CBMC).  This model covers the `::N` zero-elision prefix form
+    /// up CBMC). This model covers the `::N` zero-elision prefix form
     /// (e.g. `::1`, `::2`, `::ffff`) which is the most common loopback /
     /// link-local shape.
     fn is_ipv6_zero_elision_model(bytes: &[u8]) -> bool {
@@ -454,8 +466,8 @@ mod kani_proofs {
     /// # Scope change (proof-model architecture)
     ///
     /// Previous version called `scan()` directly, which dragged in the `regex`
-    /// crate's NFA/DFA and caused CBMC timeout/failure.  This version proves
-    /// the PATTERN MODEL, not the production regex.  Model-vs-production
+    /// crate's NFA/DFA and caused CBMC timeout/failure. This version proves
+    /// the PATTERN MODEL, not the production regex. Model-vs-production
     /// equivalence is delegated to the fuzz suite (S-3.04).
     ///
     /// # Bounds
@@ -529,7 +541,7 @@ mod kani_proofs {
     ///
     /// Previous version called `scan()` directly, which triggered unwinding
     /// failures and arithmetic check failures inside the `regex` crate.
-    /// This version proves the PATTERN MODEL.  Model-vs-production equivalence
+    /// This version proves the PATTERN MODEL. Model-vs-production equivalence
     /// is delegated to the fuzz suite (S-3.04).
     ///
     /// # Bounds
@@ -619,7 +631,7 @@ mod kani_proofs {
     ///
     /// Previous version called `ensure_no_map_values` directly, which calls
     /// `str::contains` whose UTF-8 validation loop caused CBMC timeout.
-    /// This version proves the BYTE-LEVEL MODEL.  Model-vs-production
+    /// This version proves the BYTE-LEVEL MODEL. Model-vs-production
     /// equivalence (that `byte_contains_model(h, n) == h_str.contains(n_str)`)
     /// is deferred to the fuzz suite.
     ///
@@ -675,7 +687,7 @@ mod kani_proofs {
         // ── Bidirectional invariant (model self-consistency) ─────────────────
         //
         // Verify by brute-force: if found, at least one window must match;
-        // if not found, no window must match.  This asserts the model is
+        // if not found, no window must match. This asserts the model is
         // internally consistent (not just panic-free).
         if found {
             // There must exist some position i where haystack[i..i+needle_len] == needle.

@@ -75,7 +75,17 @@ jobs:
 
       - name: Run mutation testing
         run: |
+          # F-004 (S-13.01 review): --workspace is required. The root
+          # Cargo.toml is a workspace WITH a root package (otsniff), so
+          # without this flag cargo-mutants' default-members resolution only
+          # generates mutants for the otsniff package -- the
+          # crates/otsniff-privacy/src/{scrub,leak_detector}.rs globs in
+          # .cargo-mutants.toml would silently match zero candidates, and the
+          # privacy mechanics moved there by ADR-0016 would drop out of
+          # mutation coverage entirely (the exact EC-004 failure mode this
+          # gate exists to catch).
           cargo mutants \
+            --workspace \
             --no-shuffle \
             --shard ${{ matrix.shard }}/${{ env.SHARD_COUNT }} \
             --jobs 2 \
@@ -122,6 +132,7 @@ jobs:
 
           killed = survived = timeout = unviable = 0
           shards = 0
+          privacy_mutants = 0
           for path in sorted(glob.glob('shard-results/*/outcomes.json')):
               shards += 1
               for o in json.load(open(path)).get('outcomes', []):
@@ -135,13 +146,38 @@ jobs:
                       timeout += 1
                   elif s == 'Unviable':
                       unviable += 1
+                  # F-004 (S-13.01 review, POL-11-style positive-coverage
+                  # check): confirm at least one mutant was actually
+                  # generated under crates/otsniff-privacy/ -- the exact
+                  # thing `--workspace` fixes and a config-only fix (globs
+                  # with no matching candidates) can silently fail to catch.
+                  # Match on either a workspace-relative file path or a
+                  # package-name field -- cargo-mutants' scenario JSON shape
+                  # isn't pinned across versions, and a substring match on
+                  # only the path would silently never fire (permanently
+                  # red job) if a future version records the mutant's
+                  # location package-relative with a sibling `package` field
+                  # instead.
+                  scenario_str = json.dumps(o.get('scenario', o))
+                  if 'crates/otsniff-privacy/' in scenario_str or '"otsniff-privacy"' in scenario_str:
+                      privacy_mutants += 1
           # Unviable mutations did not compile, so they never got a test result
           # and stay out of the denominator.
           total = killed + survived + timeout
-          print(f'{killed} {total} {survived} {timeout} {unviable} {shards}')
+          print(f'{killed} {total} {survived} {timeout} {unviable} {shards} {privacy_mutants}')
           PY
-          ) || PARSED="0 0 0 0 0 0"
-          read -r KILLED TOTAL SURVIVED TIMEOUT UNVIABLE SHARDS <<< "$PARSED"
+          ) || PARSED="0 0 0 0 0 0 0"
+          read -r KILLED TOTAL SURVIVED TIMEOUT UNVIABLE SHARDS PRIVACY_MUTANTS <<< "$PARSED"
+
+          # F-004: fail loudly if the otsniff-privacy globs matched zero
+          # mutants -- that means the crate dropped out of mutation scope
+          # again (e.g. --workspace regresses, or the crate is renamed/moved)
+          # rather than silently reporting a kill rate that no longer covers
+          # the privacy mechanics this gate is supposed to protect.
+          if [ "$SHARDS" = "$SHARD_COUNT" ] && [ "$PRIVACY_MUTANTS" = "0" ]; then
+            echo "::error::F-004: zero mutants were generated under crates/otsniff-privacy/ across all ${SHARD_COUNT} shards. The examine_globs in .cargo-mutants.toml are not matching any candidates -- check that 'cargo mutants' is invoked with --workspace."
+            exit 1
+          fi
 
           if [ "$TOTAL" -gt 0 ]; then
             # Killed + Timeout both count as kills: a timeout means the mutation
@@ -163,6 +199,7 @@ jobs:
             echo "| Timeout | ${TIMEOUT} |"
             echo "| Unviable (excluded) | ${UNVIABLE} |"
             echo "| Shards reporting | ${SHARDS} / ${SHARD_COUNT} |"
+            echo "| otsniff-privacy mutants (F-004 coverage check) | ${PRIVACY_MUTANTS} |"
             echo ""
             echo "See the \`mutants-results-shard-*\` artifacts for surviving mutants."
           } >> "$GITHUB_STEP_SUMMARY"

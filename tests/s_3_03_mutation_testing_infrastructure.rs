@@ -86,14 +86,19 @@ fn test_ac_001_cargo_mutants_config_exists_and_is_valid_toml() {
 /// these module paths also appears in the config's comment block, so a
 /// substring check passes even when examine_globs is empty or misparsed.
 #[test]
-fn test_ac_001_examine_globs_cover_the_four_high_value_modules() {
+fn test_ac_001_examine_globs_cover_the_high_value_modules() {
     let config = load_mutants_config();
 
     for module in &[
         "src/findings/",
         "src/parse/",
         "src/scrub.rs",
-        "src/ai/leak_detector.rs",
+        // ADR-0016 (S-13.01): the privacy mechanics moved from
+        // src/ai/leak_detector.rs / (parts of) src/scrub.rs into
+        // crates/otsniff-privacy — examine_globs must follow them so
+        // mutation coverage isn't silently dropped (EC-004).
+        "crates/otsniff-privacy/src/scrub.rs",
+        "crates/otsniff-privacy/src/leak_detector.rs",
     ] {
         assert!(
             config.examine_globs.iter().any(|g| g.starts_with(module)),

@@ -3,7 +3,9 @@
 Story: S-4.02
 Behavioral contract: BC-5.02.001
 Harnesses: `leak_regex_ipv4`, `leak_regex_ipv6`, `leak_regex_mac`
-Location: `src/ai/leak_detector.rs` — `#[cfg(kani)] mod kani_proofs`
+Location: `crates/otsniff-privacy/src/leak_detector.rs` (moved from
+`src/ai/leak_detector.rs` by ADR-0016 / S-13.01) — `#[cfg(kani)] mod
+kani_proofs`
 
 ---
 
@@ -41,7 +43,7 @@ Production code (`scan`, `ensure_clean`, `ipv4_regex`, `ipv6_regex`,
 
 ### `leak_regex_ipv4`
 
-**Location:** `src/ai/leak_detector.rs`, `kani_proofs::leak_regex_ipv4`
+**Location:** `crates/otsniff-privacy/src/leak_detector.rs`, `kani_proofs::leak_regex_ipv4`
 
 **Property:** `is_ipv4_shaped_model` returns `true` for every dotted-quad
 string `D.D.D.D` where each `D` is a single symbolic decimal digit (0–9).
@@ -62,7 +64,7 @@ This covers 10^4 = 10 000 distinct address strings.
 
 ### `leak_regex_ipv6`
 
-**Location:** `src/ai/leak_detector.rs`, `kani_proofs::leak_regex_ipv6`
+**Location:** `crates/otsniff-privacy/src/leak_detector.rs`, `kani_proofs::leak_regex_ipv6`
 
 **Property:** `is_ipv6_zero_elision_model` returns `true` for every `::H`
 string where `H` is a symbolic single hex digit (0–9 or a–f or A–F).
@@ -86,7 +88,7 @@ The full 8-group form is exercised by the unit test `flags_ipv6_in_text`.
 
 ### `leak_regex_mac`
 
-**Location:** `src/ai/leak_detector.rs`, `kani_proofs::leak_regex_mac`
+**Location:** `crates/otsniff-privacy/src/leak_detector.rs`, `kani_proofs::leak_regex_mac`
 
 **Property:** `is_mac_shaped_model` returns `true` for every MAC string
 `HH:HH:HH:HH:HH:HH` where each `H` is a symbolic lower-case hex nibble (0–9
@@ -134,9 +136,9 @@ unbounded inputs and model-vs-production equivalence by random exploration.
 ## Run Instructions
 
 ```bash
-cargo kani --harness leak_regex_ipv4
-cargo kani --harness leak_regex_ipv6
-cargo kani --harness leak_regex_mac
+cargo kani -p otsniff-privacy --harness leak_regex_ipv4
+cargo kani -p otsniff-privacy --harness leak_regex_ipv6
+cargo kani -p otsniff-privacy --harness leak_regex_mac
 ```
 
 ---

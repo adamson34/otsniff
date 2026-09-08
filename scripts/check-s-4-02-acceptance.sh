@@ -8,7 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-LEAK_RS="${REPO_ROOT}/src/ai/leak_detector.rs"
+LEAK_RS="${REPO_ROOT}/crates/otsniff-privacy/src/leak_detector.rs"
+LEAK_RS_REL="${LEAK_RS#"${REPO_ROOT}/"}"
 KANI_YML="${REPO_ROOT}/.github/workflows/kani.yml"
 PROOF_MD="${REPO_ROOT}/docs/proofs/leak-detector-regex.md"
 
@@ -29,9 +30,9 @@ check_fail() {
 # AC-001a — kani_proofs module exists in leak_detector.rs
 # ---------------------------------------------------------------------------
 if grep -qF '#[cfg(kani)]' "${LEAK_RS}"; then
-  check_pass "AC-001a: src/ai/leak_detector.rs contains #[cfg(kani)] gate"
+  check_pass "AC-001a: ${LEAK_RS_REL} contains #[cfg(kani)] gate"
 else
-  check_fail "AC-001a: src/ai/leak_detector.rs does not contain #[cfg(kani)] — kani_proofs module missing"
+  check_fail "AC-001a: ${LEAK_RS_REL} does not contain #[cfg(kani)] — kani_proofs module missing"
 fi
 
 # ---------------------------------------------------------------------------
@@ -42,9 +43,9 @@ for harness in leak_regex_ipv4 leak_regex_ipv6 leak_regex_mac; do
   # check: look for the fn declaration inside the file (the #[kani::proof]
   # attribute appears on the preceding line in the stub).
   if grep -qF "fn ${harness}" "${LEAK_RS}"; then
-    check_pass "AC-001b: harness '${harness}' declared in src/ai/leak_detector.rs"
+    check_pass "AC-001b: harness '${harness}' declared in ${LEAK_RS_REL}"
   else
-    check_fail "AC-001b: harness '${harness}' NOT declared in src/ai/leak_detector.rs"
+    check_fail "AC-001b: harness '${harness}' NOT declared in ${LEAK_RS_REL}"
   fi
 done
 
@@ -115,8 +116,8 @@ if [[ ! -f "${KANI_YML}" ]]; then
   check_fail "AC-002a: .github/workflows/kani.yml does not exist — cannot check harness invocations"
 else
   for harness in leak_regex_ipv4 leak_regex_ipv6 leak_regex_mac; do
-    if grep -v '^\s*#' "${KANI_YML}" | grep -qF "cargo kani --harness ${harness}"; then
-      check_pass "AC-002a: kani.yml invokes 'cargo kani --harness ${harness}' on a non-comment line"
+    if grep -v '^\s*#' "${KANI_YML}" | grep -qE "cargo kani( -p [A-Za-z0-9_-]+)? --harness ${harness}\b"; then
+      check_pass "AC-002a: kani.yml invokes 'cargo kani --harness ${harness}' (optionally with -p <crate>) on a non-comment line"
     else
       check_fail "AC-002a: kani.yml does NOT invoke 'cargo kani --harness ${harness}' on a non-comment line"
     fi
