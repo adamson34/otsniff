@@ -37,8 +37,9 @@ catch (e.g. `LINE-3-PLC`, `host42`, `EWS-WORKSTATION`).
 
 ## Harness
 
-**Location:** `src/ai/leak_detector.rs` — `#[cfg(kani)] mod kani_proofs`, function
-`map_value_substring`.
+**Location:** `crates/otsniff-privacy/src/leak_detector.rs` (moved from
+`src/ai/leak_detector.rs` by ADR-0016 / S-13.01) — `#[cfg(kani)] mod
+kani_proofs`, function `map_value_substring`.
 
 The harness constructs:
 
@@ -96,7 +97,7 @@ The harness asserts this by checking every window after a `false` return.
 ## Run Instructions
 
 ```bash
-cargo kani --harness map_value_substring
+cargo kani -p otsniff-privacy --harness map_value_substring
 ```
 
 ---

@@ -40,7 +40,8 @@ suite (S-3.04).  That step is out of scope for S-4.01.
 
 ## Harnesses
 
-**Location:** `src/scrub.rs`, inside `#[cfg(kani)] mod kani_proofs`
+**Location:** `crates/otsniff-privacy/src/scrub.rs`, inside `#[cfg(kani)] mod kani_proofs`
+(moved from `src/scrub.rs` by ADR-0016 / S-13.01)
 
 ### `scrub_roundtrip_bounded`
 
@@ -115,8 +116,8 @@ with the state of the art for string-manipulation proofs in Kani/CBMC.
 
 ```bash
 # Run both proof harnesses:
-cargo kani --harness scrub_roundtrip_bounded
-cargo kani --harness scrub_roundtrip_single_replacement
+cargo kani -p otsniff-privacy --harness scrub_roundtrip_bounded
+cargo kani -p otsniff-privacy --harness scrub_roundtrip_single_replacement
 ```
 
 Expected output on success:

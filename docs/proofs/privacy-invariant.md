@@ -146,15 +146,17 @@ cargo install kani-verifier
 cargo kani setup
 ```
 
-To run all six component proofs as well:
+To run all six component proofs as well (the first six now live in
+`crates/otsniff-privacy`, moved there by ADR-0016 / S-13.01; the composed
+proof stays in the root crate):
 
 ```bash
-cargo kani --harness scrub_roundtrip_bounded
-cargo kani --harness scrub_roundtrip_single_replacement
-cargo kani --harness leak_regex_ipv4
-cargo kani --harness leak_regex_ipv6
-cargo kani --harness leak_regex_mac
-cargo kani --harness map_value_substring
+cargo kani -p otsniff-privacy --harness scrub_roundtrip_bounded
+cargo kani -p otsniff-privacy --harness scrub_roundtrip_single_replacement
+cargo kani -p otsniff-privacy --harness leak_regex_ipv4
+cargo kani -p otsniff-privacy --harness leak_regex_ipv6
+cargo kani -p otsniff-privacy --harness leak_regex_mac
+cargo kani -p otsniff-privacy --harness map_value_substring
 cargo kani --harness composed_privacy_invariant
 ```
 
