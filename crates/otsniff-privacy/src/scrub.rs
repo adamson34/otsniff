@@ -235,12 +235,14 @@ pub fn merge_family(
     // Note: deliberately NOT `(start..).zip(new_reals)`. `RangeFrom<u32>::next()`
     // eagerly computes `current + 1` (via `Step::forward`) to advance its
     // internal state *before* returning the current item, and that advance
-    // panics on overflow unconditionally (not just in debug builds) rather
-    // than saturating. So even a `start` that is itself a valid `u32` (e.g.
-    // `u32::MAX`) would panic on the very first `.next()` call, before
-    // `zip`'s short-circuiting on `new_reals` running out ever gets a chance
-    // to matter. Indexing by `checked_add` per iteration avoids constructing
-    // an unbounded range at all.
+    // panics on overflow in debug builds and silently wraps in release builds
+    // (`Step::forward` is `#[rustc_inherit_overflow_checks]`, the same
+    // semantics as ordinary `+`) rather than saturating. Either outcome is
+    // unacceptable here: a `start` that is itself a valid `u32` (e.g.
+    // `u32::MAX`) would panic or silently wrap on the very first `.next()`
+    // call, before `zip`'s short-circuiting on `new_reals` running out ever
+    // gets a chance to matter. Indexing by `checked_add` per iteration avoids
+    // constructing an unbounded range at all.
     for (i, real) in new_reals.into_iter().enumerate() {
         let idx = u32::try_from(i)
             .ok()
@@ -912,7 +914,7 @@ mod tests {
     /// but that test only asserted `is_err()` / message-substring on the
     /// `PrivacyError` itself, never that the variant is specifically
     /// `MapCorrupt`. Duplicated here (in-crate) with the discriminating
-    /// assertion so the check lives next to the other four MapCorrupt sites.
+    /// assertion so the check lives next to the other MapCorrupt sites.
     #[test]
     fn test_f_002_validate_rejects_non_canonical_pseudonym() {
         let mut bad_ips = BTreeMap::new();
