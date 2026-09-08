@@ -186,9 +186,11 @@ fn mac_regex() -> &'static Regex {
 mod tests {
     use super::*;
 
-    // Moved verbatim from otsniff's `src/ai/leak_detector.rs` per ADR-0016
-    // (S-13.01 Task 2) — this whole file has no otsniff-specific logic, so
-    // all 7 original unit tests move here as-is.
+    // Moved from otsniff's `src/ai/leak_detector.rs` per ADR-0016
+    // (S-13.01 Task 2) — this whole file has no otsniff-specific logic. 5 of
+    // the 7 original unit tests move verbatim; the two `ensure_*` tests are
+    // adapted (see the per-test notes below) since their `OtError`-wrapper-
+    // layer assertions belong one level up, in otsniff's own `src/error.rs`.
 
     #[test]
     fn flags_ipv4_in_otherwise_clean_text() {
