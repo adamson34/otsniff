@@ -19,6 +19,8 @@ A consulting firm or in-house analyst captures a PCAP, then either spends 4+ hou
 
 **Stakes:** OT incidents like Colonial Pipeline, Florida water treatment, and various ICS ransomware events demonstrate that the gap between "we have a PCAP" and "we know what's wrong" matters at the safety level. Compliance pressure (NERC CIP, AWIA, IEC 62443, NIS2) is increasing for operators who don't have continuous monitoring.
 
+**A second, related problem (the "hunt" capability, 2026-09):** when a new CVE or threat drops, the same operators have no way to quickly answer "am I exposed?" or "have I been hit by this?" without either (a) manually re-reading old PCAPs looking for a specific device/protocol signature, or (b) if they do have a platform like Claroty/Dragos/Nozomi deployed, manually querying its UI and reasoning about the result themselves — the platform surfaces data, not an answer. There's no tool that lets an operator state a concern in plain terms ("I have this PCAP, am I exposed to CVE-2024-XXXX?" / "go check my Claroty, have I been hit by this?") and get a direct, privacy-preserving, AI-reasoned answer.
+
 ## Target Users
 
 ### Primary
@@ -30,6 +32,10 @@ A consulting firm or in-house analyst captures a PCAP, then either spends 4+ hou
 
 - **Internal SOC analysts at larger operators** who already have vendor platforms but want a portable OT-aware tool for ad-hoc captures (incident response, vendor laptop forensics, etc.).
 - **Researchers and educators** studying ICS protocols; CTF participants.
+
+### Hunt capability — same primary persona, explicitly SOC-optional
+
+The hunt capability (2026-09) targets the same primary persona as the rest of otsniff — **network/operations staff and whoever is in charge of plant operations, not necessarily a security team.** Many of these users have no SOC at all. Hunt must therefore work standalone against data the user already has (a PCAP, otsniff's own JSON output across captures) — a vendor platform (Claroty/Dragos/Nozomi) is an optional, later-stage data source for orgs that happen to have one, never a prerequisite.
 
 ### Technical sophistication
 
@@ -51,6 +57,14 @@ Three differentiators (validated against the alternatives above):
 
 **Produce an exec-readable HTML report from one PCAP in under 60 seconds, with at least the load-bearing findings (plaintext creds, OT engineering writes, internet egress, SMB/TLS legacy, cross-zone DNS) named correctly and a usable inventory of assets.**
 
+### Hunt capability (`otsniff hunt`, 2026-09)
+
+A directed, conversational-in-spirit but CLI-shaped extension of the same tool: **state a concern in plain terms, get a privacy-preserving AI-reasoned exposure verdict.**
+
+- `otsniff hunt <pcap> --concern "CVE-2024-XXXX"` (or a free-text threat description) — otsniff-hunt reasons over the PCAP's asset inventory (vendor/OUI, protocol, function-code observations — already extracted by `otsniff analyze`) and answers "are you exposed to this?" with cited evidence, the same way `--ai` augments findings today.
+- Same privacy guarantee as the rest of otsniff, non-negotiable: the CVE/concern reasoning pass never sends a real IP/MAC/hostname to the AI provider. This is *why* `crates/otsniff-privacy` was extracted first (ADR-0016, S-13.01) — hunt is otsniff-privacy's first actual second consumer.
+- Later, not MVP: pointing hunt at a live platform (Claroty et al.) instead of / in addition to a PCAP, so "go check my Claroty, have I been hit by this?" becomes a real invocation. Data model and privacy contract are designed so this is additive, not a rework.
+
 ## Success Criteria
 
 ### Measurable outcomes
@@ -68,6 +82,12 @@ Three differentiators (validated against the alternatives above):
 - **Near-term vision:** DNP3 parser (electric utilities); OUI table expansion; AI-augmented detection that cross-references findings; 5–7 additional rule families (NTLMv1, weak TLS ciphers, RDP-no-NLA, NTP-external, LDAP simple bind, port scan, Modbus unit-ID sweep).
 - **Long-term vision:** OPC-UA + BACnet parsers (modern industrial + building automation); cross-capture diff; web playground (WASM); native packaging (Homebrew tap, AUR); local-AI provider (Ollama).
 
+### Hunt MVP vs full vision (2026-09)
+
+- **Hunt MVP:** `otsniff hunt <pcap> --concern "<CVE or threat description>"`, CLI-only, PCAP-derived inventory only (no live platform integration), reusing `crates/otsniff-privacy`. Success bar: a small sentinel-tested corpus of PCAPs with known ground truth ("this capture has a device profile matching CVE-2024-XXXX") where hunt returns the correct exposed/not-exposed verdict with cited evidence — same testing philosophy as the existing rule catalog's sentinel tests.
+- **Near-term:** live query against a deployed platform (Claroty/Dragos/Nozomi API) as a second input alongside PCAP; ingesting otsniff's own JSON output across multiple captures over time (not just one PCAP) so hunt can reason about change/history, not just a single snapshot.
+- **Long-term / explicitly open (see Open Questions):** an app/GUI beyond the CLI; interactive multi-turn investigation instead of one-shot concern → verdict; scheduled/recurring hunts.
+
 ## Scope
 
 ### In Scope
@@ -81,11 +101,14 @@ Three differentiators (validated against the alternatives above):
 - Per-run privacy audit log with chain-of-custody SHA-256s
 - Investigation playbooks per finding
 - Rule catalog (`otsniff rules`, `docs/RULES.md`)
+- **`otsniff hunt` (MVP, 2026-09):** directed CVE/threat-concern exposure hunting against a single PCAP's asset inventory, via AI reasoning pass, under the same scrub/leak-detector privacy guarantee as `analyze --ai`. Ships as additional workspace crates in this repo (ADR-0016), not a separate binary/repo.
 
 ### Out of Scope (deliberately)
 
-- **Live capture / agent / sensor mode** — use Malcolm or a vendor platform
-- **Detection rules / IDS alerting / dashboards** — use Suricata / Zeek for signature-based detection
+- **Live capture / agent / sensor mode** — use Malcolm or a vendor platform. **Still true with hunt**: hunt never listens on the wire itself; it reasons over data otsniff (or a platform) already collected. Querying a live platform's *API* for already-collected data (near-term hunt scope) is not the same thing as otsniff capturing traffic itself, and does not change this boundary.
+- **Detection rules / IDS alerting / dashboards** — use Suricata / Zeek for signature-based detection. **Still true with hunt**: hunt answers a specific, user-stated concern on demand; it is not a standing alerting/dashboard system and has no concept of a continuously-running detection loop.
+- **Active probing/scanning of live OT devices** — hunt never sends its own queries to a PLC or other OT device. Every hunt data source (a PCAP, a platform API, otsniff's own JSON output) is passive/already-collected. This is a deliberate OT-safety boundary, not just a technical one.
+- **A GUI/app for hunt (for now)** — CLI-only for the MVP, following otsniff's existing single-binary ethos (see Open Questions for whether this changes later).
 - **Full protocol decoding** — we recognize function/service codes, not full PDU payload semantics
 - **Compliance attestation** — the project *aligns with* NERC CIP / IEC 62443 handling but does not certify
 - **HTTP / SDK / vendor cloud for AI** — AI is shell-out to local `claude` CLI (ADR-0007)
@@ -105,6 +128,7 @@ Three differentiators (validated against the alternatives above):
 - **No `unsafe` code.** Every introduction would require a `// SAFETY:` justification.
 - **Single-pass observer.** Memory bound by unique hosts/flows/events, not raw packets.
 - **Determinism.** Same inputs → byte-identical outputs. `BTreeMap` over `HashMap` where iteration order matters.
+- **Hunt ships as `otsniff hunt`, not a separate binary.** This refines ADR-0016's original framing (which described otsniff-hunt as "a second, separate product... additional workspace crates") down to: one identity, one binary, one CLI — "otsniff" — with hunt as a new subcommand backed by new workspace crates internally where that helps (e.g. reusing `crates/otsniff-privacy` directly). The single-static-binary, no-unsafe, no-async-runtime, pure-Rust constraints above apply to hunt exactly as they do to `analyze`/`scrub`/`diff` today.
 
 ### Timeline / team
 
@@ -132,6 +156,12 @@ Three differentiators (validated against the alternatives above):
 - **Dragos** (https://www.dragos.com) — vendor platform; not a competitor at our price/audience tier.
 - **Nozomi Networks** (https://www.nozominetworks.com)
 - **Claroty** (https://claroty.com)
+
+### CVE / OT vulnerability data (new for hunt)
+
+- **NVD (https://nvd.nist.gov)** — canonical CVE records; likely source of ground truth for sentinel test fixtures.
+- **CISA ICS-CERT advisories (https://www.cisa.gov/news-events/ics-advisories)** — OT-vendor-specific advisories, often with more actionable device/firmware detail than raw NVD entries.
+- otsniff's existing MITRE ATT&CK for ICS mapping (ADR-0014, `docs/RULES.md`) is prior art *within this repo* for "map a detection/finding to an external identifier system" — the same pattern likely extends to CVE mapping.
 
 ### Public PCAP sources for testing
 
@@ -179,6 +209,22 @@ The brownfield analysis identifies Kani proofs as the single highest-leverage ve
 
 `obs.cred_events: Vec<CredEvent>` is the one accumulator that scales linearly with raw packets, not unique events. For long-duration Telnet captures this is unbounded. Should pre-rollup dedup land in v0.4? See L-P1-002 in Phase 0 synthesis.
 
+### OQ-6 — CVE-to-device matching mechanism
+
+Hunt's MVP needs a way to decide "does this PCAP's asset inventory match what CVE-X targets." Options: (a) a curated, in-tree CVE→vendor/protocol/firmware-signature table maintained like the existing MITRE ATT&CK mapping (ADR-0014) — deterministic, auditable, but manual curation effort per CVE; (b) hand the CVE description + the (scrubbed) inventory to the AI provider and let it reason freely — no curation effort, but less deterministic/testable, and harder to sentinel-test against known ground truth (OQ from the Success Criteria discussion). This should be pinned down before PRD/architecture work starts on hunt, since it changes whether hunt has a "rule catalog" equivalent at all.
+
+### OQ-7 — Live platform integration timeline and auth model
+
+Near-term vision includes querying a live Claroty/Dragos/Nozomi API. Unresolved: which platform(s) first, what auth/credential handling looks like (a new class of secret this single-binary, no-phone-home tool hasn't had to manage before), and whether this requires an HTTP client dependency that ADR-0001/ADR-0007's "no HTTP/SDK, pure Rust, shell-out-only" posture would need to explicitly revisit (today that posture is scoped to *AI provider* integration specifically; a platform-API client is a different kind of network dependency and hasn't been ruled on).
+
+### OQ-8 — App/GUI ambition
+
+The original vision mentioned "our CLI tool or a app." MVP is CLI-only (decided). Open: is a GUI/app a real near-term goal worth designing the CLI's internals to support (e.g., a library core the CLI and a future app both call), or a someday-maybe that shouldn't influence architecture yet.
+
+### OQ-9 — Monetization/support posture for hunt specifically
+
+OQ-1 (above) already flags this as unresolved for otsniff broadly. Hunt sharpens it: live platform integration and any hosted/scheduled hunting capability are exactly the kind of feature that could justify a paid tier (OQ-1 options B/C), whereas the CLI-only PCAP+CVE MVP fits the current pure-OSS posture cleanly. Worth revisiting OQ-1 once hunt's near-term scope (live platforms) gets closer.
+
 ---
 
-These five open questions should be resolved (or explicitly deferred with a recorded decision) before the PRD step finalizes the BC list and the architecture shards.
+These nine open questions should be resolved (or explicitly deferred with a recorded decision) before the PRD step finalizes the BC list and the architecture shards.
