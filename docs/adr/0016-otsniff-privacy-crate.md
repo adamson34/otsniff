@@ -152,6 +152,17 @@ a `kind`/exit-code contract. The only change is *how* the wrapping happens
 constraint above, which the original ADR text did not anticipate because it
 did not yet know `PrivacyError` would need a second variant.
 
+**CI did not pick up the new crate automatically.** Unlike the "CI picks it
+up the same way it did for `zonewarden`" assumption in this ADR's original
+"Consequences" section, two workflows needed explicit changes:
+`.github/workflows/mutants.yml` needed an explicit `--workspace` flag added
+— without it, `cargo-mutants`' default-members resolution silently drops a
+non-default workspace member from mutation scope (a workspace-with-root-package
+layout, not the plain-workspace layout `zonewarden` was added under) — and
+`.github/workflows/kani.yml` needed explicit `-p otsniff-privacy` added to
+every moved proof harness invocation, since Kani's own workflow enumerates
+harnesses per-package rather than discovering them workspace-wide.
+
 ## Rationale
 - **Precedent already set.** ADR-0013 established that a formally-verified pure
   core gets a crate boundary, not a module boundary, specifically to keep the
@@ -180,7 +191,8 @@ otsniff/                              (host repo; unchanged root binary)
 │   │                                 re-exports or thinly wraps otsniff_privacy
 │   │                                 types for existing call sites
 │   ├── ai/leak_detector.rs           removed — call sites use otsniff_privacy::leak_detector
-│   └── error.rs                      OtError::Privacy(#[from] otsniff_privacy::PrivacyError)
+│   └── error.rs                      OtError::Privacy(otsniff_privacy::PrivacyError) +
+│                                     hand-written From impl (see Decision refinement)
 │                                     replaces the inline PrivacyLeak variant
 └── crates/
     ├── zonewarden/                   (unchanged, ADR-0013)
@@ -198,8 +210,10 @@ otsniff/                              (host repo; unchanged root binary)
 
 ## Consequences
 - otsniff grows from a two-member workspace (root + `zonewarden`) to a
-  three-member workspace. CI (`ci.yml`, `mutants.yml`, `kani.yml`) picks up the
-  new crate the same way it picked up `zonewarden` in ADR-0013.
+  three-member workspace. CI needed explicit per-workflow updates to cover
+  the new crate — see "Decision refinement" above for the specific
+  `--workspace`/`-p` requirements this uncovered in `mutants.yml` and
+  `kani.yml`.
 - Every call site of `scrub::ScrubMap`, `scrub::scrub_text`/`unscrub_text`,
   and `ai::leak_detector::*` in `src/` (cli.rs, ai/mod.rs, findings/augmented.rs,
   audit.rs, kani_proofs.rs) needs its `use` paths updated to `otsniff_privacy::…`.
