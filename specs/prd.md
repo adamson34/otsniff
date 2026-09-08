@@ -1,9 +1,10 @@
 ---
 artifact_type: prd
 project: otsniff
-version: 1.0
+version: 1.1
 generated: 2026-05-11
-status: draft (brownfield-recovered)
+amended: 2026-09-08 — added Subsystem S.10 (Hunt, planned MVP)
+status: draft (brownfield-recovered; S.10 is draft/planned, not yet implemented)
 traces_to:
   - product-brief.md
   - domain-spec/L2-INDEX.md
@@ -16,6 +17,13 @@ traces_to:
 PRD recovered from v0.3.1 shipped state. Functional requirements
 trace to existing behavior; non-functional requirements come from
 Pass 4 NFR catalog with B.6 corrections applied.
+
+**2026-09-08 amendment:** Subsystem S.10 (Hunt) added — FR-1001..1015,
+BC-10.xx.xxx. Unlike S.0–S.9, these requirements are **planned, not yet
+implemented**: no story exists for them yet. They describe the MVP scope
+agreed in the product-brief amendment (`otsniff hunt <PCAP> --concern
+<CVE-ID>`), resolved against OQ-6 (curated CVE-signature table + AI
+explanation, not free-form AI reasoning alone).
 
 ## 1. Functional Requirements
 
@@ -131,6 +139,35 @@ Pass 4 NFR catalog with B.6 corrections applied.
 | FR-905 | `analyze --md <PATH>` emits an LLM-friendly markdown report sidecar alongside the HTML report. Same rendering pipeline as `scrub --md`; suitable for piping into operator-driven AI tools (Claude.ai web, ChatGPT, local Ollama) without `--ai` | BC-8.02.001 |
 | FR-906 | `analyze --json <PATH>` emits a JSON sidecar with the same `Observations`-derived fields used by the HTML template; intended for downstream automation. `analyze --map <PATH>` emits the scrub map when `--ai` or `--md` is set so unscrubbing the AI's response or the markdown sidecar later is possible | BC-9.01.002 |
 
+### Subsystem S.10 — Hunt (**planned, MVP — not yet implemented**; see `product-brief.md` "Hunt capability")
+
+Added 2026-09-08 per the product brief amendment for `otsniff hunt`: a directed
+CVE/threat-concern exposure-hunting subcommand. Depends on `crates/otsniff-privacy`
+(S-13.01, merged) for its scrub/leak-detector mechanics — hunt has no
+`Observations`, so it cannot use otsniff's `build_map`/`merge_map`; it builds a
+minimal scrub map directly from matched-asset fields via `otsniff_privacy::ScrubMap`.
+These FRs and their BC traces (BC-10.xx.xxx, `BC-INDEX.md` §S.10) are **not**
+counted in the shipped-BC tallies until a story implements them — matching this
+PRD's existing convention that the tallies represent shipped surface, not spec.
+
+| ID | Requirement | BC trace |
+|---|---|---|
+| FR-1001 | `otsniff hunt <PCAP> --concern <CVE-ID>` parses a positional PCAP path and a required `--concern` flag whose value must match `^CVE-\d{4}-\d{4,7}$` | BC-10.01.001 |
+| FR-1002 | Missing positional PCAP or missing `--concern` is a clap usage error, exit 2 — same convention as `analyze`'s zero-input case (S-9.01) | BC-10.01.002 |
+| FR-1003 | A `--concern` value that doesn't match the CVE-ID regex is rejected (exit 2) with a message stating the expected format and that free-text/named-threat concerns are not yet supported (MVP scope) | BC-10.01.003 |
+| FR-1004 | PCAP-not-found / malformed-PCAP errors reuse the existing `OtError::InputOpen`/`OtError::BadInput` variants and exit codes — no new PCAP-level error class | BC-10.01.004 |
+| FR-1005 | `hunt` runs the same ingestion pipeline `analyze` uses (PCAP → `Observer` → `Observations` → `inventory::build`) to obtain an asset inventory, but does **not** run `findings::run_all` or render an HTML report — hunt's only output is the CVE verdict | BC-10.02.001 |
+| FR-1006 | A new `hunt_catalog()` function (mirrors `rule_catalog()`/the MITRE mapping's catalog pattern, ADR-0014 precedent) returns a table of CVE signatures: CVE ID → one or more `(vendor OUI-prefix-or-name, protocol family, optional function-code/version range)` match criteria, a plain-English description, and a reference URL (NVD or CISA ICS-CERT — no entry ships without one, mirroring MITRE mapping's URL-validity requirement) | BC-10.02.002 |
+| FR-1007 | A `--concern` CVE ID absent from `hunt_catalog()` produces a distinct `HuntVerdict::UnknownCve` outcome (never conflated with "not exposed" — otsniff not having catalogued a CVE yet must never look like a clean bill of health), exit 0, no AI call | BC-10.02.003 |
+| FR-1008 | Matching is deterministic: an inventory asset matches a signature iff it satisfies **every** criterion of at least one of the CVE's signature entries (vendor AND protocol AND, if present, function-code/version range); a PCAP is `HuntVerdict::Exposed` iff at least one asset matches any signature for the given CVE; catalog entry order never affects the verdict | BC-10.02.004 |
+| FR-1009 | `HuntVerdict::Exposed` carries the matching asset(s) as cited evidence, capped at 5 per the existing evidence-sample convention (`findings/*`) | BC-10.02.005 |
+| FR-1010 | `HuntVerdict::NotExposed` (no match) and `HuntVerdict::UnknownCve` short-circuit before any AI call — deterministic non-exposure/unknown verdicts never invoke the AI provider (cost + determinism: nothing to reason about) | BC-10.03.001 |
+| FR-1011 | On `HuntVerdict::Exposed`, the matched-asset evidence and CVE description are passed through scrub (`otsniff_privacy::scrub_text`/`ScrubMap`) → leak-check (`otsniff_privacy::leak_detector::ensure_clean`) → the existing `AiProvider`/`ClaudeCliProvider` (`claude -p`, ADR-0007) → unscrub, before any output reaches the user — identically enforced to `analyze --ai`'s existing privacy pipeline, reusing the crate `crates/otsniff-privacy` was extracted for (ADR-0016, S-13.01) | BC-10.03.002 |
+| FR-1012 | The privacy invariant test (`invariant_no_real_values_reach_ai_provider`-style) extends to hunt: no real IP/MAC/hostname of a matched asset reaches the AI provider on any hunt test fixture | BC-10.03.003 |
+| FR-1013 | AI-call failure (claude CLI missing, non-zero exit, timeout) degrades gracefully: hunt still exits 0 and prints the deterministic verdict + matched evidence, with an appended "AI explanation unavailable: `<reason>`" notice — an AI failure never fails the whole `hunt` invocation | BC-10.03.004 |
+| FR-1014 | stdout always includes: CVE ID, verdict (`Exposed`/`NotExposed`/`UnknownCve`), matched evidence (pseudonymized) when `Exposed`, and the AI explanation when available. Exit code is always 0 regardless of verdict value — "you are exposed" is a successful answer, not a program failure | BC-10.04.001 |
+| FR-1015 | `hunt --map <PATH>` writes the scrub map used during the run, mirroring `analyze --map`, so `otsniff unscrub` round-trips any saved hunt output later | BC-10.04.002 |
+
 ## 2. Non-Functional Requirements
 
 Per Pass 4 NFR catalog. Each NFR carries a measurable target where applicable.
@@ -219,6 +256,11 @@ Boundary conditions every requirement must consider:
 | All-IPv6 capture with no `--ot-subnet` declared | `ot_or_default(&[])` returns only IPv4 RFC1918 ranges; no IPv6 host will match `in_ot_zone`. All findings that key off OT classification (egress, recon, boundary, unexpected_protocols) silently become inactive. Operator must declare IPv6 ranges explicitly (`--ot-subnet fd00::/8` for ULA, for example). Documented in FR-111. |
 | `--source-type` declared, heuristic returns Ambiguous | No warning (Ambiguous is treated as "no opinion") |
 | `--source-type` declared, declared matches heuristic kind | No warning |
+| `hunt` — `--concern` CVE ID not in `hunt_catalog()` | `HuntVerdict::UnknownCve`; exit 0; no AI call; message distinguishes this from "not exposed" |
+| `hunt` — `--concern` value doesn't match `^CVE-\d{4}-\d{4,7}$` | Exit 2; message states expected format; free-text concerns explicitly unsupported in MVP |
+| `hunt` — matched CVE, `claude` not on `PATH` or times out | Deterministic verdict + evidence still printed; exit 0; "AI explanation unavailable" notice appended (does NOT reuse `analyze --ai`'s exit-70 failure mode — hunt's deterministic layer already answered the question) |
+| `hunt` — zero assets in inventory match, catalog has entries for the CVE | `HuntVerdict::NotExposed`; exit 0; no AI call |
+| `hunt` — PCAP has assets matching multiple signature entries for the same CVE | All matches cited as evidence up to the 5-item cap; verdict is still a single `Exposed` (not one-per-signature) |
 
 ## 4. Open questions (to resolve before stories)
 
@@ -229,6 +271,10 @@ Inherited from product brief; restated here so they don't drift:
 - **OQ-3** Cross-event correlation (would touch the Finding data model)
 - **OQ-4** Kani proofs of the privacy invariant — v0.4 deliverable or deferred?
 - **OQ-5** `cred_events` Vec memory bound — pre-rollup dedup in v0.4?
+- **OQ-6** ~~CVE-to-device matching mechanism~~ — **RESOLVED 2026-09-08**: curated in-tree `hunt_catalog()` table (deterministic, sentinel-testable) + AI explains/narrates the verdict. See Subsystem S.10 above.
+- **OQ-7** Live platform (Claroty/Dragos/Nozomi) integration timeline + auth model — not in MVP; would need ADR-0001/ADR-0007's "no HTTP/SDK" posture explicitly revisited for a platform-API client (a different kind of network dependency than the AI-provider shell-out these ADRs actually scoped)
+- **OQ-8** App/GUI ambition beyond the hunt CLI — not in MVP; architecture should not pay a cost for this now
+- **OQ-9** Monetization posture for hunt specifically (sharpens OQ-1) — live platform integration is the kind of feature that could justify a paid tier; the CLI-only MVP fits the current pure-OSS posture cleanly
 
 ## 5. B.6 corrections applied
 

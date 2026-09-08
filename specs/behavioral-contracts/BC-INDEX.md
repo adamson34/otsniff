@@ -161,6 +161,32 @@ with B.6 corrections applied in `.factory/specs/prd.md` §5.
 - BC-9.04.001 Verbose-mode (-v) parse loop emits periodic progress to stderr every >= 100,000 packets OR >= 10 MB read; rate-limited to one emission per 2 seconds via injectable Clock trait; final summary always emitted via finish() (HIGH, added S-5.01 v0.4.0)
 - BC-9.06.001 `analyze --review-scrub` pauses for human eyeball (HIGH, added S-5.04 v0.4.0)
 
+### S.10 — Hunt (planned MVP — not yet implemented; depends on `crates/otsniff-privacy`)
+
+Added to the PRD 2026-09-08 per the product-brief "Hunt capability" amendment
+(see `prd.md` §Subsystem S.10 for full FR text). **These BCs are excluded from
+the Confidence summary tally below** — they trace requirements agreed in
+planning, not shipped behavior; a future story will move them into the
+counted set once implemented, same treatment this project already gives
+"planned, not built" items (see ADR-0015 for the analogous precedent on the
+ADR side).
+
+- BC-10.01.001 `otsniff hunt <PCAP> --concern <CVE-ID>` parses; `--concern` must match `^CVE-\d{4}-\d{4,7}$` (confidence: HIGH; planned)
+- BC-10.01.002 Missing positional PCAP or missing `--concern` → clap usage error, exit 2 (same convention as `analyze` zero-input, BC-1.01.003's sibling case) (confidence: HIGH; planned)
+- BC-10.01.003 `--concern` value not matching the CVE-ID regex → exit 2, message states expected format and that free-text concerns are unsupported in MVP (confidence: HIGH; planned)
+- BC-10.01.004 PCAP-not-found / malformed-PCAP reuse `OtError::InputOpen`/`OtError::BadInput` verbatim — no new PCAP-level error class for hunt (confidence: HIGH; planned)
+- BC-10.02.001 `hunt` reuses `analyze`'s ingestion pipeline (PCAP → `Observer` → `Observations` → `inventory::build`) but never calls `findings::run_all` or renders HTML — hunt's only output is the CVE verdict (confidence: HIGH; planned)
+- BC-10.02.002 `hunt_catalog()` (mirrors `rule_catalog()`/MITRE-mapping pattern, ADR-0014 precedent) returns CVE signatures: CVE ID → `(vendor OUI-prefix-or-name, protocol family, optional function-code/version range)` criteria + description + a required NVD-or-CISA-ICS-CERT reference URL — no entry ships without a URL (confidence: HIGH; planned)
+- BC-10.02.003 `--concern` CVE ID absent from `hunt_catalog()` → `HuntVerdict::UnknownCve`, exit 0, no AI call; never conflated with "not exposed" (confidence: HIGH; planned)
+- BC-10.02.004 Deterministic matching: an asset matches a signature iff it satisfies every one of that signature's criteria; a PCAP is `Exposed` iff at least one asset matches any signature for the CVE; catalog-entry order never affects the verdict (confidence: HIGH; planned)
+- BC-10.02.005 `Exposed` evidence is the matching asset(s), capped at 5 per the existing evidence-sample convention (confidence: HIGH; planned)
+- BC-10.03.001 `NotExposed` and `UnknownCve` short-circuit before any AI call — deterministic non-exposure/unknown verdicts never invoke the AI provider (confidence: HIGH; planned)
+- BC-10.03.002 On `Exposed`, matched-asset evidence + CVE description pass through `otsniff_privacy::scrub_text`/`ScrubMap` → `otsniff_privacy::leak_detector::ensure_clean` → the existing `AiProvider`/`ClaudeCliProvider` (ADR-0007) → unscrub before reaching the user — identical enforcement to `analyze --ai`, reusing the crate S-13.01/ADR-0016 extracted specifically for this (confidence: HIGH; planned)
+- BC-10.03.003 Privacy invariant extends to hunt: no real IP/MAC/hostname of a matched asset reaches the AI provider on any hunt test fixture — mirrors `invariant_no_real_values_reach_ai_provider` (confidence: HIGH; planned)
+- BC-10.03.004 AI-call failure (claude missing/non-zero exit/timeout) degrades gracefully: exit 0, deterministic verdict + evidence still printed, "AI explanation unavailable" notice appended — an AI failure never fails the whole `hunt` invocation (confidence: HIGH; planned)
+- BC-10.04.001 stdout always includes CVE ID, verdict, matched evidence (pseudonymized) when `Exposed`, and the AI explanation when available; exit code is always 0 regardless of verdict — an exposure finding is a successful answer, not a program failure (confidence: HIGH; planned)
+- BC-10.04.002 `hunt --map <PATH>` writes the run's scrub map, mirroring `analyze --map`, so `otsniff unscrub` round-trips saved hunt output later (confidence: HIGH; planned)
+
 ### Diff (`src/diff.rs`, cross-cutting findings/render/CLI)
 
 The diff-core / renderer BCs from S-6.02 / S-6.03 (BC-3.08.001..003,
