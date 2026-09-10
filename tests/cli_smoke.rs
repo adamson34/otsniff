@@ -948,3 +948,172 @@ fn unscrub_strict_mode_fails_on_unknown_token() {
         .failure()
         .stderr(predicate::str::contains("strict mode"));
 }
+
+// ---------------------------------------------------------------------------
+// P1-7 — `slice` subcommand
+// ---------------------------------------------------------------------------
+
+#[test]
+fn slice_help_describes_command() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["slice", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--host"))
+        .stdout(predicate::str::contains("--flow"));
+}
+
+/// clap's `ArgGroup` on `SliceArgs` must reject a run with neither `--host`
+/// nor `--flow` — a slice with no selector is a usage mistake, not "match
+/// everything."
+#[test]
+fn slice_requires_a_selector() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src.pcap");
+    std::fs::write(&src, legacy_pcap(&eth_ipv4_udp_frame(), 1, &[0])).unwrap();
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["slice"])
+        .arg(&src)
+        .arg("-o")
+        .arg(tmp.path().join("out.pcap"))
+        .assert()
+        .failure()
+        .code(2);
+}
+
+#[test]
+fn slice_by_host_keeps_only_matching_packets() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src.pcap");
+    // Three copies of the same 10.10.0.1 -> 10.10.0.2 frame.
+    std::fs::write(&src, legacy_pcap(&eth_ipv4_udp_frame(), 3, &[0, 1, 2])).unwrap();
+    let out = tmp.path().join("out.pcap");
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["slice"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&out)
+        .arg("--host")
+        .arg("10.10.0.1")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("3 of 3 packets matched"));
+
+    // The sliced file must itself be a valid pcap `analyze` can ingest.
+    let report = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&out)
+        .arg("-o")
+        .arg(&report)
+        .assert()
+        .success();
+}
+
+#[test]
+fn slice_by_host_with_no_match_writes_empty_but_valid_pcap() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src.pcap");
+    std::fs::write(&src, legacy_pcap(&eth_ipv4_udp_frame(), 2, &[0, 1])).unwrap();
+    let out = tmp.path().join("out.pcap");
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["slice"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&out)
+        .arg("--host")
+        .arg("192.0.2.1") // not present in the fixture frame
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("0 of 2 packets matched"));
+
+    let report = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&out)
+        .arg("-o")
+        .arg(&report)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("0 findings across 0 hosts"));
+}
+
+#[test]
+fn slice_by_flow_filters_directionally() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src.pcap");
+    std::fs::write(&src, legacy_pcap(&eth_ipv4_udp_frame(), 1, &[0])).unwrap();
+    let out = tmp.path().join("out.pcap");
+
+    // eth_ipv4_udp_frame is 10.10.0.1 -> 10.10.0.2 on udp/53. The reverse
+    // direction must not match.
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["slice"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&out)
+        .arg("--flow")
+        .arg("10.10.0.2=10.10.0.1:53")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("0 of 1 packets matched"));
+}
+
+/// Real-fixture smoke test: slicing `synthetic-1mb.pcap` down to one host
+/// must produce a much smaller, still-analyzable file.
+#[test]
+fn slice_real_fixture_by_host_shrinks_the_capture() {
+    let pcap =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/synthetic-1mb.pcap");
+    if !pcap.exists() {
+        assert!(
+            std::env::var("CI").is_err(),
+            "F-ADV-P2-015: tests/fixtures/synthetic-1mb.pcap missing in CI; \
+             check .gitignore exception"
+        );
+        eprintln!("skipping: tests/fixtures/synthetic-1mb.pcap not present");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let out = tmp.path().join("sliced.pcap");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["slice"])
+        .arg(&pcap)
+        .arg("-o")
+        .arg(&out)
+        .arg("--host")
+        .arg("10.10.0.1")
+        .assert()
+        .success();
+
+    let sliced_size = std::fs::metadata(&out).unwrap().len();
+    let original_size = std::fs::metadata(&pcap).unwrap().len();
+    assert!(
+        sliced_size < original_size,
+        "sliced capture ({sliced_size} bytes) should be smaller than the original ({original_size} bytes)"
+    );
+    assert!(
+        sliced_size > 24,
+        "sliced capture must contain at least the 24-byte global header + some packets"
+    );
+
+    let report = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&out)
+        .arg("-o")
+        .arg(&report)
+        .assert()
+        .success();
+}

@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use chrono::Utc;
@@ -110,6 +111,11 @@ pub enum Command {
     // Internal traceability: BC-9.05.001 (subcommand surface),
     // BC-3.08.001..003 (delta shape). See docs/ROADMAP.md P1-3.
     Diff(DiffArgs),
+    /// Extract a small PCAP containing only packets matching a host or
+    /// flow filter (P1-7). Packets are copied verbatim (exact captured
+    /// bytes, byte-identical), not reconstructed, so the output survives
+    /// a round-trip through Wireshark/tshark/a vendor's support team.
+    Slice(SliceArgs),
     /// Zonewarden segmentation-conformance tools (ADR-0013).
     #[command(subcommand)]
     Zonewarden(ZonewardenCmd),
@@ -164,6 +170,31 @@ pub struct DiffArgs {
     /// leaves the diff unchanged.
     #[arg(long = "policy", value_name = "PATH")]
     pub policy: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+#[command(group(
+    clap::ArgGroup::new("slice_selectors")
+        .multiple(true)
+        .required(true)
+        .args(["hosts", "flows"])
+))]
+pub struct SliceArgs {
+    /// Path to input PCAP/PCAPNG.
+    pub input: PathBuf,
+    /// Output PCAP path. Always written as a classic (legacy) pcap file
+    /// regardless of the input's format.
+    #[arg(short = 'o', long = "output")]
+    pub output: PathBuf,
+    /// Keep every packet where this IP is the source or destination
+    /// (repeatable; OR-matched with any other `--host` / `--flow`).
+    #[arg(long = "host", value_name = "IP")]
+    pub hosts: Vec<IpAddr>,
+    /// Keep every packet matching this exact, directional flow:
+    /// `SRC=DST:PORT` (repeatable; OR-matched with any other `--host` /
+    /// `--flow`). Matches both TCP and UDP on that port.
+    #[arg(long = "flow", value_name = "SRC=DST:PORT")]
+    pub flows: Vec<crate::slice::FlowFilter>,
 }
 
 #[derive(Args, Debug)]
@@ -309,6 +340,7 @@ pub fn run() -> Result<()> {
         Command::Unscrub(a) => run_unscrub(a),
         Command::Rules(a) => run_rules(a),
         Command::Diff(a) => run_diff(a),
+        Command::Slice(a) => run_slice(a),
         Command::Zonewarden(ZonewardenCmd::Suggest { input, ot_subnets }) => {
             run_zonewarden_suggest(input, ot_subnets)
         }
@@ -321,6 +353,21 @@ fn run_zonewarden_suggest(input: PathBuf, ot_subnets: Vec<IpNet>) -> Result<()> 
     let obs = analyze(std::slice::from_ref(&input), &ot_subnets, false, None)?;
     let inventory = crate::inventory::build(&obs);
     print!("{}", crate::segmentation::suggest::draft_policy(&inventory));
+    Ok(())
+}
+
+/// Run the `slice` subcommand (P1-7): filter-and-copy packets matching a
+/// host or flow selector into a small, standalone PCAP. clap's `ArgGroup`
+/// on `SliceArgs` already guarantees at least one of `--host`/`--flow` was
+/// given, so this only orchestrates the read/filter/write pass.
+fn run_slice(args: SliceArgs) -> Result<()> {
+    let summary = crate::slice::run(&args.input, &args.output, &args.hosts, &args.flows)?;
+    eprintln!(
+        "wrote {} ({} of {} packets matched)",
+        args.output.display(),
+        summary.matched,
+        summary.scanned,
+    );
     Ok(())
 }
 

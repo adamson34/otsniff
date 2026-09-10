@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`otsniff slice` subcommand** (P1-7, partial): `slice <PCAP> -o out.pcap
+  --host IP` / `--flow SRC=DST:PORT` (repeatable, OR-matched, at least one
+  required) extracts a small PCAP containing only matching packets,
+  copied verbatim from the source file — not reconstructed from decoded
+  fields, so checksums and unusual framing survive. Closes the loop with
+  Wireshark/tshark/a vendor's support team without hand-filtering a
+  multi-gigabyte capture. `--finding <ID>` (slice by which packets
+  contributed to a specific finding) is not yet implemented — see
+  `docs/ROADMAP.md` P1-7 for why it's a separate, larger follow-up.
 - **Spoofed-source flood detection + inventory render cap** (P1-10): new
   `attack.spoofed_sources` (High) finding fires when more than 500
   distinct source IPs match the spoofed-source fingerprint — exactly one
