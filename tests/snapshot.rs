@@ -887,6 +887,119 @@ fn cred_event_note_must_not_reach_any_rendered_output() {
 }
 
 // ---------------------------------------------------------------------------
+// P2-3 — creds.default_or_weak_credentials
+// ---------------------------------------------------------------------------
+
+/// Minimal base64 encoder for building a synthetic `Authorization: Basic`
+/// header in tests. Production code only ever decodes (see
+/// `findings::default_credentials::decode_base64_lenient`); this is a test
+/// fixture helper, not a regression on production surface.
+fn test_base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        out.push(ALPHABET[(n >> 18 & 0x3F) as usize] as char);
+        out.push(ALPHABET[(n >> 12 & 0x3F) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(n >> 6 & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[(n & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// Regression guard: `creds.default_or_weak_credentials` fires on an FTP
+/// anonymous login and on an HTTP Basic weak password, is wired into
+/// `run_all`, and — critically — never echoes the raw `CredEvent.note`
+/// content (a real username here) into any rendered output, mirroring
+/// `cred_event_note_must_not_reach_any_rendered_output` above.
+#[test]
+fn creds_default_or_weak_credentials_fires_and_does_not_leak_note_content() {
+    let mut obs = build_fixture();
+    let canary = "CANARY-USER-DO-NOT-LEAK";
+    obs.cred_events.push(CredEvent {
+        ts: fixed_ts(),
+        src: ip("10.10.0.6"),
+        dst: ip("10.10.0.21"),
+        dst_port: 21,
+        kind: CredKind::FtpAuth,
+        count: 1,
+        note: "USER anonymous".to_string(),
+    });
+    let token = test_base64_encode(format!("{canary}:admin").as_bytes());
+    obs.cred_events.push(CredEvent {
+        ts: fixed_ts(),
+        src: ip("10.10.0.7"),
+        dst: ip("10.10.0.22"),
+        dst_port: 80,
+        kind: CredKind::HttpBasic,
+        count: 1,
+        note: format!("Authorization: Basic {token}"),
+    });
+
+    let findings = run_all(&obs, &ot_subnets());
+    let f = findings
+        .iter()
+        .find(|f| f.id == "creds.default_or_weak_credentials")
+        .expect("run_all must include creds.default_or_weak_credentials");
+    assert_eq!(f.severity, otsniff::findings::Severity::Critical);
+    assert_eq!(f.evidence.len(), 2, "one line per (src,dst,port) pair");
+    assert!(f.evidence.iter().any(|l| l.contains("FTP anonymous login")));
+    assert!(f
+        .evidence
+        .iter()
+        .any(|l| l.contains("known weak/default password")));
+    assert!(
+        catalog()
+            .iter()
+            .any(|r| r.id == "creds.default_or_weak_credentials"),
+        "must be present in the rule catalog"
+    );
+
+    let inventory = build_inventory(&obs);
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "tests/fixtures/synthetic.pcap",
+        fixed_ts(),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(
+        !html.contains(canary) && !html.contains(&token),
+        "creds.default_or_weak_credentials must not leak CredEvent.note content into HTML"
+    );
+
+    let md = render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    assert!(
+        !md.contains(canary) && !md.contains(&token),
+        "creds.default_or_weak_credentials must not leak CredEvent.note content into markdown"
+    );
+
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed = scrub_text(&md, &map);
+    assert!(
+        !scrubbed.contains(canary) && !scrubbed.contains(&token),
+        "creds.default_or_weak_credentials must not leak CredEvent.note content into the AI-bound payload"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // AC-004 / BC-3.03.005 — ics.dnp3_engineering snapshot test
 // ---------------------------------------------------------------------------
 

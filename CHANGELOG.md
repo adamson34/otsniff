@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`creds.default_or_weak_credentials` finding** (P2-3, partial, Critical):
+  fires on an FTP anonymous login, or an HTTP Basic password that's empty
+  or matches a small watchlist of textbook-weak values (admin, password,
+  123456, ...) — a stronger signal than generic cleartext-credential
+  exposure, since these are guessable without ever capturing the traffic.
+  Builds entirely on already-captured `cred_events`, no new protocol
+  parsing. Evidence states only the matched *category*, never the raw
+  captured username/password — see `docs/ROADMAP.md` P2-3 for what's
+  deferred (Telnet, Siemens S7 default password, suspicious DNS, and
+  hard-coded Modbus/S7 attack patterns all need new protocol parsing or
+  careful external sourcing this story doesn't add). Rule catalog now
+  lists **26** rules.
 - **`otsniff bundle` / `unbundle`** (P2-7, ADR-0017): `bundle <report-stem>
   -o bundle.age --passphrase-env VAR` packs `<stem>.html` +
   `<stem>.map.json` + `<stem>.audit.json` (whichever exist) into one

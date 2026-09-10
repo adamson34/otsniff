@@ -879,21 +879,46 @@ WriteProperty, AtomicWriteFile, ReinitializeDevice, DeviceCommunicationControl.
 Smaller user base for triage tools but also less competition. Worth doing if
 a user asks; not a default.
 
-### P2-3: Payload-aware findings (M)
+### P2-3: Payload-aware findings (M) — 🟡 partially shipped
 
 Detect things in payload bytes the rule layer ignores today:
-- Default credentials in cleartext (ftp anonymous, telnet admin/admin,
-  Siemens default password "0000")
-- HTTP basic auth with weak passwords (decode b64, check against a small
-  watchlist)
-- Suspicious DNS queries (dyn-DNS providers, IDN homoglyphs)
-- Hard-coded modbus / S7 attack patterns (publicly-known PLC stuxnet-style
-  sequences)
+- ✅ **FTP anonymous login** — shipped as part of `creds.default_or_weak_credentials`
+  (`findings/default_credentials.rs`).
+- ✅ **HTTP Basic auth with weak passwords** (decode b64, check against a
+  small watchlist) — shipped, same finding.
+- ⬜ **Telnet admin/admin** — deferred. Telnet's byte-by-byte character-echo
+  protocol means the current parser never captures a clean USER/PASS pair
+  to check — `CredEvent.note` for `TelnetSession` is a constant "session
+  observed" string today, not login content. Extracting it needs session
+  reassembly (tracking a TCP stream's bytes across many small packets,
+  handling terminal echo), which is a materially different, larger parser
+  change than the other three items.
+- ⬜ **Siemens S7 default password "0000"** — deferred. No S7
+  password/auth-exchange parsing exists in `parse/s7comm.rs` today (S7's
+  access-level/password mechanism is a distinct sub-protocol from the
+  function-code decoding otsniff currently does); would need new parser
+  work, not just a new detector.
+- ⬜ **Suspicious DNS queries** (dyn-DNS providers, IDN homoglyphs) —
+  deferred. otsniff has never parsed the DNS question section (only
+  `classify_flow` tags UDP/53 traffic by port); extracting the queried
+  domain name is new parser work (`parse/dns.rs`), not a detector-only
+  change like the credential items were.
+- ⬜ **Hard-coded Modbus/S7 "Stuxnet-style" attack patterns** — deferred.
+  Needs both new protocol-specific parsing *and* careful sourcing of
+  actual documented attack sequences (Langner's/Symantec's Stuxnet
+  analyses, not an invented signature) — closer in risk profile to P1-8's
+  external-data-sourcing question than to the rest of this item.
 
 **Why:** adds depth to existing detector coverage. Each item is small but
 together they meaningfully expand what otsniff finds. **Caveat:** moves us
 toward "audit-grade" territory — false positives bite harder when the rule
-references payload bytes.
+references payload bytes. **Privacy note:** `creds.default_or_weak_credentials`
+reads `CredEvent.note` (may hold a real username/password even on a
+non-match) only to compute a verdict; evidence states the matched
+*category* only ("FTP anonymous login", "HTTP Basic — known weak/default
+password"), never the captured value — see the doc comment in
+`default_credentials.rs` and the dedicated leak-regression test in
+`tests/snapshot.rs`. Rule catalog is now 26 rules.
 
 ### P2-4: Web playground (L)
 
