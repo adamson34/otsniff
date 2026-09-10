@@ -144,9 +144,16 @@ pub fn render_markdown(
         }
     }
 
-    // Asset inventory
+    // Asset inventory. P1-10: cap the rendered table to the top hosts by
+    // traffic when the inventory is implausibly large (spoofed-source
+    // flood) — at or under the cap this is every asset, unchanged order.
+    let (assets_to_render, assets_capped_note) = crate::inventory::capped_for_render(inventory);
     writeln!(out, "## Asset inventory").unwrap();
     writeln!(out).unwrap();
+    if let Some(note) = &assets_capped_note {
+        writeln!(out, "_{note}_").unwrap();
+        writeln!(out).unwrap();
+    }
     writeln!(
         out,
         "| IP | Hostname | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |"
@@ -157,7 +164,7 @@ pub fn render_markdown(
         "|----|----------|------|-----|--------|---------------|-----------|---------|-------|"
     )
     .unwrap();
-    for a in inventory {
+    for a in assets_to_render {
         writeln!(
             out,
             "| `{}` | {} | {} | `{}` | {} | {} | {} | {} | {} |",

@@ -17,6 +17,7 @@ mod plaintext_creds;
 pub mod rdp_legacy;
 pub mod recon_scan;
 mod smbv1;
+mod spoofed_sources;
 mod stale_tls;
 mod trusted_writer_activity;
 mod unexpected_protocols;
@@ -169,6 +170,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         recon_scan::METADATA,
         unexpected_protocols::METADATA,
         trusted_writer_activity::METADATA,
+        spoofed_sources::METADATA,
         // Zonewarden segmentation-conformance rules (ADR-0013). These fire only
         // when a `--policy` is supplied; they are not part of `run_all`.
         zonewarden::IDMZ_BYPASS_METADATA,
@@ -241,6 +243,7 @@ pub fn run_all_with_trusted_writers(
     out.extend(dns_resolver::detect(obs, ot_subnets));
     out.extend(ntp_external::detect(obs, ot_subnets));
     out.extend(recon_scan::detect(obs, ot_subnets));
+    out.extend(spoofed_sources::detect(obs));
     out.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(b.id)));
     out
 }

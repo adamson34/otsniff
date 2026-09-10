@@ -382,6 +382,10 @@
 
 <details open>
 <summary class="section-summary">Asset inventory <span class="row-count">({{ assets.len() }})</span></summary>
+{%- match assets_capped_note %}{% when Some with (note) %}
+<p class="muted" style="font-size:0.8rem;margin:0.3rem 0;">{{ note }}</p>
+{%- when None -%}
+{% endmatch %}
 <div class="table-wrap">
 <table>
   <thead><tr>

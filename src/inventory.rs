@@ -59,6 +59,40 @@ pub fn build(obs: &Observations) -> Vec<Asset> {
     assets
 }
 
+/// Above this many distinct hosts, the rendered inventory table is capped
+/// to the top-N by traffic rather than listing every row (P1-10). A
+/// legitimate network essentially never has this many distinct hosts on
+/// one capture; the common cause is a spoofed-source flood inflating the
+/// host count into the thousands (see `findings::spoofed_sources`).
+pub const RENDER_CAP: usize = 100;
+
+/// Selects which assets the HTML/markdown renderers should list, and an
+/// optional human-readable note when the full inventory was capped.
+///
+/// At or under [`RENDER_CAP`] hosts, returns every asset unchanged (same
+/// order `build` produced) and `None` — existing small-capture output is
+/// untouched. Above the cap, re-sorts by traffic (packets, descending) and
+/// returns only the top [`RENDER_CAP`], plus a note naming how many were
+/// omitted. This is a rendering-only decision: callers that need the full,
+/// uncapped inventory (role-shift diffing, the OT-zone count in the report
+/// header) should keep using the `Vec<Asset>` from [`build`] directly.
+pub fn capped_for_render(inventory: &[Asset]) -> (Vec<&Asset>, Option<String>) {
+    if inventory.len() <= RENDER_CAP {
+        return (inventory.iter().collect(), None);
+    }
+    let omitted = inventory.len() - RENDER_CAP;
+    let mut by_traffic: Vec<&Asset> = inventory.iter().collect();
+    by_traffic.sort_by(|a, b| b.packets.cmp(&a.packets).then_with(|| a.ip.cmp(&b.ip)));
+    by_traffic.truncate(RENDER_CAP);
+    let note = format!(
+        "Showing the top {RENDER_CAP} hosts by traffic. {omitted} additional low-volume \
+         host(s) omitted from this table — a host count this large usually means spoofed \
+         source addresses (see the attack.spoofed_sources finding, if present), not that \
+         many genuine hosts on the network."
+    );
+    (by_traffic, Some(note))
+}
+
 fn host_to_asset(host: &HostObs, obs: &Observations) -> Asset {
     let mac = host.macs.first().copied();
     let vendor = mac.and_then(|m| oui::lookup(&m).map(str::to_string));
@@ -149,4 +183,57 @@ fn infer_role(host: &HostObs, vendor: Option<&str>) -> Role {
     }
 
     Role::Unknown
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn asset(n: u8, packets: u64) -> Asset {
+        Asset {
+            ip: IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, n)),
+            hostname: None,
+            mac: None,
+            vendor: None,
+            role: Role::Unknown,
+            protocols: Vec::new(),
+            packets,
+            bytes: 0,
+            in_ot_zone: false,
+        }
+    }
+
+    #[test]
+    fn at_or_under_cap_returns_every_asset_unchanged_order_no_note() {
+        let assets: Vec<Asset> = (0..RENDER_CAP as u8).map(|i| asset(i, 1)).collect();
+        let (rendered, note) = capped_for_render(&assets);
+        assert_eq!(rendered.len(), assets.len());
+        assert!(note.is_none());
+        // Order preserved exactly as `build` produced it — no re-sort below the cap.
+        for (a, b) in rendered.iter().zip(assets.iter()) {
+            assert_eq!(a.ip, b.ip);
+        }
+    }
+
+    #[test]
+    fn over_cap_truncates_to_top_n_by_traffic_with_a_note() {
+        // RENDER_CAP + 50 assets, packet counts inverse to index so the
+        // highest-traffic assets are NOT the ones `build`'s (zone, ip) sort
+        // would have put first — proves the re-sort actually happens.
+        let total = RENDER_CAP + 50;
+        let assets: Vec<Asset> = (0..total)
+            .map(|i| asset((i % 256) as u8, (total - i) as u64))
+            .collect();
+        let (rendered, note) = capped_for_render(&assets);
+        assert_eq!(rendered.len(), RENDER_CAP);
+        let note = note.expect("omitting hosts must produce a note");
+        assert!(note.contains("50"));
+        assert!(note.contains(&RENDER_CAP.to_string()));
+        // Top-N by traffic: packets must be non-increasing across the kept rows.
+        for w in rendered.windows(2) {
+            assert!(w[0].packets >= w[1].packets);
+        }
+        // The single highest-traffic asset (packets = total) must be first.
+        assert_eq!(rendered[0].packets, total as u64);
+    }
 }

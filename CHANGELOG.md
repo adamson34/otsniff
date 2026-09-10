@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Spoofed-source flood detection + inventory render cap** (P1-10): new
+  `attack.spoofed_sources` (High) finding fires when more than 500
+  distinct source IPs match the spoofed-source fingerprint — exactly one
+  packet sent, zero received in reply, no MAC ever captured, no protocol
+  enrichment. DoS captures with randomized source addresses (SYN flood,
+  ping flood) can otherwise produce inventories with 10k+ "hosts" that
+  drown the real ones out. The asset inventory table (HTML and markdown)
+  is now capped to the top 100 hosts by traffic once the inventory
+  exceeds that size, with a note naming how many low-volume hosts were
+  omitted; the report's host-count stat stays the full, uncapped total.
+  Rule catalog now lists **25** rules.
 - **Trusted-writer allowlist** (P1-12, ADR-0015): `analyze --trusted-writer
   SRC=DST:PROTO` (repeatable) lets an operator declare a known-good
   engineering-command pair (e.g. an EWS writing to a PLC rack) so repeat

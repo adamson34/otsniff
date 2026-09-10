@@ -541,7 +541,7 @@ the gap.
 `report.rs` + `report_md.rs` (add a banner), `cli.rs` (stderr warn).
 **Deps:** none.
 
-### P1-10: Spoofed-source detection / inventory cap (M)
+### P1-10: Spoofed-source detection / inventory cap (M) — ✅ shipped
 
 DoS captures (ping flood, SYN flood) produce inventories with 10k+
 "hosts" because attacker tooling spoofs source IPs. Discovered while
@@ -549,23 +549,27 @@ triaging the Lemay/Fernandez dataset: `eth2dump-pingFloodDDoS` and
 `eth2dump-tcpSYNFloodDDoS` show 12,005 / 12,017 hosts each — the
 report inventory becomes unreadable.
 
-Two-part fix:
+Two-part fix, both shipped:
 
-1. **Detector** — new `attack.spoofed_sources` finding that fires
-   when K hosts (K > 500) appear with: exactly 1 packet sent, no
-   responses received, no MAC observation, no protocol enrichment.
-   That's the spoofed-source fingerprint.
+1. **Detector** — `attack.spoofed_sources` (High, `findings/spoofed_sources.rs`)
+   fires when more than 500 distinct source IPs match the fingerprint:
+   exactly 1 packet sent, 0 received in reply, no MAC ever captured, no
+   protocol enrichment.
 
-2. **Inventory render cap** — when inventory > 100 hosts, paginate
-   or summarize. Top-N by traffic + "+ K low-volume hosts (likely
-   spoofed) summarized" footer.
+2. **Inventory render cap** — `inventory::capped_for_render` (used by both
+   `report.rs` and `report_md.rs`) caps the rendered table to the top 100
+   hosts by traffic above that count, with a summary note naming how many
+   were omitted. The report header's host count stays the full, uncapped
+   total — only the table itself is capped, so the discrepancy between
+   "N hosts" and a 100-row table is self-explanatory.
 
 **Why:** correctness (the 12k entries are technically real distinct
 src IPs, but reporting them as "hosts" misleads the analyst) and UX
 (the HTML report becomes unusably large).
 
-**Touches:** new `findings/spoofed_sources.rs`, `report.rs` +
-`report_md.rs` inventory section, snapshot tests.
+**Touches:** `findings/spoofed_sources.rs`, `inventory.rs`
+(`capped_for_render`), `report.rs` + `report_md.rs` + `templates/report.html`
+inventory section, snapshot tests. Rule catalog is now 25 rules.
 **Deps:** none.
 
 ### P1-11: Diff capture-window normalization (S) — ✅ shipped (#145, S-11.01)
