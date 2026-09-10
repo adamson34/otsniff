@@ -1165,3 +1165,141 @@ fn provider_ollama_with_model_reaches_the_provider_and_fails_cleanly_without_oll
         .failure()
         .stderr(predicate::str::contains("Ollama not found on PATH"));
 }
+
+// ---------------------------------------------------------------------------
+// P2-7 — `bundle` / `unbundle` (ADR-0017)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bundle_help_describes_command() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["bundle", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--passphrase-env"));
+}
+
+#[test]
+fn bundle_round_trips_through_unbundle() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src.pcap");
+    std::fs::write(&src, legacy_pcap(&eth_ipv4_udp_frame(), 1, &[0])).unwrap();
+    let report = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&report)
+        .assert()
+        .success();
+
+    let stem = tmp.path().join("report");
+    let bundle_path = tmp.path().join("bundle.age");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["bundle"])
+        .arg(&stem)
+        .arg("-o")
+        .arg(&bundle_path)
+        .arg("--passphrase-env")
+        .arg("OTSNIFF_TEST_PASSPHRASE")
+        .env("OTSNIFF_TEST_PASSPHRASE", "correct horse battery staple")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("report.html"));
+    assert!(bundle_path.exists());
+
+    let extract_dir = tmp.path().join("extracted");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["unbundle"])
+        .arg(&bundle_path)
+        .arg("-o")
+        .arg(&extract_dir)
+        .arg("--passphrase-env")
+        .arg("OTSNIFF_TEST_PASSPHRASE")
+        .env("OTSNIFF_TEST_PASSPHRASE", "correct horse battery staple")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("report.html"));
+
+    let original = std::fs::read_to_string(&report).unwrap();
+    let extracted = std::fs::read_to_string(extract_dir.join("report.html")).unwrap();
+    assert_eq!(original, extracted);
+}
+
+#[test]
+fn unbundle_with_wrong_passphrase_env_fails() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src.pcap");
+    std::fs::write(&src, legacy_pcap(&eth_ipv4_udp_frame(), 1, &[0])).unwrap();
+    let report = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&report)
+        .assert()
+        .success();
+
+    let stem = tmp.path().join("report");
+    let bundle_path = tmp.path().join("bundle.age");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["bundle"])
+        .arg(&stem)
+        .arg("-o")
+        .arg(&bundle_path)
+        .arg("--passphrase-env")
+        .arg("OTSNIFF_TEST_PASSPHRASE")
+        .env("OTSNIFF_TEST_PASSPHRASE", "right-one")
+        .assert()
+        .success();
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["unbundle"])
+        .arg(&bundle_path)
+        .arg("-o")
+        .arg(tmp.path().join("extracted"))
+        .arg("--passphrase-env")
+        .arg("OTSNIFF_TEST_PASSPHRASE")
+        .env("OTSNIFF_TEST_PASSPHRASE", "wrong-one")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("wrong passphrase"));
+}
+
+#[test]
+fn bundle_missing_passphrase_env_var_is_a_clear_usage_error() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src.pcap");
+    std::fs::write(&src, legacy_pcap(&eth_ipv4_udp_frame(), 1, &[0])).unwrap();
+    let report = tmp.path().join("report.html");
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&report)
+        .assert()
+        .success();
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["bundle"])
+        .arg(tmp.path().join("report"))
+        .arg("-o")
+        .arg(tmp.path().join("bundle.age"))
+        .arg("--passphrase-env")
+        .arg("OTSNIFF_DEFINITELY_UNSET_VAR")
+        .env_remove("OTSNIFF_DEFINITELY_UNSET_VAR")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "OTSNIFF_DEFINITELY_UNSET_VAR' (named by --passphrase-env) is not set",
+        ));
+}

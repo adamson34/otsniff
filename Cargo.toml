@@ -34,6 +34,7 @@ pulldown-cmark = { version = "0.13", default-features = false, features = ["html
 zonewarden = { path = "crates/zonewarden" }
 otsniff-privacy = { path = "crates/otsniff-privacy" }
 serde_norway = "0.9"   # YAML parser for Zonewarden segmentation policies (ADR-0013)
+age = "0.12"           # Passphrase encryption for `bundle`/`unbundle` (ADR-0017)
 
 [dev-dependencies]
 pretty_assertions = "1.4"

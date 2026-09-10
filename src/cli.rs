@@ -127,6 +127,12 @@ pub enum Command {
     /// bytes, byte-identical), not reconstructed, so the output survives
     /// a round-trip through Wireshark/tshark/a vendor's support team.
     Slice(SliceArgs),
+    /// Encrypt a report + its sidecars (map, audit log) into one file
+    /// (P2-7, ADR-0017) — moves BCSI-at-rest protection from "guidance" to
+    /// "default behavior." Counterpart to `unbundle`.
+    Bundle(BundleArgs),
+    /// Decrypt a bundle produced by `bundle` back into its component files.
+    Unbundle(UnbundleArgs),
     /// Zonewarden segmentation-conformance tools (ADR-0013).
     #[command(subcommand)]
     Zonewarden(ZonewardenCmd),
@@ -206,6 +212,36 @@ pub struct SliceArgs {
     /// `--flow`). Matches both TCP and UDP on that port.
     #[arg(long = "flow", value_name = "SRC=DST:PORT")]
     pub flows: Vec<crate::slice::FlowFilter>,
+}
+
+#[derive(Args, Debug)]
+pub struct BundleArgs {
+    /// Report stem (e.g. `report` for `report.html`). Looks for
+    /// `<stem>.html`, `<stem>.map.json`, and `<stem>.audit.json` — the same
+    /// derivation `analyze`'s audit log uses (ADR-0012). Missing sidecars
+    /// are skipped, not an error; at least one file must exist.
+    pub stem: PathBuf,
+    /// Output encrypted bundle path.
+    #[arg(short = 'o', long = "output", default_value = "bundle.age")]
+    pub output: PathBuf,
+    /// Name of the environment variable holding the passphrase. otsniff
+    /// never accepts a passphrase as a bare CLI argument — it would leak
+    /// into shell history and be visible to every other process via `ps`.
+    #[arg(long = "passphrase-env", value_name = "VAR")]
+    pub passphrase_env: String,
+}
+
+#[derive(Args, Debug)]
+pub struct UnbundleArgs {
+    /// Encrypted bundle produced by `bundle`.
+    pub bundle: PathBuf,
+    /// Directory to extract into (created if missing).
+    #[arg(short = 'o', long = "output", default_value = ".")]
+    pub output_dir: PathBuf,
+    /// Name of the environment variable holding the passphrase (see
+    /// `bundle --passphrase-env`).
+    #[arg(long = "passphrase-env", value_name = "VAR")]
+    pub passphrase_env: String,
 }
 
 #[derive(Args, Debug)]
@@ -367,6 +403,8 @@ pub fn run() -> Result<()> {
         Command::Rules(a) => run_rules(a),
         Command::Diff(a) => run_diff(a),
         Command::Slice(a) => run_slice(a),
+        Command::Bundle(a) => run_bundle(a),
+        Command::Unbundle(a) => run_unbundle(a),
         Command::Zonewarden(ZonewardenCmd::Suggest { input, ot_subnets }) => {
             run_zonewarden_suggest(input, ot_subnets)
         }
@@ -393,6 +431,47 @@ fn run_slice(args: SliceArgs) -> Result<()> {
         args.output.display(),
         summary.matched,
         summary.scanned,
+    );
+    Ok(())
+}
+
+/// Read the passphrase named by `var` from the environment, wrapping it in
+/// `SecretString` immediately so it doesn't linger as a plain `String`.
+/// Missing/empty is a usage error naming the flag, not a cryptic KeyError.
+fn read_passphrase_env(var: &str) -> Result<age::secrecy::SecretString> {
+    let value = std::env::var(var).map_err(|_| {
+        OtError::Parse(format!(
+            "environment variable '{var}' (named by --passphrase-env) is not set"
+        ))
+    })?;
+    if value.is_empty() {
+        return Err(OtError::Parse(format!(
+            "environment variable '{var}' (named by --passphrase-env) is empty"
+        )));
+    }
+    Ok(age::secrecy::SecretString::from(value))
+}
+
+fn run_bundle(args: BundleArgs) -> Result<()> {
+    let passphrase = read_passphrase_env(&args.passphrase_env)?;
+    let summary = crate::bundle::bundle(&args.stem, &args.output, passphrase)?;
+    eprintln!(
+        "wrote {} ({} file(s): {})",
+        args.output.display(),
+        summary.files.len(),
+        summary.files.join(", "),
+    );
+    Ok(())
+}
+
+fn run_unbundle(args: UnbundleArgs) -> Result<()> {
+    let passphrase = read_passphrase_env(&args.passphrase_env)?;
+    let written = crate::bundle::unbundle(&args.bundle, &args.output_dir, passphrase)?;
+    eprintln!(
+        "extracted {} file(s) to {}: {}",
+        written.len(),
+        args.output_dir.display(),
+        written.join(", "),
     );
     Ok(())
 }

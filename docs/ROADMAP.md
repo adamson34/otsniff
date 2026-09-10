@@ -926,12 +926,17 @@ OT triage? Probably qwen2.5-7b or llama3.1-8b at a minimum. Output
 quality varies and isn't covered by the `tests/prompt-evals/` harness
 (P1-4) yet — that harness currently only drives the Claude Code CLI.
 
-### P2-7: Encrypted output bundle (S)
+### P2-7: Encrypted output bundle (S) — ✅ shipped (ADR-0017)
 
-`otsniff bundle <report-stem> --passphrase` (or read passphrase from
-env) — zips `report.html` + `map.json` + `audit.json` into one
-file encrypted with a symmetric cipher. Inverse `unbundle` extracts
-back.
+`otsniff bundle <report-stem> -o bundle.age --passphrase-env VAR` packs
+`<stem>.html` + `<stem>.map.json` + `<stem>.audit.json` (whichever
+exist — missing sidecars are skipped) into one `age`-encrypted file.
+Inverse `otsniff unbundle <bundle> -o dir/ --passphrase-env VAR`
+extracts back, refusing any entry name that isn't a bare filename
+(defense against a maliciously crafted bundle path-traversing on
+extract). Passphrase is read from a named environment variable, never
+a bare CLI argument — see ADR-0017 D2 for why (shell history / `ps`
+visibility).
 
 **Why:** the BCSI handling commitment (NERC CIP-011 alignment) is
 currently a documentation claim — we *say* the map file is sensitive
@@ -939,9 +944,10 @@ and should be protected at rest, and rely on the user to do so. A
 first-party encrypted bundle moves that from "guidance" to "default
 behavior." Doesn't change the privacy invariant — the AI still never
 sees real values — but closes the at-rest exposure window between
-`scrub` and `unscrub`. **Touches:** new `bundle` subcommand, new
-dep on `age` or `cocoon` for the encryption primitive (`age` is the
-modern choice; small footprint, audited).
+`scrub` and `unscrub`. **Touches:** `src/bundle.rs`, `bundle`/`unbundle`
+subcommands, new dep on `age` for the encryption primitive (ADR-0017 D1
+— `age` over `cocoon` or hand-rolling, same "modern, audited" reasoning
+this entry originally gave `age`).
 
 ### P2-8: User-defined rules via YAML (L)
 
