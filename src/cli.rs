@@ -46,6 +46,17 @@ pub enum SourceTypeArg {
     Tap,
 }
 
+/// Which `AiProvider` backs `--ai`. `Claude` (default) shells out to the
+/// Claude Code CLI; `Ollama` (P2-6) shells out to a local `ollama run
+/// <model>` instead, for an operator who cannot use any external AI
+/// service at all (ADR-0007's air-gap promise).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum ProviderArg {
+    Claude,
+    Ollama,
+}
+
 impl From<SourceTypeArg> for DeclaredSource {
     fn from(a: SourceTypeArg) -> Self {
         match a {
@@ -277,8 +288,23 @@ pub struct AnalyzeArgs {
     /// disagrees.
     #[arg(long = "source-type", value_name = "TYPE", value_enum)]
     pub source_type: Option<SourceTypeArg>,
-    /// Optional Claude model override, passed through to `claude --model`.
-    /// Only meaningful when `--ai` is set.
+    /// Which AI backend `--ai` uses: `claude` (default) shells out to the
+    /// Claude Code CLI; `ollama` shells out to a local `ollama run <model>`
+    /// instead (P2-6), for an operator who cannot use any external AI
+    /// service. Only meaningful when `--ai` is set.
+    #[arg(
+        long = "provider",
+        value_name = "PROVIDER",
+        value_enum,
+        default_value = "claude"
+    )]
+    pub provider: ProviderArg,
+    /// Model override. For `--provider claude`, passed through to `claude
+    /// --model` (optional — omitting it lets Claude Code pick its
+    /// default). For `--provider ollama`, this is the model `ollama run`
+    /// invokes and is REQUIRED (e.g. `--model llama3.1`) — there's no
+    /// meaningful default across local installs. Only meaningful when
+    /// `--ai` is set.
     #[arg(long = "model", value_name = "MODEL")]
     pub model: Option<String>,
     /// Print the scrubbed prompt to stderr and pause for confirmation
@@ -969,15 +995,42 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         review_scrub_gate(&user_message)?;
     }
 
-    let model_label = args.model.clone().unwrap_or_else(|| "default".to_string());
+    // P2-6: --provider selects claude (default) or ollama. Ollama requires
+    // --model (no meaningful default across local installs); validate here
+    // so the failure is immediate and clear rather than surfacing from deep
+    // inside the provider.
+    let model_label = match args.provider {
+        ProviderArg::Claude => args.model.clone().unwrap_or_else(|| "default".to_string()),
+        ProviderArg::Ollama => args.model.clone().ok_or_else(|| {
+            OtError::Parse(
+                "--provider ollama requires --model <name> (e.g. --model llama3.1)".to_string(),
+            )
+        })?,
+    };
     if args.verbose {
-        eprintln!("  invoking claude (model: {})...", model_label);
+        eprintln!(
+            "  invoking {} (model: {})...",
+            match args.provider {
+                ProviderArg::Claude => "claude",
+                ProviderArg::Ollama => "ollama",
+            },
+            model_label
+        );
     }
     // Pass verbose through to the provider so run_with_heartbeat knows
     // whether to emit heartbeat lines. The provider also checks
     // stderr.is_terminal() internally (AC-004), so explicit -v and
     // interactive TTY use cases are both covered.
-    let provider = ClaudeCliProvider::new_verbose(args.model.clone(), args.verbose);
+    let provider: Box<dyn AiProvider> = match args.provider {
+        ProviderArg::Claude => Box::new(ClaudeCliProvider::new_verbose(
+            args.model.clone(),
+            args.verbose,
+        )),
+        ProviderArg::Ollama => Box::new(crate::ai::ollama::OllamaProvider::new_verbose(
+            model_label.clone(),
+            args.verbose,
+        )),
+    };
     let invoke_start = std::time::Instant::now();
     let scrubbed_response = provider.analyze(&system_prompt, &user_message)?;
     let elapsed = invoke_start.elapsed();
@@ -1001,7 +1054,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     // with rule findings and the analyze-pass AI section intact; the augmented
     // section is simply absent.
     let (augmented_findings, augment_summary_opt) =
-        match augment_findings(&obs, &findings, &inventory, &provider) {
+        match augment_findings(&obs, &findings, &inventory, provider.as_ref()) {
             Ok((af, summary)) => {
                 if args.verbose {
                     eprintln!(
@@ -1121,13 +1174,16 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         scrub: scrub_summary,
         leak_check,
         ai_provider: AiInvocationSummary {
-            command: format!(
-                "claude -p{}",
-                args.model
-                    .as_deref()
-                    .map(|m| format!(" --model {m}"))
-                    .unwrap_or_default()
-            ),
+            command: match args.provider {
+                ProviderArg::Claude => format!(
+                    "claude -p{}",
+                    args.model
+                        .as_deref()
+                        .map(|m| format!(" --model {m}"))
+                        .unwrap_or_default()
+                ),
+                ProviderArg::Ollama => format!("ollama run {model_label}"),
+            },
             model: model_label,
             system_prompt_bytes: system_prompt.len(),
             system_prompt_sha256: audit::sha256_hex(&system_prompt),

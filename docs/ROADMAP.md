@@ -907,20 +907,24 @@ Homebrew formula, Debian/RPM packages, scoop manifest. Requires a stable
 release cadence to be worth automating. **Deps:** P1-5 (a stable v0.2.0 to
 package).
 
-### P2-6: Ollama local provider (M)
+### P2-6: Ollama local provider (M) — ✅ shipped
 
-Second `AiProvider` implementation alongside `ClaudeCliProvider`. Shells
-out to `ollama run <model>` with the same scrubbed input. Fulfills the
-air-gap promise from ADR-0007 — analyze flow that doesn't require any
-external service.
+Second `AiProvider` implementation (`src/ai/ollama.rs`) alongside
+`ClaudeCliProvider`. `analyze --ai --provider ollama --model <name>`
+shells out to `ollama run <model>`, piping the system prompt +
+scrubbed markdown (concatenated — the plain CLI has no separate
+system-prompt channel) over stdin and capturing stdout. Fulfills the
+air-gap promise from ADR-0007 — an analyze flow that never leaves the
+host. `--model` is required for this provider (no meaningful default
+across local installs); omitting it is a clear usage error rather than
+a cryptic failure inside the provider. Reuses the existing
+`run_with_heartbeat` verbose-progress machinery from `claude_cli.rs`
+unchanged.
 
-**Why P2 / not P1:** named as a v0.4 follow-on in ADR-0007 but no user
-has asked for it yet, and the `claude` CLI integration covers the
-majority of use cases. Move to P1 if a regulated entity surfaces who
-literally cannot use any external AI service.
-
-**Open question:** which local models are good enough for OT triage?
-Probably qwen2.5-7b or llama3.1-8b at a minimum. Output quality varies.
+**Open question (still open):** which local models are good enough for
+OT triage? Probably qwen2.5-7b or llama3.1-8b at a minimum. Output
+quality varies and isn't covered by the `tests/prompt-evals/` harness
+(P1-4) yet — that harness currently only drives the Claude Code CLI.
 
 ### P2-7: Encrypted output bundle (S)
 

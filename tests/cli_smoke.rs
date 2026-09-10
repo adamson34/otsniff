@@ -1117,3 +1117,51 @@ fn slice_real_fixture_by_host_shrinks_the_capture() {
         .assert()
         .success();
 }
+
+// ---------------------------------------------------------------------------
+// P2-6 — `--provider ollama`
+// ---------------------------------------------------------------------------
+
+#[test]
+fn provider_ollama_without_model_is_a_clear_usage_error() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src.pcap");
+    std::fs::write(&src, legacy_pcap(&eth_ipv4_udp_frame(), 1, &[0])).unwrap();
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["analyze", "--ai", "--provider", "ollama"])
+        .arg(&src)
+        .arg("-o")
+        .arg(tmp.path().join("out.html"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--provider ollama requires --model",
+        ));
+}
+
+/// CI never has `ollama` installed, so this deterministically exercises the
+/// provider-selection wiring (the run reaches OllamaProvider::analyze and
+/// fails there, not earlier) without a live model invocation.
+#[test]
+fn provider_ollama_with_model_reaches_the_provider_and_fails_cleanly_without_ollama_installed() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src.pcap");
+    std::fs::write(&src, legacy_pcap(&eth_ipv4_udp_frame(), 1, &[0])).unwrap();
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args([
+            "analyze",
+            "--ai",
+            "--provider",
+            "ollama",
+            "--model",
+            "llama3.1",
+        ])
+        .arg(&src)
+        .arg("-o")
+        .arg(tmp.path().join("out.html"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Ollama not found on PATH"));
+}

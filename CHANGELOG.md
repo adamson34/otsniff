@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Ollama local AI provider** (P2-6): `analyze --ai --provider ollama
+  --model <name>` runs the AI analysis and augment passes through a local
+  `ollama run <model>` instead of the Claude Code CLI, fulfilling the
+  air-gap promise from ADR-0007 for operators who cannot use any external
+  AI service. `--model` is required for this provider (no meaningful
+  default across local installs) — omitting it is a clear usage error.
+  Reuses the existing scrub → leak-check → unscrub pipeline and
+  verbose-progress heartbeat unchanged; only the subprocess invocation
+  differs.
 - **`otsniff slice` subcommand** (P1-7, partial): `slice <PCAP> -o out.pcap
   --host IP` / `--flow SRC=DST:PORT` (repeatable, OR-matched, at least one
   required) extracts a small PCAP containing only matching packets,
