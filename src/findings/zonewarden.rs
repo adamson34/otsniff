@@ -322,7 +322,7 @@ conduits: []
         // the subnet rule is dropped and zonewarden findings are added.
         let result =
             segmentation::run_conformance(POLICY, &[obs_flow("10.0.1.5", "10.0.5.9", 80)]).unwrap();
-        let findings = run_with_conformance(&obs, &[], &result);
+        let findings = run_with_conformance(&obs, &[], &result, &[]);
         assert!(
             !findings.iter().any(|f| f.id == "egress.ot_to_internet"),
             "egress is deduped when a policy is present"

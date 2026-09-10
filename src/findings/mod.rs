@@ -18,6 +18,7 @@ pub mod rdp_legacy;
 pub mod recon_scan;
 mod smbv1;
 mod stale_tls;
+mod trusted_writer_activity;
 mod unexpected_protocols;
 pub mod weak_tls_cipher;
 pub mod zonewarden;
@@ -28,6 +29,7 @@ use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 
 use crate::observe::Observations;
+use crate::trusted_writer::TrustedWriterRule;
 
 /// Render a host as "HOSTNAME (1.2.3.4)" when we have a hostname for
 /// it (DHCP option 12 today), otherwise just the IP. The IP stays in
@@ -166,6 +168,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         ntp_external::METADATA,
         recon_scan::METADATA,
         unexpected_protocols::METADATA,
+        trusted_writer_activity::METADATA,
         // Zonewarden segmentation-conformance rules (ADR-0013). These fire only
         // when a `--policy` is supplied; they are not part of `run_all`.
         zonewarden::IDMZ_BYPASS_METADATA,
@@ -193,8 +196,9 @@ pub fn run_with_conformance(
     // `::zonewarden` (the crate) — `zonewarden` alone resolves to the local
     // `findings::zonewarden` submodule below.
     conformance: &::zonewarden::types::ConformanceResult,
+    trusted_writers: &[TrustedWriterRule],
 ) -> Vec<Finding> {
-    let mut out = run_all(obs, ot_subnets);
+    let mut out = run_all_with_trusted_writers(obs, ot_subnets, trusted_writers);
     out.retain(|f| f.id != internet_egress::METADATA.id); // dedup vs the engine
     out.extend(zonewarden::detect(conformance, obs));
     out.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(b.id)));
@@ -202,13 +206,32 @@ pub fn run_with_conformance(
 }
 
 pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
+    run_all_with_trusted_writers(obs, ot_subnets, &[])
+}
+
+/// Same as [`run_all`], plus the P1-12 trusted-writer allowlist (ADR-0015):
+/// engineering-command pairs matching a declared rule are excluded from
+/// their protocol's High/Critical finding and rolled up instead into the
+/// Info-severity `ics.trusted_writer_activity` finding. `run_all` delegates
+/// here with an empty allowlist, so its behavior (and every existing
+/// snapshot built on it) is unchanged.
+pub fn run_all_with_trusted_writers(
+    obs: &Observations,
+    ot_subnets: &[IpNet],
+    trusted_writers: &[TrustedWriterRule],
+) -> Vec<Finding> {
     let mut out = Vec::new();
     out.extend(plaintext_creds::detect(obs));
     out.extend(ldap_creds::build_findings(obs));
     out.extend(ntlmv1::build_findings(obs));
     out.extend(internet_egress::detect(obs));
-    out.extend(engineering_commands::detect(obs, ot_subnets));
-    out.extend(dnp3_engineering::detect(obs, ot_subnets));
+    out.extend(engineering_commands::detect(
+        obs,
+        ot_subnets,
+        trusted_writers,
+    ));
+    out.extend(dnp3_engineering::detect(obs, ot_subnets, trusted_writers));
+    out.extend(trusted_writer_activity::detect(obs, trusted_writers));
     out.extend(unexpected_protocols::detect(obs, ot_subnets));
     out.extend(smbv1::detect(obs));
     out.extend(stale_tls::detect(obs));
@@ -220,6 +243,17 @@ pub fn run_all(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
     out.extend(recon_scan::detect(obs, ot_subnets));
     out.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(b.id)));
     out
+}
+
+/// Declared-rule indices (1-based) matched by at least one engineering
+/// event in `obs`. Exposed here (re-export) so the CLI can print the
+/// unmatched-declaration stderr warning without reaching into the
+/// `trusted_writer_activity` submodule directly.
+pub fn trusted_writer_matched_rule_indices(
+    obs: &Observations,
+    trusted_writers: &[TrustedWriterRule],
+) -> std::collections::BTreeSet<usize> {
+    trusted_writer_activity::matched_rule_indices(obs, trusted_writers)
 }
 
 /// A MITRE ATT&CK for ICS technique surfaced for a finding: a display-ready
@@ -305,12 +339,19 @@ mod mitre_tests {
     /// and never names the zonewarden verdicts in the MITRE context; forcing a
     /// technique onto them would be semantically wrong and require an
     /// unverifiable ID. They keep their IEC 62443 `Spec` references instead.
+    ///
+    /// `ics.trusted_writer_activity` (P1-12, ADR-0015) is exempt for the same
+    /// reason: it's an annotation over an operator's own unverified
+    /// declaration, not a detection of adversary behavior, so it carries an
+    /// ADR `Spec` reference instead of an ATT&CK technique.
     #[test]
     fn every_rule_has_a_well_formed_mitre_reference() {
         for rule in catalog() {
-            // Policy-gated segmentation-conformance verdicts are MITRE-exempt
-            // (see doc comment): they map to IEC 62443 controls, not ATT&CK.
-            if rule.id.starts_with("zonewarden.") {
+            // Policy-gated segmentation-conformance verdicts and the
+            // trusted-writer annotation are MITRE-exempt (see doc comment):
+            // they map to IEC 62443 controls / an operator assertion, not
+            // ATT&CK adversary techniques.
+            if rule.id.starts_with("zonewarden.") || rule.id == "ics.trusted_writer_activity" {
                 continue;
             }
             let mitre: Vec<&Reference> = rule

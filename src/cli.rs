@@ -15,6 +15,7 @@ use crate::audit::{
 use crate::capture_source::DeclaredSource;
 use crate::error::{OtError, Result};
 use crate::findings::augmented::augment_findings;
+use crate::trusted_writer::TrustedWriterRule;
 use otsniff_privacy::leak_detector;
 
 /// Source-label sentinel used in the markdown payload sent to the AI
@@ -261,6 +262,17 @@ pub struct AnalyzeArgs {
     /// `egress.ot_to_internet` rule is superseded by the engine.
     #[arg(long = "policy", value_name = "PATH")]
     pub policy: Option<PathBuf>,
+    /// Declare a known-good engineering-command pair (repeatable):
+    /// `SRC=DST:PROTO`, where SRC/DST are an IP address or CIDR and PROTO
+    /// is `modbus`, `cip`, `s7`, `dnp3`, or `any`. Matched pairs are
+    /// excluded from the High/Critical `ics.modbus_writes` /
+    /// `ics.cip_engineering` / `ics.s7_engineering` / `ics.dnp3_engineering`
+    /// findings and rolled up instead into the Info-severity
+    /// `ics.trusted_writer_activity` finding. This is an UNVERIFIED
+    /// operator assertion, not authentication — IPs are spoofable and
+    /// otsniff is a passive PCAP tool (ADR-0015, P1-12).
+    #[arg(long = "trusted-writer", value_name = "SRC=DST:PROTO")]
+    pub trusted_writers: Vec<TrustedWriterRule>,
     /// Print parse summary + (with `--ai`) privacy ledger lines to stderr.
     #[arg(short = 'v', long = "verbose")]
     pub verbose: bool,
@@ -752,9 +764,25 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         None => None,
     };
     let findings = match &conformance {
-        Some(result) => crate::findings::run_with_conformance(&obs, &ot_subnets, result),
-        None => crate::findings::run_all(&obs, &ot_subnets),
+        Some(result) => {
+            crate::findings::run_with_conformance(&obs, &ot_subnets, result, &args.trusted_writers)
+        }
+        None => {
+            crate::findings::run_all_with_trusted_writers(&obs, &ot_subnets, &args.trusted_writers)
+        }
     };
+    // A declaration that matched nothing (typo, or a decommissioned host)
+    // should be visible, not silent (docs/specs/trusted-writer-allowlist.md
+    // "Behaviour on the report").
+    if !args.trusted_writers.is_empty() {
+        let matched =
+            crate::findings::trusted_writer_matched_rule_indices(&obs, &args.trusted_writers);
+        for rule in crate::trusted_writer::unmatched(&args.trusted_writers, &matched) {
+            eprintln!(
+                "WARNING: --trusted-writer '{rule}' matched no engineering-class traffic in this capture"
+            );
+        }
+    }
     let conformance_html = conformance
         .as_ref()
         .map(crate::report::render_conformance_section);
@@ -1068,6 +1096,16 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         },
         // S-5.03 AC-006: populate the augment_pass field from the returned summary.
         augment_pass: augment_summary_opt,
+        // P1-12 / ADR-0015 D4: count + digest only, never the declared
+        // CIDRs/addresses.
+        trusted_writers: if args.trusted_writers.is_empty() {
+            None
+        } else {
+            Some(audit::TrustedWriterAuditSummary {
+                count: args.trusted_writers.len(),
+                digest: crate::trusted_writer::digest(&args.trusted_writers),
+            })
+        },
     };
     let log_json = serde_json::to_string_pretty(&log)?;
     leak_detector::ensure_clean(&log_json)?;

@@ -11,12 +11,13 @@ findings. Binary name: `otsniff`.
 - Modbus/TCP, EtherNet/IP, S7Comm, and DNP3 protocol decoding
   (function-code level), plus DHCP / LDAP / RDP recognizers for inventory
   and credential findings
-- **23 rule-based findings** (full catalog in `docs/RULES.md`): plaintext
+- **24 rule-based findings** (full catalog in `docs/RULES.md`): plaintext
   credentials (rolled up by kind), LDAP simple-bind, RDP-without-NLA,
   internet egress from OT subnets, ICS engineering commands
   (Modbus / EtherNet-IP CIP / S7Comm / DNP3), SMBv1, stale TLS, weak TLS
   ciphers, NTLMv1, DNS/NTP to non-OT destinations, port-scan + Modbus
-  unit-ID-sweep recon, unexpected protocols on OT VLANs, and three
+  unit-ID-sweep recon, unexpected protocols on OT VLANs, an Info-severity
+  trusted-writer-activity rollup (`--trusted-writer`, ADR-0015), and three
   policy-gated `zonewarden.*` segmentation verdicts
 - **Zonewarden segmentation conformance** (ADR-0013) — declarative
   IEC 62443 zone/conduit policy checking with the Purdue-3.5 IDMZ
@@ -161,7 +162,7 @@ proofs (Kani), parser fuzz harnesses under `fuzz/`, and an 80%-kill
 ## Subcommands
 
 ```
-otsniff analyze <PCAP> -o report.html [--ai] [--policy zones.yaml] [--audit-log X] [--md X] [--json X] [--map X] [--ot-subnet ...] [--source-type ...] [--model M]
+otsniff analyze <PCAP> -o report.html [--ai] [--policy zones.yaml] [--trusted-writer SRC=DST:PROTO ...] [--audit-log X] [--md X] [--json X] [--map X] [--ot-subnet ...] [--source-type ...] [--model M]
 otsniff diff <BASELINE> <CURRENT> --baseline-map A.json --current-map B.json -o diff.html [--policy zones.yaml] [--flow-shift-multiplier N] [--ot-subnet ...]
 otsniff zonewarden suggest <PCAP> [--ot-subnet ...]      # draft a policy from the inventory
 otsniff scrub   <PCAP> -o report.md --map map.json [--ot-subnet ...] [--source-type ...]
@@ -224,10 +225,8 @@ See `docs/adr/` for rationale:
 - **ADR-0012** — Audit log auto-derives its path from `-o`
 - **ADR-0013** — Fold Zonewarden in as a segmentation module (pure engine as a workspace sub-crate)
 - **ADR-0014** — MITRE ATT&CK for ICS mapping lives in the rule catalog
+- **ADR-0015** — Operator-declared trusted writers may lower finding severity (never suppress; `--trusted-writer`)
 - **ADR-0016** — Extract the privacy/scrub layer into `crates/otsniff-privacy`
-
-(ADR-0015 — operator-declared trusted writers — is spec-written but not yet
-implemented; see `docs/adr/0015-operator-declared-trusted-writers.md`.)
 
 When adding a non-trivial feature or making an architectural decision, add a new ADR.
 

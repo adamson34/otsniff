@@ -52,6 +52,20 @@ pub struct AuditLog {
     /// `None` when `--ai` is not set or when the augment pass was not
     /// requested for this run.
     pub augment_pass: Option<AugmentInvocationSummary>,
+    /// Operator-declared trusted-writer allowlist (P1-12, ADR-0015 D4).
+    /// Count + digest only — never the raw CIDRs/addresses, so this
+    /// compliance artifact never carries host identifiers. `None` when
+    /// `--trusted-writer` was not passed for this run.
+    pub trusted_writers: Option<TrustedWriterAuditSummary>,
+}
+
+/// Count + SHA-256 digest of the declared `--trusted-writer` rule list
+/// (P1-12, ADR-0015 D4). Lets two runs be compared for "was the same
+/// allowlist in force?" without the audit log carrying addresses.
+#[derive(Debug, Clone, Serialize)]
+pub struct TrustedWriterAuditSummary {
+    pub count: usize,
+    pub digest: String,
 }
 
 /// SHA-256 hashes and metadata for the AI augment pass (S-5.03).
@@ -225,6 +239,7 @@ mod tests {
                 pseudonyms_unmapped: 0,
             },
             augment_pass: None,
+            trusted_writers: None,
         };
         let json = serde_json::to_string_pretty(&log).unwrap();
         // The leak detector — the same one the analyze pipeline uses —
@@ -278,6 +293,7 @@ mod tests {
             },
             unscrub: UnscrubSummary::default(),
             augment_pass: None,
+            trusted_writers: None,
         };
 
         assert_eq!(log.schema_version, 2, "schema_version must bump to 2");

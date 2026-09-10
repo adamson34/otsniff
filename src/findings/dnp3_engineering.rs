@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use ipnet::IpNet;
 
 use crate::observe::Observations;
+use crate::trusted_writer::{classify, TrustedWriterRule, WriterProto};
 
 use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
@@ -41,11 +42,19 @@ pub const METADATA: RuleMetadata = RuleMetadata {
     ],
 };
 
-pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
+pub fn detect(
+    obs: &Observations,
+    ot_subnets: &[IpNet],
+    trusted_writers: &[TrustedWriterRule],
+) -> Vec<Finding> {
+    // D2 (docs/specs/trusted-writer-allowlist.md): pairs matching a
+    // `--trusted-writer` declaration are excluded here and rolled up
+    // separately into `ics.trusted_writer_activity`.
     let eng: Vec<_> = obs
         .dnp3_events
         .iter()
         .filter(|e| e.engineering_class)
+        .filter(|e| classify(trusted_writers, e.src, e.dst, WriterProto::Dnp3).is_none())
         .collect();
 
     if eng.is_empty() {

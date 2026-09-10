@@ -4,6 +4,7 @@ use std::net::IpAddr;
 use ipnet::IpNet;
 
 use crate::observe::Observations;
+use crate::trusted_writer::{classify, TrustedWriterRule, WriterProto};
 
 use super::{host_label, Finding, Reference, ReferenceKind, RuleMetadata, Severity};
 
@@ -98,25 +99,38 @@ pub const S7_METADATA: RuleMetadata = RuleMetadata {
     ],
 };
 
-pub fn detect(obs: &Observations, ot_subnets: &[IpNet]) -> Vec<Finding> {
+pub fn detect(
+    obs: &Observations,
+    ot_subnets: &[IpNet],
+    trusted_writers: &[TrustedWriterRule],
+) -> Vec<Finding> {
     let mut out = Vec::new();
 
+    // D2 (docs/specs/trusted-writer-allowlist.md): pairs matching a
+    // `--trusted-writer` declaration are excluded here and rolled up
+    // separately into `ics.trusted_writer_activity`
+    // (findings/trusted_writer_activity.rs) instead. Severity below is
+    // computed over these untrusted-only sets, so a single trusted
+    // external writer can no longer keep this finding Critical forever.
     let modbus_eng: Vec<_> = obs
         .modbus_events
         .iter()
         .filter(|e| e.engineering_class)
+        .filter(|e| classify(trusted_writers, e.src, e.dst, WriterProto::Modbus).is_none())
         .collect();
 
     let enip_eng: Vec<_> = obs
         .enip_events
         .iter()
         .filter(|e| e.engineering_class)
+        .filter(|e| classify(trusted_writers, e.src, e.dst, WriterProto::Cip).is_none())
         .collect();
 
     let s7_eng: Vec<_> = obs
         .s7_events
         .iter()
         .filter(|e| e.engineering_class)
+        .filter(|e| classify(trusted_writers, e.src, e.dst, WriterProto::S7).is_none())
         .collect();
 
     if !modbus_eng.is_empty() {
@@ -415,6 +429,118 @@ fn format_ip_list(ips: &[IpAddr]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::observe::ModbusEvent;
+    use chrono::Utc;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    fn ot_subnets() -> Vec<IpNet> {
+        vec!["10.0.0.0/8".parse().unwrap()]
+    }
+
+    fn modbus_event(src: &str, dst: &str) -> ModbusEvent {
+        ModbusEvent {
+            ts: Utc::now(),
+            src: ip(src),
+            dst: ip(dst),
+            function_code: 0x10,
+            label: "Write Multiple Registers".to_string(),
+            engineering_class: true,
+        }
+    }
+
+    fn rule(s: &str) -> TrustedWriterRule {
+        s.parse().unwrap()
+    }
+
+    // D2 matrix (docs/specs/trusted-writer-allowlist.md): partition, never
+    // downgrade the whole finding.
+
+    #[test]
+    fn d2_all_untrusted_unchanged() {
+        let mut obs = Observations::default();
+        obs.modbus_events
+            .push(modbus_event("10.20.0.5", "10.20.0.10"));
+        let findings = detect(&obs, &ot_subnets(), &[]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].id, "ics.modbus_writes");
+        assert_eq!(findings[0].severity, Severity::High);
+    }
+
+    #[test]
+    fn d2_mixed_keeps_only_untrusted_pairs_in_the_high_finding() {
+        let mut obs = Observations::default();
+        obs.modbus_events
+            .push(modbus_event("10.20.0.5", "10.20.0.10")); // trusted
+        obs.modbus_events
+            .push(modbus_event("10.20.0.66", "10.20.0.10")); // untrusted
+        let rules = vec![rule("10.20.0.5=10.20.0.10:modbus")];
+        let findings = detect(&obs, &ot_subnets(), &rules);
+        assert_eq!(
+            findings.len(),
+            1,
+            "engineering_commands::detect emits only the untrusted High finding; \
+             the trusted pair rolls up separately into ics.trusted_writer_activity"
+        );
+        let f = &findings[0];
+        assert_eq!(f.id, "ics.modbus_writes");
+        assert_eq!(f.severity, Severity::High);
+        assert!(f.evidence.iter().any(|l| l.contains("10.20.0.66")));
+        assert!(
+            !f.evidence.iter().any(|l| l.starts_with("10.20.0.5 ")),
+            "trusted pair must not appear as a source in the High finding's evidence: {:?}",
+            f.evidence
+        );
+    }
+
+    #[test]
+    fn d2_all_trusted_suppresses_the_high_finding() {
+        let mut obs = Observations::default();
+        obs.modbus_events
+            .push(modbus_event("10.20.0.5", "10.20.0.10"));
+        let rules = vec![rule("10.20.0.5=10.20.0.10:modbus")];
+        let findings = detect(&obs, &ot_subnets(), &rules);
+        assert!(
+            findings.is_empty(),
+            "when every pair is trusted, ics.modbus_writes must not fire at all — \
+             only the Info rollup does (a separate detector)"
+        );
+    }
+
+    #[test]
+    fn d2_declaration_matching_nothing_leaves_finding_untouched() {
+        let mut obs = Observations::default();
+        obs.modbus_events
+            .push(modbus_event("10.20.0.5", "10.20.0.10"));
+        let rules = vec![rule("9.9.9.9=9.9.9.8:modbus")];
+        let findings = detect(&obs, &ot_subnets(), &rules);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, Severity::High);
+    }
+
+    /// D2 note: the High→Critical escalation for an out-of-zone source must
+    /// be computed over the untrusted pairs only, or a single trusted
+    /// external writer would keep the finding Critical forever.
+    #[test]
+    fn d2_critical_escalation_ignores_trusted_external_sources() {
+        let mut obs = Observations::default();
+        // Outside the 10.0.0.0/8 OT subnet, but declared trusted.
+        obs.modbus_events
+            .push(modbus_event("203.0.113.9", "10.20.0.10"));
+        obs.modbus_events
+            .push(modbus_event("10.20.0.7", "10.20.0.10")); // untrusted, in-zone
+        let rules = vec![rule("203.0.113.9=10.20.0.10:modbus")];
+        let findings = detect(&obs, &ot_subnets(), &rules);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].severity,
+            Severity::High,
+            "the trusted external source must not escalate the remaining untrusted, \
+             in-zone pair to Critical"
+        );
+    }
 
     /// AC-006 Red Gate: S7_METADATA.trigger must NOT mention "password".
     /// The word crept in as an erroneous classifier label ("password operations")

@@ -1,0 +1,37 @@
+---
+source: tests/snapshot.rs
+expression: relevant
+---
+[
+  {
+    "id": "ics.modbus_writes",
+    "severity": "High",
+    "title": "Modbus engineering-class commands on the wire",
+    "summary": "1 write/diagnostic Modbus call(s) observed across 1 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.",
+    "evidence": [
+      "10.10.0.66 -> 10.10.0.10 : fc=0x06 (Write Single Register)"
+    ],
+    "recommendation": "Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.",
+    "playbook": [
+      "Identify the source host(s) physically: `10.10.0.66`. Run `show mac address-table address <mac>` on the access switch (or your switch vendor's equivalent), then walk the cable. The asset inventory in this report has the MAC for each host.",
+      "Ask the on-shift control engineer whether `10.10.0.66` is the authorized Modbus master for `10.10.0.10`. Common authorized masters: SCADA servers, Niagara N4 supervisors, RTUs polling downstream PLCs. If yes, the finding is expected — but the host hygiene (other ports open on the asset inventory) is worth a separate look.",
+      "Pull session / event logs from `10.10.0.10`. Most controllers can show which coil and register addresses were written, with timestamps. Cross-reference against change-management tickets covering the capture window.",
+      "If the source is not an authorized writer, do NOT block at the switch yet. An unexpected ACL on a Modbus path is an availability event. Coordinate with operations first — schedule the change, run it past the control engineer.",
+      "Once the unauthorized path is confirmed: ACL the switch port (or VLAN) so only the authorized writer can reach tcp/502 on the target controllers. Consider Modbus-aware filtering (DPI) in front of safety-critical PLCs."
+    ]
+  },
+  {
+    "id": "ics.trusted_writer_activity",
+    "severity": "Info",
+    "title": "Trusted engineering-command activity (operator-declared)",
+    "summary": "1 engineering-class call(s) across 1 declared client→server pair(s) matched a `--trusted-writer` declaration. Severity was reduced by operator declaration — this is not proof the traffic was authenticated.",
+    "evidence": [
+      "modbus: 10.10.0.5 -> 10.10.0.10 : fc=0x10 (Write Multiple Registers)  [trusted-writer 1]"
+    ],
+    "recommendation": "Review the declared pairs periodically; a stale entry naming a decommissioned host silently lowers severity for anyone who reuses that IP.",
+    "playbook": [
+      "This finding exists only because `--trusted-writer` was passed for this run. Confirm the declared pairs are still the correct authorized writers — an IP reassignment or decommissioned engineering workstation can make a stale declaration match an unrelated, untrusted host.",
+      "The declaration is an assertion, not a verification: it does not prove the traffic was authenticated. Treat it as a triage aid, not a compliance control."
+    ]
+  }
+]
