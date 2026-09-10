@@ -1,6 +1,6 @@
 # Trusted-writer allowlist (P1-12)
 
-**Status:** spec — not yet implemented.
+**Status:** implemented.
 **Roadmap item:** P1-12 (M).
 **ADR:** [ADR-0015](../adr/0015-operator-declared-trusted-writers.md) records the
 decision to let unverified operator assertions change finding severity.

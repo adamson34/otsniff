@@ -529,6 +529,105 @@ fn invariant_no_real_values_reach_ai_provider() {
         .expect("user message contains an unscrambled value from the scrub map");
 }
 
+/// Testing plan item 5 (docs/specs/trusted-writer-allowlist.md, "Scrub
+/// stance"): a `--trusted-writer` declaration can name a host that never
+/// appears in the capture (a typo, or a decommissioned EWS). That address
+/// is absent from the scrub map (minted only from observed values), so if
+/// it were ever rendered into the report the map-value leak check couldn't
+/// catch it — only the regex fail-closed backstop would. The design closes
+/// this "by construction": only endpoints actually matched in an observed
+/// event are rendered. This is the regression test for that guarantee.
+#[test]
+fn invariant_trusted_writer_declaration_for_unobserved_host_does_not_leak() {
+    use otsniff::findings::run_all_with_trusted_writers;
+
+    let obs = build_fixture();
+    let inventory = build_inventory(&obs);
+    // RFC 5737 TEST-NET-3 — guaranteed absent from build_fixture's hosts.
+    let rules: Vec<otsniff::trusted_writer::TrustedWriterRule> =
+        vec!["203.0.113.77=203.0.113.78:modbus".parse().unwrap()];
+    let findings = run_all_with_trusted_writers(&obs, &ot_subnets(), &rules);
+    let raw_md =
+        render_markdown(&inventory, &findings, &obs, "<scrubbed>", fixed_ts(), None).unwrap();
+    let map = build_map_at(&obs, fixed_ts());
+    let scrubbed_md = scrub_text(&raw_md, &map);
+    let user_message = format!("{}\n\n{}", prompts::DEFAULT_TASK, scrubbed_md);
+
+    leak_detector::ensure_clean(&user_message)
+        .expect("unmatched trusted-writer declaration leaked into the AI-bound payload");
+    leak_detector::ensure_no_map_values(&user_message, &map)
+        .expect("user message contains an unscrubbed value from the scrub map");
+
+    // The declared (unobserved) addresses must never appear anywhere in the
+    // report — this is the leak vector the design closes "by construction."
+    assert!(
+        !raw_md.contains("203.0.113.77") && !raw_md.contains("203.0.113.78"),
+        "an unmatched trusted-writer declaration must not be rendered anywhere in the report"
+    );
+}
+
+/// Testing plan item 4 (docs/specs/trusted-writer-allowlist.md): snapshot
+/// the D2 "mixed" case — one trusted Modbus pair, one untrusted — across
+/// JSON, markdown, and HTML.
+#[test]
+fn trusted_writer_mixed_case_snapshot() {
+    use otsniff::findings::run_all_with_trusted_writers;
+
+    let mut obs = Observations::default();
+    obs.modbus_events.push(ModbusEvent {
+        ts: fixed_ts(),
+        src: ip("10.10.0.5"),
+        dst: ip("10.10.0.10"),
+        function_code: 0x10,
+        label: "Write Multiple Registers".to_string(),
+        engineering_class: true,
+    });
+    obs.modbus_events.push(ModbusEvent {
+        ts: fixed_ts(),
+        src: ip("10.10.0.66"),
+        dst: ip("10.10.0.10"),
+        function_code: 0x06,
+        label: "Write Single Register".to_string(),
+        engineering_class: true,
+    });
+    let subnets = ot_subnets();
+    let rules: Vec<otsniff::trusted_writer::TrustedWriterRule> =
+        vec!["10.10.0.5=10.10.0.10:modbus".parse().unwrap()];
+    let findings = run_all_with_trusted_writers(&obs, &subnets, &rules);
+
+    let relevant: Vec<_> = findings
+        .iter()
+        .filter(|f| f.id == "ics.modbus_writes" || f.id == "ics.trusted_writer_activity")
+        .cloned()
+        .collect();
+    assert_eq!(
+        relevant.len(),
+        2,
+        "expected both the untrusted High finding and the trusted Info rollup"
+    );
+    insta::assert_json_snapshot!("trusted_writer_mixed_case", relevant);
+
+    let inventory = build_inventory(&obs);
+    let md = render_markdown(&inventory, &findings, &obs, "mixed.pcap", fixed_ts(), None).unwrap();
+    insta::assert_snapshot!("trusted_writer_mixed_case_md", md);
+
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "mixed.pcap",
+        fixed_ts(),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(
+        html.contains("Trusted engineering-command activity"),
+        "HTML report must render the ics.trusted_writer_activity title"
+    );
+}
+
 #[test]
 fn rule_catalog_matches_committed_rules_md() {
     // The committed `docs/RULES.md` is the auto-generated catalog. If
@@ -710,6 +809,7 @@ fn audit_log_rendered_for_an_analyze_run_carries_no_real_identifiers() {
             pseudonyms_unmapped: 0,
         },
         augment_pass: None,
+        trusted_writers: None,
     };
     let log_json = serde_json::to_string_pretty(&log).unwrap();
 
@@ -918,7 +1018,7 @@ fn dnp3_engineering_fires_on_operate_calls() {
     let subnets = ot_subnets();
 
     // Call the detector directly so failures are attributed precisely.
-    let findings = dnp3_engineering::detect(&obs, &subnets);
+    let findings = dnp3_engineering::detect(&obs, &subnets, &[]);
 
     assert!(
         !findings.is_empty(),
@@ -944,7 +1044,7 @@ fn dnp3_engineering_silent_on_empty_events() {
 
     let obs = Observations::default();
     let subnets = ot_subnets();
-    let findings = dnp3_engineering::detect(&obs, &subnets);
+    let findings = dnp3_engineering::detect(&obs, &subnets, &[]);
 
     assert!(
         findings.is_empty(),
@@ -965,6 +1065,84 @@ fn dnp3_engineering_wired_into_run_all() {
     assert!(
         dnp3_finding.is_some(),
         "run_all must include ics.dnp3_engineering when dnp3_events are present"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P1-12 / ADR-0015 — trusted-writer allowlist, D2 partition matrix
+// ---------------------------------------------------------------------------
+
+/// D2 "mixed" row for DNP3: a declaration covering one of the two
+/// master→outstation pairs in `build_dnp3_fixture` must drop that pair out
+/// of `ics.dnp3_engineering`'s evidence while leaving the other untouched.
+#[test]
+fn dnp3_trusted_writer_mixed_excludes_only_the_declared_pair() {
+    use otsniff::findings::dnp3_engineering;
+
+    let obs = build_dnp3_fixture();
+    let subnets = ot_subnets();
+    let rules = vec!["10.10.0.5=10.10.0.21:dnp3".parse().unwrap()];
+    let findings = dnp3_engineering::detect(&obs, &subnets, &rules);
+
+    assert_eq!(findings.len(), 1, "the untrusted pair still fires");
+    let f = &findings[0];
+    assert!(
+        f.evidence.iter().any(|l| l.contains("10.10.0.22")),
+        "untrusted outstation must still be present: {:?}",
+        f.evidence
+    );
+    assert!(
+        !f.evidence.iter().any(|l| l.contains("10.10.0.21")),
+        "declared-trusted outstation must be excluded from the High finding: {:?}",
+        f.evidence
+    );
+}
+
+/// D2 "all trusted" row for DNP3: declaring every observed pair suppresses
+/// `ics.dnp3_engineering` entirely — only the Info rollup fires.
+#[test]
+fn dnp3_trusted_writer_all_trusted_suppresses_the_finding() {
+    use otsniff::findings::dnp3_engineering;
+
+    let obs = build_dnp3_fixture();
+    let subnets = ot_subnets();
+    let rules = vec!["10.10.0.5=10.10.0.0/24:dnp3".parse().unwrap()];
+    let findings = dnp3_engineering::detect(&obs, &subnets, &rules);
+
+    assert!(
+        findings.is_empty(),
+        "declaring every pair trusted must suppress ics.dnp3_engineering entirely"
+    );
+}
+
+/// Wired end-to-end: `run_all_with_trusted_writers` rolls the fully-trusted
+/// DNP3 fixture into `ics.trusted_writer_activity` (Info) instead of the
+/// High `ics.dnp3_engineering` finding, and the rule catalog knows both ids.
+#[test]
+fn dnp3_trusted_writer_all_trusted_wired_into_run_all() {
+    use otsniff::findings::run_all_with_trusted_writers;
+
+    let obs = build_dnp3_fixture();
+    let subnets = ot_subnets();
+    let rules = vec!["10.10.0.5=10.10.0.0/24:dnp3".parse().unwrap()];
+    let findings = run_all_with_trusted_writers(&obs, &subnets, &rules);
+
+    assert!(
+        !findings.iter().any(|f| f.id == "ics.dnp3_engineering"),
+        "fully-trusted DNP3 activity must not also fire the High finding"
+    );
+    let info = findings
+        .iter()
+        .find(|f| f.id == "ics.trusted_writer_activity")
+        .expect("ics.trusted_writer_activity must fire when a trusted pair matched");
+    assert_eq!(info.severity, otsniff::findings::Severity::Info);
+    assert!(info.evidence.iter().any(|l| l.starts_with("dnp3")));
+
+    assert!(
+        catalog()
+            .iter()
+            .any(|r| r.id == "ics.trusted_writer_activity"),
+        "ics.trusted_writer_activity must be present in the rule catalog"
     );
 }
 
@@ -3360,6 +3538,7 @@ fn audit_log_records_augment_pass_hashes_separately() {
         },
         unscrub: otsniff::audit::UnscrubSummary::default(),
         augment_pass: Some(summary),
+        trusted_writers: None,
     };
 
     // If we got here without panic, the AuditLog structure accepted augment_pass.

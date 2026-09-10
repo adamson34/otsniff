@@ -1,8 +1,8 @@
 # ADR-0015: Operator-declared trusted writers may lower finding severity
 
 ## Status
-Proposed — spec written (`docs/specs/trusted-writer-allowlist.md`, P1-12), not
-yet implemented.
+Accepted — implemented (P1-12). See `docs/specs/trusted-writer-allowlist.md`
+for the design and `--trusted-writer SRC=DST:PROTO` on `otsniff analyze`.
 
 ## Context
 

@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**23 rules.**
+**24 rules.**
 
 ## Index
 
@@ -30,6 +30,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`boundary.ntp_external`](#boundaryntp_external) | medium | OT host syncing time to public NTP |
 | [`recon.port_scan`](#reconport_scan) | medium | Port scan — source host probing many destinations or ports |
 | [`ot.unexpected_protocols`](#otunexpected_protocols) | medium | Non-OT protocols observed touching OT subnets |
+| [`ics.trusted_writer_activity`](#icstrusted_writer_activity) | info | Trusted engineering-command activity (operator-declared) |
 | [`zonewarden.idmz_bypass`](#zonewardenidmz_bypass) | critical | IDMZ bypass — direct OT↔IT flow |
 | [`zonewarden.wrong_direction`](#zonewardenwrong_direction) | high | Conduit used in the wrong direction |
 | [`zonewarden.deny_by_default`](#zonewardendeny_by_default) | high | Cross-zone flow not permitted by any conduit |
@@ -329,6 +330,19 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **MITRE ATT&CK for ICS** — T0883 — Internet Accessible Device ([link](https://attack.mitre.org/techniques/T0883/))
 - **Spec** — ISA/IEC 62443-3-3 SR-5.1 — Network segmentation
+
+## `ics.trusted_writer_activity`
+
+**Trusted engineering-command activity (operator-declared)**
+
+- **Severity:** info
+- **Data source:** `modbus_events (where engineering_class = true)`, `enip_events (where engineering_class = true)`, `s7_events (where engineering_class = true)`, `dnp3_events (where engineering_class = true)`
+
+**Trigger.** Fires when one or more Modbus / EtherNet-IP CIP / S7Comm / DNP3 engineering-class commands match a client→server pair declared via `--trusted-writer`. This reflects an UNVERIFIED operator assertion, not evidence that the traffic was authenticated — IPs are spoofable and otsniff is a passive PCAP tool. It exists so the High/Critical engineering-command findings can report only pairs that were not declared, instead of re-flagging the same known-good writer every run.
+
+**References:**
+
+- **Spec** — ADR-0015 — Operator-declared trusted writers may lower finding severity
 
 ## `zonewarden.idmz_bypass`
 

@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Trusted-writer allowlist** (P1-12, ADR-0015): `analyze --trusted-writer
+  SRC=DST:PROTO` (repeatable) lets an operator declare a known-good
+  engineering-command pair (e.g. an EWS writing to a PLC rack) so repeat
+  captures don't flag the same expected pair High/Critical forever. SRC/DST
+  may be an IP or CIDR; PROTO is `modbus`, `cip`, `s7`, `dnp3`, or `any`.
+  Declared pairs are excluded from `ics.modbus_writes` /
+  `ics.cip_engineering` / `ics.s7_engineering` / `ics.dnp3_engineering` and
+  rolled up instead into a new Info-severity `ics.trusted_writer_activity`
+  finding — an unverified operator assertion, not proof of authentication.
+  A finding mixing trusted and untrusted pairs keeps its original severity
+  for the untrusted pairs only, so one declared pair can't mask an
+  unexpected writer sharing the same protocol. The `--ai` audit log records
+  a count + SHA-256 digest of the declared rules, never the raw
+  CIDRs/addresses. A declaration matching no traffic in the capture warns
+  on stderr. Rule catalog now lists **24** rules.
 - **New workspace crate `crates/otsniff-privacy`** (ADR-0016): the pseudonym
   scrub/unscrub mechanics and the fail-closed leak detector, extracted so a
   planned companion tool ("otsniff-hunt") can reuse the same

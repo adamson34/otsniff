@@ -1,0 +1,72 @@
+---
+source: tests/snapshot.rs
+expression: md
+---
+# otsniff report
+
+_Source: `mixed.pcap` · Generated: 2026-05-07 12:00:00 UTC · otsniff v0.7.0-dev.1_
+
+## Summary
+
+- **Packets parsed:** 0
+- **Payload bytes:** 0.0 B
+- **Hosts seen:** 0 (0 in OT zones)
+- **Findings:** 2
+- **Capture window:** (no timestamps)
+
+## Findings
+
+### [HIGH] Modbus engineering-class commands on the wire
+
+1 write/diagnostic Modbus call(s) observed across 1 client→server pair(s). Modbus has no authentication; any host that can reach a controller on tcp/502 can change plant state.
+
+**Evidence (1 sample(s)):**
+```
+10.10.0.66 -> 10.10.0.10 : fc=0x06 (Write Single Register)
+```
+
+**Detection criteria.** Fires when one or more Modbus/TCP requests have a function code that writes or changes device state. Function-code level only — no payload deep-parse. The engineering class includes: 0x05 (Write Single Coil), 0x06 (Write Single Register), 0x0F (Write Multiple Coils), 0x10 (Write Multiple Registers), 0x16 (Mask Write Register), 0x17 (Read/Write Multiple Registers), 0x08 (Diagnostics — includes Restart Communication), 0x15 (Write File Record), and FC 8 sub-function 1 (Force Listen Only Mode). Modbus has no authentication; any host reaching tcp/502 can issue these.
+
+**MITRE ATT&CK for ICS.** [T0836 — Modify Parameter](https://attack.mitre.org/techniques/T0836/), [T0855 — Unauthorized Command Message](https://attack.mitre.org/techniques/T0855/)
+
+**Recommendation:** Enumerate which hosts are allowed to write to controllers and ACL the rest at the switch/firewall. Consider Modbus-aware filtering (deep-packet inspection) in front of safety-critical PLCs.
+
+**Investigation playbook:**
+
+1. Identify the source host(s) physically: `10.10.0.66`. Run `show mac address-table address <mac>` on the access switch (or your switch vendor's equivalent), then walk the cable. The asset inventory in this report has the MAC for each host.
+2. Ask the on-shift control engineer whether `10.10.0.66` is the authorized Modbus master for `10.10.0.10`. Common authorized masters: SCADA servers, Niagara N4 supervisors, RTUs polling downstream PLCs. If yes, the finding is expected — but the host hygiene (other ports open on the asset inventory) is worth a separate look.
+3. Pull session / event logs from `10.10.0.10`. Most controllers can show which coil and register addresses were written, with timestamps. Cross-reference against change-management tickets covering the capture window.
+4. If the source is not an authorized writer, do NOT block at the switch yet. An unexpected ACL on a Modbus path is an availability event. Coordinate with operations first — schedule the change, run it past the control engineer.
+5. Once the unauthorized path is confirmed: ACL the switch port (or VLAN) so only the authorized writer can reach tcp/502 on the target controllers. Consider Modbus-aware filtering (DPI) in front of safety-critical PLCs.
+
+_id: `ics.modbus_writes`_
+
+### [INFO] Trusted engineering-command activity (operator-declared)
+
+1 engineering-class call(s) across 1 declared client→server pair(s) matched a `--trusted-writer` declaration. Severity was reduced by operator declaration — this is not proof the traffic was authenticated.
+
+**Evidence (1 sample(s)):**
+```
+modbus: 10.10.0.5 -> 10.10.0.10 : fc=0x10 (Write Multiple Registers)  [trusted-writer 1]
+```
+
+**Detection criteria.** Fires when one or more Modbus / EtherNet-IP CIP / S7Comm / DNP3 engineering-class commands match a client→server pair declared via `--trusted-writer`. This reflects an UNVERIFIED operator assertion, not evidence that the traffic was authenticated — IPs are spoofable and otsniff is a passive PCAP tool. It exists so the High/Critical engineering-command findings can report only pairs that were not declared, instead of re-flagging the same known-good writer every run.
+
+**Recommendation:** Review the declared pairs periodically; a stale entry naming a decommissioned host silently lowers severity for anyone who reuses that IP.
+
+**Investigation playbook:**
+
+1. This finding exists only because `--trusted-writer` was passed for this run. Confirm the declared pairs are still the correct authorized writers — an IP reassignment or decommissioned engineering workstation can make a stale declaration match an unrelated, untrusted host.
+2. The declaration is an assertion, not a verification: it does not prove the traffic was authenticated. Treat it as a triage aid, not a compliance control.
+
+_id: `ics.trusted_writer_activity`_
+
+## Asset inventory
+
+| IP | Hostname | Zone | MAC | Vendor | Inferred role | Protocols | Packets | Bytes |
+|----|----------|------|-----|--------|---------------|-----------|---------|-------|
+
+## Top flows
+
+| Source | Destination | Protocol | Conns | Packets | Bytes |
+|--------|-------------|----------|-------|---------|-------|

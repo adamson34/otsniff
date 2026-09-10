@@ -594,12 +594,19 @@ common operator footgun.
 (window-mismatch warning), snapshot tests.
 **Deps:** P1-3 base diff (shipped).
 
-### P1-12: Trusted-writer / engineering-allowlist suppression (M) — 🔵 spec written
+### P1-12: Trusted-writer / engineering-allowlist suppression (M) — ✅ shipped
 
 Spec: [`docs/specs/trusted-writer-allowlist.md`](specs/trusted-writer-allowlist.md).
 Decision record: [ADR-0015](adr/0015-operator-declared-trusted-writers.md) —
 operator assertions may lower severity but never suppress, and a finding mixing
 trusted and untrusted pairs keeps its severity for the untrusted ones.
+
+Shipped as `analyze --trusted-writer SRC=DST:PROTO` (repeatable). Matched
+pairs are excluded from the four `ics.*` engineering-command findings and
+rolled up into the new Info-severity `ics.trusted_writer_activity` finding
+(D2/D3 in the spec); the `--ai` audit log records a count + SHA-256 digest
+of the declared rules, never the raw addresses (D4). Rule catalog is now
+24 rules.
 
 
 Today the `ics.modbus_writes` (and analogous `ics.s7_engineering`,
