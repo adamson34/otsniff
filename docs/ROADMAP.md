@@ -924,7 +924,11 @@ password"), never the captured value — see the doc comment in
 
 `otsniff.example.com` — upload a PCAP, get a report. Real engineering:
 hosting, file-size limits, rate limiting, cost management, abuse vectors,
-TOS. Defer until and unless there's a demonstrated need.
+TOS. Defer until and unless there's a demonstrated need. **Distinct from
+P2-9** (`otsniff-web`, shipped): that's a *local*, single-operator
+companion app with no hosting/multi-tenant/TOS surface at all — this item
+is specifically about a hosted, public, multi-tenant service, which is a
+different and much larger commitment.
 
 ### P2-5: Native packaging (S each, M total)
 
@@ -996,6 +1000,35 @@ are a long-tail extension rather than a workaround. **Touches:** new
 `rules/` module, YAML schema in `src/rules/schema.rs`, snapshot
 tests on the deserializer. **Deps:** none functionally; conceptually
 the catalog needs to be richer first.
+
+### P2-9: Local web companion app (`otsniff-web`) (M) — ✅ shipped (ADR-0018)
+
+`cargo run -p otsniff-web -- --port 7878 --data-dir ./otsniff-web-data`
+starts a local `127.0.0.1`-only web UI: upload a PCAP, run the same
+rules-based `analyze` pipeline the CLI uses (in-process, no subprocess),
+view the rendered report in-browser, browse a dashboard of past runs,
+download each run's HTML/JSON. New workspace crate `crates/otsniff-web`
+so `axum`/`tokio` stay entirely off the CLI's dependency tree; the core
+pipeline stays fully synchronous (ADR-0008 untouched) — the web crate's
+own async layer calls it via `spawn_blocking`.
+
+**Why now, not on the roadmap before:** direct user ask for a non-CLI way
+to run otsniff — not the otsniff-hunt threat-hunting vision (ADR-0016),
+which is a different, larger, not-yet-started thing that ingests live
+external data; this is a UI over the existing one-shot `analyze` pipeline.
+**Distinct from P2-4** (web playground) — see that entry.
+
+**Deferred (v1 scope cut):** `--ai` support (the provider machinery
+already exists and would drop in easily, but needs UI for
+model/provider selection); diffing two past runs from the dashboard;
+direct Anthropic HTTP API integration (the actual "networking to go out"
+motivation for choosing a web app over a desktop app — natural v2 once
+the server can hold an API key); non-localhost deployment / auth.
+**Touches:** `crates/otsniff-web/` (`pipeline.rs` reuses the root crate's
+public pipeline functions in-process, `store.rs` is a flat-JSON run
+index, `main.rs`/`lib.rs` the axum app), `templates/dashboard.html`.
+**Deps:** `axum`, `tokio`, plus `askama`/`serde`/`clap`/`ipnet`/`chrono`
+already used elsewhere in the workspace.
 
 ---
 

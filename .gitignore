@@ -33,6 +33,9 @@ out/
 *.audit.json
 *.scrubbed.md
 
+# otsniff-web run data (uploaded PCAPs + generated reports) — never committed
+otsniff-web-data/
+
 # OS / editor
 .DS_Store
 .idea/
