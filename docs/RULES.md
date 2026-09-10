@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**24 rules.**
+**25 rules.**
 
 ## Index
 
@@ -31,6 +31,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`recon.port_scan`](#reconport_scan) | medium | Port scan — source host probing many destinations or ports |
 | [`ot.unexpected_protocols`](#otunexpected_protocols) | medium | Non-OT protocols observed touching OT subnets |
 | [`ics.trusted_writer_activity`](#icstrusted_writer_activity) | info | Trusted engineering-command activity (operator-declared) |
+| [`attack.spoofed_sources`](#attackspoofed_sources) | high | Spoofed-source flood — mass single-packet ghost hosts |
 | [`zonewarden.idmz_bypass`](#zonewardenidmz_bypass) | critical | IDMZ bypass — direct OT↔IT flow |
 | [`zonewarden.wrong_direction`](#zonewardenwrong_direction) | high | Conduit used in the wrong direction |
 | [`zonewarden.deny_by_default`](#zonewardendeny_by_default) | high | Cross-zone flow not permitted by any conduit |
@@ -343,6 +344,19 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 **References:**
 
 - **Spec** — ADR-0015 — Operator-declared trusted writers may lower finding severity
+
+## `attack.spoofed_sources`
+
+**Spoofed-source flood — mass single-packet ghost hosts**
+
+- **Severity:** high
+- **Data source:** `hosts (macs, protocols)`, `flows (per-(src,dst) packet counts)`
+
+**Trigger.** Fires when more than 500 distinct source IPs each match the spoofed-source fingerprint: exactly one packet sent, zero packets ever received in reply, no MAC address captured, and no protocol enrichment. A real host's Ethernet framing records a MAC on every packet, and a real bidirectional exchange gets at least one reply; this shape — thousands of one-shot, unreachable 'hosts' — is what a randomized-source SYN flood or ping flood looks like on the wire, not genuine distinct hosts.
+
+**References:**
+
+- **MITRE ATT&CK for ICS** — T0814 — Denial of Service ([link](https://attack.mitre.org/techniques/T0814/))
 
 ## `zonewarden.idmz_bypass`
 

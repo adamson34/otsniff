@@ -36,6 +36,10 @@ struct ReportView {
     ot_asset_count: usize,
     findings: Vec<FindingView>,
     assets: Vec<AssetView>,
+    /// Set when the inventory table was capped to the top hosts by traffic
+    /// (P1-10, `inventory::capped_for_render`). `None` for the common case
+    /// (at or under the cap), so existing report output is unchanged.
+    assets_capped_note: Option<String>,
     top_flows: Vec<TopFlow>,
     /// Pre-rendered HTML for the AI section, if any. Already passed
     /// through `ai::html_render::render_safe`, so raw HTML events
@@ -162,8 +166,12 @@ pub fn render_html(
         })
         .collect();
 
-    let assets_view: Vec<AssetView> = inventory
-        .iter()
+    // P1-10: cap the rendered table to the top hosts by traffic when the
+    // inventory is implausibly large (spoofed-source flood). `asset_count`
+    // / `ot_asset_count` above still reflect the full, uncapped inventory.
+    let (assets_to_render, assets_capped_note) = crate::inventory::capped_for_render(inventory);
+    let assets_view: Vec<AssetView> = assets_to_render
+        .into_iter()
         .map(|a| AssetView {
             ip: a.ip.to_string(),
             hostname: a.hostname.clone().unwrap_or_else(|| "—".to_string()),
@@ -201,6 +209,7 @@ pub fn render_html(
         ot_asset_count: inventory.iter().filter(|a| a.in_ot_zone).count(),
         findings: findings_view,
         assets: assets_view,
+        assets_capped_note,
         top_flows,
         ai_section,
         conformance_section,

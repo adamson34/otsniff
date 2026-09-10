@@ -11,12 +11,13 @@ findings. Binary name: `otsniff`.
 - Modbus/TCP, EtherNet/IP, S7Comm, and DNP3 protocol decoding
   (function-code level), plus DHCP / LDAP / RDP recognizers for inventory
   and credential findings
-- **24 rule-based findings** (full catalog in `docs/RULES.md`): plaintext
+- **25 rule-based findings** (full catalog in `docs/RULES.md`): plaintext
   credentials (rolled up by kind), LDAP simple-bind, RDP-without-NLA,
   internet egress from OT subnets, ICS engineering commands
   (Modbus / EtherNet-IP CIP / S7Comm / DNP3), SMBv1, stale TLS, weak TLS
   ciphers, NTLMv1, DNS/NTP to non-OT destinations, port-scan + Modbus
-  unit-ID-sweep recon, unexpected protocols on OT VLANs, an Info-severity
+  unit-ID-sweep recon, unexpected protocols on OT VLANs, spoofed-source
+  flood detection with an inventory render cap (P1-10), an Info-severity
   trusted-writer-activity rollup (`--trusted-writer`, ADR-0015), and three
   policy-gated `zonewarden.*` segmentation verdicts
 - **Zonewarden segmentation conformance** (ADR-0013) — declarative

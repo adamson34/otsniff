@@ -2757,6 +2757,149 @@ fn ics_modbus_unit_id_sweep_wired_into_run_all() {
 }
 
 // ---------------------------------------------------------------------------
+// P1-10 — attack.spoofed_sources wiring + inventory render cap
+// ---------------------------------------------------------------------------
+
+/// Builds a synthetic spoofed-source flood: `n` single-packet, no-reply,
+/// no-MAC, no-protocol "hosts" all hitting one real target, plus the
+/// target itself (which has real traffic and so anchors the top of the
+/// traffic-sorted inventory).
+fn build_spoofed_flood_fixture(n: u32) -> Observations {
+    use otsniff::observe::{FlowKey, FlowObs};
+
+    let mut obs = Observations::default();
+    let ts = fixed_ts();
+    let target = ip("10.0.0.1");
+
+    obs.hosts.insert(
+        target,
+        HostObs {
+            ip: target,
+            macs: vec![[0, 1, 2, 3, 4, 5]],
+            protocols: HashSet::from(["tcp".to_string()]),
+            first_seen: ts,
+            last_seen: ts,
+            packets: n as u64,
+            bytes: 0,
+            in_ot_zone: false,
+        },
+    );
+
+    for i in 0..n {
+        let src = IpAddr::V4(Ipv4Addr::from(0x0A140000u32 + i)); // 10.20.x.x range
+        obs.hosts.insert(
+            src,
+            HostObs {
+                ip: src,
+                macs: Vec::new(),
+                protocols: HashSet::new(),
+                first_seen: ts,
+                last_seen: ts,
+                packets: 1,
+                bytes: 60,
+                in_ot_zone: false,
+            },
+        );
+        let key = FlowKey {
+            src,
+            dst: target,
+            dst_port: 80,
+            proto: 6,
+        };
+        obs.flows.insert(
+            format!("{src}->{target}:80/6"),
+            FlowObs {
+                key,
+                packets: 1,
+                bytes: 60,
+                first_seen: ts,
+                last_seen: ts,
+                label: None,
+                unique_src_ports: HashSet::new(),
+            },
+        );
+    }
+    obs
+}
+
+/// Regression guard: above the K > 500 threshold, `run_all` must include
+/// `attack.spoofed_sources`, and its severity/id match the catalog.
+#[test]
+fn attack_spoofed_sources_wired_into_run_all() {
+    let obs = build_spoofed_flood_fixture(501);
+    let findings = run_all(&obs, &ot_subnets());
+
+    let f = findings
+        .iter()
+        .find(|f| f.id == "attack.spoofed_sources")
+        .expect("run_all must include attack.spoofed_sources above the K>500 threshold");
+    assert_eq!(f.severity, otsniff::findings::Severity::High);
+    assert!(
+        catalog().iter().any(|r| r.id == "attack.spoofed_sources"),
+        "attack.spoofed_sources must be present in the rule catalog"
+    );
+}
+
+/// End-to-end: a flood large enough to blow past `inventory::RENDER_CAP`
+/// (100) renders a capped table with a summary note in both HTML and
+/// markdown, while the stats-bar host count stays the full, uncapped
+/// total (P1-10 part 2 — the cap is a rendering decision, not a detection
+/// or inventory-size change).
+#[test]
+fn spoofed_flood_caps_the_rendered_inventory_but_not_the_host_count() {
+    let n = otsniff::inventory::RENDER_CAP as u32 + 20;
+    let obs = build_spoofed_flood_fixture(n);
+    let inventory = build_inventory(&obs);
+    // n spoofed sources + 1 real target.
+    assert_eq!(inventory.len(), n as usize + 1);
+
+    let findings = run_all(&obs, &ot_subnets());
+    let html = render_html(
+        &inventory,
+        &findings,
+        &obs,
+        "flood.pcap",
+        fixed_ts(),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+
+    // Stats-bar count reflects the FULL inventory, not the capped table.
+    assert!(
+        html.contains(&format!("<div class=\"n\">{}</div>", inventory.len())),
+        "the top-of-report host count must stay the full, uncapped total"
+    );
+    // The table itself is capped, and says so.
+    assert!(
+        html.contains(&format!(
+            "Asset inventory <span class=\"row-count\">({})</span>",
+            otsniff::inventory::RENDER_CAP
+        )),
+        "the rendered table row-count must reflect the cap, not the full inventory"
+    );
+    assert!(
+        html.contains("Showing the top 100 hosts by traffic"),
+        "HTML must carry the capped-inventory note"
+    );
+    // The real target (highest packet count) must survive the cap — it's
+    // sorted to the top by traffic, not dropped as a "low-volume" ghost.
+    assert!(html.contains(&target_ip_needle()));
+
+    let md = render_markdown(&inventory, &findings, &obs, "flood.pcap", fixed_ts(), None).unwrap();
+    assert!(
+        md.contains("Showing the top 100 hosts by traffic"),
+        "markdown must carry the capped-inventory note"
+    );
+    assert!(md.contains(&target_ip_needle()));
+}
+
+fn target_ip_needle() -> String {
+    "10.0.0.1".to_string()
+}
+
+// ---------------------------------------------------------------------------
 // BC-8.01.005 — S-5.07: Collapsible finding cards
 //
 // All five tests render the same fixture through render_html and assert
