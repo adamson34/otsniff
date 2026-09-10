@@ -1,0 +1,28 @@
+[package]
+name = "otsniff-web"
+version = "0.1.0"
+description = "Local web companion app for otsniff — upload a PCAP, run analyze/diff in a browser (ADR-0018)."
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/adamson34/otsniff"
+publish = false
+
+[[bin]]
+name = "otsniff-web"
+path = "src/main.rs"
+
+[dependencies]
+otsniff = { path = "../.." }
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
+askama = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+ipnet = "2.10"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["multipart", "rustls-tls"] }
+tempfile = "3"

@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`otsniff-web` — local web companion app** (P2-9, ADR-0018, new
+  workspace crate): `cargo run -p otsniff-web -- --port 7878 --data-dir
+  ./otsniff-web-data` starts a `127.0.0.1`-only web UI — upload a PCAP,
+  run the same rules-based `analyze` pipeline in-process (no
+  subprocess), view the report in-browser, and browse a dashboard of
+  past runs with HTML/JSON downloads. `axum`/`tokio` stay entirely off
+  the CLI's own dependency tree (new crate boundary, same pattern as
+  `zonewarden`/`otsniff-privacy`); the core analyze pipeline stays fully
+  synchronous (ADR-0008 untouched) — the web crate's async layer calls
+  it via `spawn_blocking`. `--ai` support, diffing past runs, and direct
+  Anthropic API integration are deliberately deferred past v1; see
+  `docs/ROADMAP.md` P2-9.
 - **`creds.default_or_weak_credentials` finding** (P2-3, partial, Critical):
   fires on an FTP anonymous login, or an HTTP Basic password that's empty
   or matches a small watchlist of textbook-weak values (admin, password,

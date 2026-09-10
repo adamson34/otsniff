@@ -4,7 +4,7 @@
 # core (ADR-0016). resolver = "2" is set explicitly: a workspace with a root
 # package otherwise defaults to resolver "1".
 [workspace]
-members = ["crates/zonewarden", "crates/otsniff-privacy"]
+members = ["crates/zonewarden", "crates/otsniff-privacy", "crates/otsniff-web"]
 resolver = "2"
 
 [package]

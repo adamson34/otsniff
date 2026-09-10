@@ -55,12 +55,14 @@ list with rationale per item.
 
 ## Architecture
 
-otsniff is a three-member Cargo workspace: the `otsniff` binary crate at the
+otsniff is a four-member Cargo workspace: the `otsniff` binary crate at the
 root, the pure, Kani-verified `zonewarden` engine under `crates/`
 (ADR-0013 keeps it a crate boundary so its no-I/O guarantee and proofs stay
-isolated), and the pure, Kani-verified `otsniff-privacy` crate (ADR-0016,
+isolated), the pure, Kani-verified `otsniff-privacy` crate (ADR-0016,
 same rationale — a formally-verified pure core that a second, not-yet-started
-consumer needs).
+consumer needs), and `otsniff-web` (ADR-0018), a local web companion app
+that depends on the root crate as a library and calls its analyze
+pipeline in-process.
 
 ```
 src/
@@ -109,12 +111,17 @@ src/
 crates/
 ├── zonewarden/         # Pure segmentation engine (resolver, classifier, idmz,
 │                       #   multicast, aggregator, digest, validator) + 7 Kani proofs
-└── otsniff-privacy/    # Pure privacy/scrub core (ScrubMap, scrub_text/
-                        #   unscrub_text, leak_detector) + Kani proofs (ADR-0016).
-                        #   otsniff-specific population (build_map/merge_map)
-                        #   stays in src/scrub.rs; this crate has zero
-                        #   otsniff-specific types so a second consumer
-                        #   ("otsniff-hunt") can depend on it directly.
+├── otsniff-privacy/    # Pure privacy/scrub core (ScrubMap, scrub_text/
+│                       #   unscrub_text, leak_detector) + Kani proofs (ADR-0016).
+│                       #   otsniff-specific population (build_map/merge_map)
+│                       #   stays in src/scrub.rs; this crate has zero
+│                       #   otsniff-specific types so a second consumer
+│                       #   ("otsniff-hunt") can depend on it directly.
+└── otsniff-web/        # Local web companion app (ADR-0018): axum + tokio,
+                        #   upload a PCAP in a browser, view/download the
+                        #   analyze report, browse past runs. Calls the root
+                        #   crate's pipeline in-process via spawn_blocking —
+                        #   the core stays sync (ADR-0008 untouched).
 
 tests/
 ├── cli_smoke.rs       # End-to-end binary tests (assert_cmd + predicates)
@@ -138,7 +145,7 @@ and the report's conformance section.
 ```bash
 cargo build                        # debug build
 cargo build --release              # optimized (LTO, strip, single codegen unit)
-cargo test --workspace             # all tests (all three crates)
+cargo test --workspace             # all tests (all four crates)
 cargo test --lib                   # unit tests only
 cargo test --test '*'              # integration tests only
 cargo clippy --all-targets --workspace -- -D warnings
@@ -233,6 +240,13 @@ must also pass the leak detector or the invariant test
 (`tests/snapshot.rs::invariant_no_real_values_reach_ai_provider`) will
 block the commit.
 
+## Companion app: `otsniff-web`
+
+`cargo run -p otsniff-web -- --port 7878 --data-dir ./otsniff-web-data`
+starts a local web UI (ADR-0018) — upload a PCAP in a browser, view the
+same `analyze` report, browse past runs. `127.0.0.1`-only, no auth, v1
+scope only (no `--ai`, no diff yet). See `crates/otsniff-web/README.md`.
+
 ## Key Decisions
 
 See `docs/adr/` for rationale:
@@ -254,6 +268,7 @@ See `docs/adr/` for rationale:
 - **ADR-0015** — Operator-declared trusted writers may lower finding severity (never suppress; `--trusted-writer`)
 - **ADR-0016** — Extract the privacy/scrub layer into `crates/otsniff-privacy`
 - **ADR-0017** — Encrypted report bundle (`age` passphrase encryption; `--passphrase-env`, never a bare CLI arg)
+- **ADR-0018** — `otsniff-web` local web companion app (new workspace crate; async scoped to it, core pipeline stays sync)
 
 When adding a non-trivial feature or making an architectural decision, add a new ADR.
 
