@@ -451,27 +451,29 @@ captures of an existing network.
 **Deps:** P0-3 (hostname extraction + persistent map operation).
 Promoted from P2 in the Track 1 prioritization.
 
-### P1-4: Prompt evaluation harness (S)
+### P1-4: Prompt evaluation harness (S) — ✅ shipped (#79, S-3.02)
 
-A small `tests/prompt-evals/` directory with committed expected-shape
-outputs for the AI flow. Each eval is a (Observations fixture,
-expected-shape rubric) pair — *not* an exact-string match (LLM output
-is non-deterministic) but a structural rubric: "must contain a Priority
-1 referencing host_001," "must qualify topology claims if capture
-source is host-side," etc.
+`tests/prompt-evals/` holds one directory per capture-source variant
+(`span`, `host-side`, `tap`, `ambiguous`), each an (`observations.json`
+fixture, `rubric.md`) pair — a numbered MUST/SHOULD/MUST NOT structural
+rubric, not an exact-string match (LLM output is non-deterministic).
+`run_all.sh` (or `<eval>/run.sh` for one) invokes `analyze --ai` against
+the fixture and scores the response; `--dry-run` validates rubric
+parsing with no AI calls, for use in ordinary CI. `tests/prompt_evals.rs`
+covers the rubric parser itself and asserts every on-disk rubric file
+parses.
 
-When a prompt changes, run the evals on the current Claude version,
-compare results against the rubric, surface regressions before they
-ship.
+Non-flake discipline: a pass requires ≥90% of MUST assertions met across
+three runs; MUST NOT (the privacy-invariant assertions) has zero
+tolerance and is additionally checked by a leak-detector pass on every
+response before scoring, independent of the rubric.
 
 **Why:** prompt tuning becomes "discipline" instead of "vibes." Without
 this, every prompt change is uncovered — we'd find out about
 regressions only when a real user noticed the AI got worse.
 
-**Touches:** new directory `tests/prompt-evals/`, new test harness in
-`tests/`, possibly a `cargo xtask eval-prompts` runner that supports
-the non-deterministic LLM testing pattern.
-
+**Touches:** `tests/prompt-evals/` (fixtures, rubrics, `run_all.sh`),
+`tests/prompt_evals.rs` (rubric-parser tests).
 **Deps:** none.
 
 ### P1-5: Tagged release of the develop accumulation (S) — ✅ recurring
