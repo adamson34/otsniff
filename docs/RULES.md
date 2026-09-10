@@ -4,7 +4,7 @@ _Auto-generated from `findings::catalog()`. Run `otsniff rules > docs/RULES.md` 
 
 Every rule below is implemented as a pure function in `src/findings/` that reads `Observations` and returns zero or more `Finding`s. The `trigger` column describes the firing condition in plain English; the `data_source` column lists the `Observations` fields the rule reads.
 
-**25 rules.**
+**26 rules.**
 
 ## Index
 
@@ -14,6 +14,7 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 | [`creds.telnet`](#credstelnet) | critical | Telnet session observed (cleartext by definition) |
 | [`creds.http_basic`](#credshttp_basic) | critical | HTTP Basic authentication over plaintext HTTP |
 | [`creds.snmp`](#credssnmp) | critical | SNMPv1 / SNMPv2c traffic (plaintext community strings) |
+| [`creds.default_or_weak_credentials`](#credsdefault_or_weak_credentials) | critical | Default or trivially-weak credentials observed in cleartext |
 | [`creds.ldap_simple_bind`](#credsldap_simple_bind) | critical | LDAP plaintext simple-bind observed |
 | [`compat.ntlmv1`](#compatntlmv1) | high | NTLMv1 authentication observed |
 | [`ics.modbus_writes`](#icsmodbus_writes) | high | Modbus engineering-class commands on the wire |
@@ -94,6 +95,20 @@ Every rule below is implemented as a pure function in `src/findings/` that reads
 
 - **CWE** — CWE-319 — Cleartext Transmission of Sensitive Information ([link](https://cwe.mitre.org/data/definitions/319.html))
 - **RFC** — RFC 3411 — Architecture for SNMPv3 (the secure replacement) ([link](https://datatracker.ietf.org/doc/html/rfc3411))
+- **MITRE ATT&CK for ICS** — T0859 — Valid Accounts ([link](https://attack.mitre.org/techniques/T0859/))
+
+## `creds.default_or_weak_credentials`
+
+**Default or trivially-weak credentials observed in cleartext**
+
+- **Severity:** critical
+- **Data source:** `cred_events (kind = FtpAuth | HttpBasic)`
+
+**Trigger.** Fires on the subset of creds.ftp / creds.http_basic events that are ALSO a well-known default or weak value: an FTP `USER anonymous` login, or an HTTP Basic password that is empty or matches a small watchlist of textbook-weak values (admin, password, 123456, ...). A stronger signal than cleartext exposure alone — these are guessable without ever capturing the traffic.
+
+**References:**
+
+- **CWE** — CWE-521 — Weak Password Requirements ([link](https://cwe.mitre.org/data/definitions/521.html))
 - **MITRE ATT&CK for ICS** — T0859 — Valid Accounts ([link](https://attack.mitre.org/techniques/T0859/))
 
 ## `creds.ldap_simple_bind`

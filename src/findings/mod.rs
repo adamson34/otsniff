@@ -5,6 +5,7 @@
 //! the report, sorted by severity.
 
 pub mod augmented;
+mod default_credentials;
 pub mod dnp3_engineering;
 mod dns_resolver;
 mod engineering_commands;
@@ -153,6 +154,7 @@ pub fn catalog() -> Vec<RuleMetadata> {
         plaintext_creds::TELNET_METADATA,
         plaintext_creds::HTTP_BASIC_METADATA,
         plaintext_creds::SNMP_METADATA,
+        default_credentials::METADATA,
         ldap_creds::LDAP_METADATA,
         ntlmv1::NTLM_METADATA,
         engineering_commands::MODBUS_METADATA,
@@ -224,6 +226,7 @@ pub fn run_all_with_trusted_writers(
 ) -> Vec<Finding> {
     let mut out = Vec::new();
     out.extend(plaintext_creds::detect(obs));
+    out.extend(default_credentials::detect(obs));
     out.extend(ldap_creds::build_findings(obs));
     out.extend(ntlmv1::build_findings(obs));
     out.extend(internet_egress::detect(obs));
