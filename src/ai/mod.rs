@@ -1,8 +1,9 @@
 //! AI provider abstraction.
 //!
-//! v0.3 ships one provider: the Claude Code CLI. v0.4 adds Ollama via the
-//! same trait. We deliberately do *not* embed an HTTP client or vendor SDK —
-//! shelling out to whatever CLI the user already has installed is the
+//! Two providers ship: the Claude Code CLI (`claude_cli`, default) and
+//! Ollama (`ollama`, P2-6 — for an operator who cannot use any external AI
+//! service at all). We deliberately do *not* embed an HTTP client or vendor
+//! SDK — shelling out to whatever CLI the user already has installed is the
 //! cleanest supply-chain story we can offer.
 //!
 //! Every call into a provider runs a fail-closed leak check first. The
@@ -11,6 +12,7 @@
 
 pub mod claude_cli;
 pub mod html_render;
+pub mod ollama;
 pub mod prompts;
 
 use crate::error::Result;

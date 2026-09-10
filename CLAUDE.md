@@ -99,6 +99,7 @@ src/
 └── ai/
     ├── mod.rs              # AiProvider trait
     ├── claude_cli.rs       # Provider that shells out to `claude -p ...` (tool-sandboxed)
+    ├── ollama.rs           # Provider that shells out to `ollama run <model>` (P2-6, local-only)
     ├── html_render.rs      # render_safe — strips raw HTML from the AI response
     └── prompts.rs          # Committed system prompt + default task
 
@@ -166,7 +167,7 @@ proofs (Kani), parser fuzz harnesses under `fuzz/`, and an 80%-kill
 ## Subcommands
 
 ```
-otsniff analyze <PCAP> -o report.html [--ai] [--policy zones.yaml] [--trusted-writer SRC=DST:PROTO ...] [--audit-log X] [--md X] [--json X] [--map X] [--ot-subnet ...] [--source-type ...] [--model M]
+otsniff analyze <PCAP> -o report.html [--ai] [--provider claude|ollama] [--policy zones.yaml] [--trusted-writer SRC=DST:PROTO ...] [--audit-log X] [--md X] [--json X] [--map X] [--ot-subnet ...] [--source-type ...] [--model M]
 otsniff diff <BASELINE> <CURRENT> --baseline-map A.json --current-map B.json -o diff.html [--policy zones.yaml] [--flow-shift-multiplier N] [--ot-subnet ...]
 otsniff slice   <PCAP> -o filtered.pcap [--host IP ...] [--flow SRC=DST:PORT ...]   # at least one of --host/--flow
 otsniff zonewarden suggest <PCAP> [--ot-subnet ...]      # draft a policy from the inventory
@@ -177,13 +178,15 @@ otsniff rules   [--format md|json]
 
 `analyze` is the primary subcommand. Without flags it produces an HTML
 report (rules-based findings + inventory + comms-matrix). With `--ai`
-it additionally runs scrub → leak-check → invoke local `claude` CLI →
-unscrub → embed Claude's response as an "AI analysis" section in the
-rendered HTML. When `--ai` is set, the privacy audit log is written
-automatically alongside the report (default path: `report.audit.json`).
-With `--policy` it runs Zonewarden conformance and adds a segmentation
-section + `zonewarden.*` findings (and deduplicates `egress.ot_to_internet`
-against the policy).
+it additionally runs scrub → leak-check → invoke an `AiProvider` (the
+local `claude` CLI by default, or `--provider ollama` for a fully
+local `ollama run <model>` — P2-6, ADR-0007's air-gap promise; ollama
+requires `--model`) → unscrub → embed the response as an "AI analysis"
+section in the rendered HTML. When `--ai` is set, the privacy audit log
+is written automatically alongside the report (default path:
+`report.audit.json`). With `--policy` it runs Zonewarden conformance
+and adds a segmentation section + `zonewarden.*` findings (and
+deduplicates `egress.ot_to_internet` against the policy).
 
 `diff` compares two captures by pseudonym (via merged scrub maps). With
 `--policy` it adds a "Segmentation drift" section — conformance-tally
