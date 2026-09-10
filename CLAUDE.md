@@ -91,6 +91,8 @@ src/
 ├── trusted_writer.rs  # --trusted-writer SRC=DST:PROTO parser + matcher (ADR-0015)
 ├── slice.rs           # `slice` subcommand: host/flow packet filter + verbatim
 │                      #   pcap writer (P1-7)
+├── bundle.rs          # `bundle`/`unbundle` subcommands: age-encrypted report
+│                      #   bundle (P2-7, ADR-0017)
 ├── audit.rs           # Privacy chain-of-custody audit log (ADR-0012)
 ├── progress.rs        # Verbose-mode progress reporting
 ├── kani_proofs.rs     # Composed privacy-invariant proof harnesses (CBMC-friendly
@@ -170,6 +172,8 @@ proofs (Kani), parser fuzz harnesses under `fuzz/`, and an 80%-kill
 otsniff analyze <PCAP> -o report.html [--ai] [--provider claude|ollama] [--policy zones.yaml] [--trusted-writer SRC=DST:PROTO ...] [--audit-log X] [--md X] [--json X] [--map X] [--ot-subnet ...] [--source-type ...] [--model M]
 otsniff diff <BASELINE> <CURRENT> --baseline-map A.json --current-map B.json -o diff.html [--policy zones.yaml] [--flow-shift-multiplier N] [--ot-subnet ...]
 otsniff slice   <PCAP> -o filtered.pcap [--host IP ...] [--flow SRC=DST:PORT ...]   # at least one of --host/--flow
+otsniff bundle   <report-stem> -o bundle.age --passphrase-env VAR
+otsniff unbundle <bundle.age> -o dir/ --passphrase-env VAR
 otsniff zonewarden suggest <PCAP> [--ot-subnet ...]      # draft a policy from the inventory
 otsniff scrub   <PCAP> -o report.md --map map.json [--ot-subnet ...] [--source-type ...]
 otsniff unscrub --map map.json [INPUT_FILE] [-o OUTPUT] [--strict]
@@ -198,6 +202,12 @@ not reconstructed, so the output survives a round-trip through
 Wireshark/tshark/a vendor's support team. `--finding <ID>` (slice by
 which packets contributed to a specific finding) is not yet implemented;
 see `docs/ROADMAP.md` P1-7 for why.
+
+`bundle` / `unbundle` (P2-7, ADR-0017) encrypt a report + its sidecars
+(map, audit log) into one `age`-encrypted file and back — moves the
+BCSI-at-rest protection commitment from "guidance" to "default
+behavior." The passphrase is read from a named environment variable
+(`--passphrase-env VAR`), never accepted as a bare CLI argument.
 
 `zonewarden suggest` drafts a starter `zones.yaml` from the asset
 inventory (the only `zonewarden` subcommand; the conformance run itself
@@ -242,6 +252,7 @@ See `docs/adr/` for rationale:
 - **ADR-0014** — MITRE ATT&CK for ICS mapping lives in the rule catalog
 - **ADR-0015** — Operator-declared trusted writers may lower finding severity (never suppress; `--trusted-writer`)
 - **ADR-0016** — Extract the privacy/scrub layer into `crates/otsniff-privacy`
+- **ADR-0017** — Encrypted report bundle (`age` passphrase encryption; `--passphrase-env`, never a bare CLI arg)
 
 When adding a non-trivial feature or making an architectural decision, add a new ADR.
 

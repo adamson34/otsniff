@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod audit;
+pub mod bundle;
 pub mod capture_sanity;
 pub mod capture_source;
 pub mod cli;

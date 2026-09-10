@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`otsniff bundle` / `unbundle`** (P2-7, ADR-0017): `bundle <report-stem>
+  -o bundle.age --passphrase-env VAR` packs `<stem>.html` +
+  `<stem>.map.json` + `<stem>.audit.json` (whichever exist) into one
+  `age`-encrypted file; `unbundle` reverses it. Moves the BCSI-at-rest
+  handling commitment (NERC CIP-011 alignment) from "guidance" to
+  "default behavior" — closes the at-rest exposure window between
+  `scrub`/`analyze --ai` and whenever the operator protects the output
+  themselves. The passphrase is always read from a named environment
+  variable, never accepted as a bare CLI argument (shell-history / `ps`
+  visibility). `unbundle` refuses to extract any entry whose stored name
+  isn't a bare filename, so a maliciously crafted bundle can't
+  path-traverse on extract. New dependency: `age` (MIT/Apache-2.0).
 - **Ollama local AI provider** (P2-6): `analyze --ai --provider ollama
   --model <name>` runs the AI analysis and augment passes through a local
   `ollama run <model>` instead of the Claude Code CLI, fulfilling the
