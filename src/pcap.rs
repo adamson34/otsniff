@@ -280,10 +280,92 @@ impl Iterator for PacketIter {
     }
 }
 
+/// Like [`iter_packets`], but each yielded item also carries the exact,
+/// verbatim raw Ethernet frame bytes for that packet (P1-7 / `slice`).
+/// `iter_packets`/`Packet` deliberately keep only the decoded fields the
+/// findings layer needs; slicing needs the original bytes untouched so the
+/// output file round-trips byte-for-byte through any downstream tool
+/// (Wireshark, tshark, a vendor's support team) exactly as the source
+/// capture would have.
+pub fn iter_packets_raw(path: &Path) -> Result<RawPacketIter> {
+    let file = File::open(path).map_err(|source| OtError::InputOpen {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let reader = create_reader(1 << 20, file).map_err(|e| OtError::BadInput {
+        path: path.to_path_buf(),
+        reason: format!("{e:?}"),
+    })?;
+    Ok(RawPacketIter {
+        reader,
+        link_type: None,
+    })
+}
+
+pub struct RawPacketIter {
+    reader: Box<dyn PcapReaderIterator>,
+    link_type: Option<Linktype>,
+}
+
+impl Iterator for RawPacketIter {
+    /// Decoded fields (for filtering) alongside the owned, verbatim frame
+    /// bytes (for writing out unchanged).
+    type Item = Result<(Packet, Vec<u8>)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.reader.next() {
+                Ok((offset, block)) => {
+                    let result = extract_frame(&block, &mut self.link_type);
+                    let extracted = match result {
+                        Ok(Some((ts, frame))) => {
+                            let pkt = decode_ethernet(ts, frame).map(|p| (p, frame.to_vec()));
+                            Ok(pkt)
+                        }
+                        Ok(None) => Ok(None),
+                        Err(e) => Err(e),
+                    };
+                    self.reader.consume(offset);
+                    match extracted {
+                        Ok(Some(pair)) => return Some(Ok(pair)),
+                        Ok(None) => continue,
+                        Err(e) => return Some(Err(e)),
+                    }
+                }
+                Err(PcapError::Eof) => return None,
+                Err(PcapError::Incomplete(_)) => {
+                    if self.reader.refill().is_err() {
+                        return Some(Err(OtError::Parse(
+                            "refill failed (truncated file?)".to_string(),
+                        )));
+                    }
+                }
+                Err(e) => return Some(Err(OtError::Parse(format!("{e:?}")))),
+            }
+        }
+    }
+}
+
 fn decode_block(
     block: &PcapBlockOwned<'_>,
     link_type: &mut Option<Linktype>,
 ) -> Result<Option<Packet>> {
+    let (ts, data) = match extract_frame(block, link_type)? {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+    Ok(decode_ethernet(ts, data))
+}
+
+/// Pulls the timestamp and raw Ethernet frame bytes out of one block,
+/// tracking `link_type` across calls exactly like `decode_block` (same
+/// branches, same `UnsupportedLinkType` guard). Split out so
+/// [`crate::slice`] can capture the verbatim frame bytes for a sliced
+/// output file without duplicating this branching (P1-7).
+fn extract_frame<'a>(
+    block: &PcapBlockOwned<'a>,
+    link_type: &mut Option<Linktype>,
+) -> Result<Option<(DateTime<Utc>, &'a [u8])>> {
     use pcap_parser::pcapng::Block;
 
     let (ts_sec, ts_nsec, data, lt) = match block {
@@ -332,7 +414,7 @@ fn decode_block(
         .single()
         .unwrap_or_else(Utc::now);
 
-    Ok(decode_ethernet(ts, data))
+    Ok(Some((ts, data)))
 }
 
 fn combine_ng_ts(high: u32, low: u32) -> (i64, u32) {

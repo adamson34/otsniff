@@ -504,12 +504,29 @@ technique. **Touches:** `findings/mod.rs` (`Finding` schema), each
 detector module (one-line tag), rendering layer, snapshot tests.
 **Deps:** none.
 
-### P1-7: PCAP slicing — extract subset that triggered a finding (M)
+### P1-7: PCAP slicing — extract subset that triggered a finding (M) — 🟡 partially shipped
 
-`otsniff slice <PCAP> --finding F-001 -o filtered.pcap` — produce a
-much smaller PCAP containing only the packets that contributed to
-finding `F-001`. Plus `--host 192.168.88.52` and `--flow A→B:502`
-variants.
+`otsniff slice <PCAP> -o filtered.pcap --host 192.168.88.52` and
+`--flow SRC=DST:PORT` are shipped: a self-contained filter-and-copy
+pass (`src/slice.rs`) that keeps only matching packets, copied
+**verbatim** from the source file (not reconstructed from decoded
+fields, so checksums/options/unusual framing survive), written as a
+classic pcap (no new dependency — ADR-0001, same rationale). At least
+one of `--host`/`--flow` is required (clap `ArgGroup`); both are
+repeatable and OR-matched.
+
+**Deferred: `--finding F-001`** (slice by which packets contributed to
+a specific finding). Unlike `--host`/`--flow`, which only need to
+re-decode src/dst/port on a second pass over the raw file, this needs
+per-event packet provenance threaded through *every* protocol parser
+and detector (`ModbusEvent`, `EnipEvent`, `S7Event`, `Dnp3Event`,
+`CredEvent`, `NtlmEvent`, `LdapBindEvent`, `RdpEvent`, …) plus a way
+for each detector to expose which packet(s) backed a given finding's
+evidence — a materially larger, more invasive change than the
+host/flow path, and one that risks the 25-rule detector layer for a
+feature that's additive on top of what's already shipped. Left as a
+distinct follow-up rather than bundled in to avoid a half-finished
+`--finding` flag that silently does less than its name implies.
 
 **Why:** today, when otsniff flags a Modbus write, the operator still
 opens the original (potentially gigabyte-sized) PCAP in Wireshark to
@@ -517,11 +534,14 @@ investigate. A pre-sliced PCAP loads instantly, contains only the
 relevant packets, and is small enough to attach to a ticket or share
 with a vendor for support. Closes the loop with the
 deeper-investigation tools that already exist (Wireshark, tshark,
-zeek) rather than competing with them. **Touches:** new `slice`
-subcommand, packet-index threading through the observer (which packet
-contributed to which event), `pcap.rs` write-half. **Deps:** small
-refactor to retain `pcap_offset: u64` on `CredEvent` / `ModbusEvent`
-etc. so we know which bytes to write out.
+zeek) rather than competing with them.
+
+**Touches:** `slice` subcommand (`cli.rs`), `src/slice.rs` (filter +
+writer), `pcap.rs` (`iter_packets_raw` / `RawPacketIter` — verbatim
+frame bytes alongside the decoded `Packet`, refactored out of the
+existing `decode_block`). **Deps:** none for the shipped host/flow
+path; `--finding` still needs the packet-provenance refactor described
+above.
 
 ### P1-9: Capture-window sanity warning (S) — ✅ shipped (#143, S-10.01)
 

@@ -17,6 +17,7 @@ pub mod report_md;
 pub mod rule_catalog;
 pub mod scrub;
 pub mod segmentation;
+pub mod slice;
 pub mod trusted_writer;
 
 #[cfg(kani)]

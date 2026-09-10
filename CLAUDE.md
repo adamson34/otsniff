@@ -88,6 +88,9 @@ src/
 │                      #   otsniff's Observations to discover identifiers; the
 │                      #   pseudonym mechanics live in crates/otsniff-privacy
 │                      #   (ADR-0016)
+├── trusted_writer.rs  # --trusted-writer SRC=DST:PROTO parser + matcher (ADR-0015)
+├── slice.rs           # `slice` subcommand: host/flow packet filter + verbatim
+│                      #   pcap writer (P1-7)
 ├── audit.rs           # Privacy chain-of-custody audit log (ADR-0012)
 ├── progress.rs        # Verbose-mode progress reporting
 ├── kani_proofs.rs     # Composed privacy-invariant proof harnesses (CBMC-friendly
@@ -165,6 +168,7 @@ proofs (Kani), parser fuzz harnesses under `fuzz/`, and an 80%-kill
 ```
 otsniff analyze <PCAP> -o report.html [--ai] [--policy zones.yaml] [--trusted-writer SRC=DST:PROTO ...] [--audit-log X] [--md X] [--json X] [--map X] [--ot-subnet ...] [--source-type ...] [--model M]
 otsniff diff <BASELINE> <CURRENT> --baseline-map A.json --current-map B.json -o diff.html [--policy zones.yaml] [--flow-shift-multiplier N] [--ot-subnet ...]
+otsniff slice   <PCAP> -o filtered.pcap [--host IP ...] [--flow SRC=DST:PORT ...]   # at least one of --host/--flow
 otsniff zonewarden suggest <PCAP> [--ot-subnet ...]      # draft a policy from the inventory
 otsniff scrub   <PCAP> -o report.md --map map.json [--ot-subnet ...] [--source-type ...]
 otsniff unscrub --map map.json [INPUT_FILE] [-o OUTPUT] [--strict]
@@ -184,6 +188,13 @@ against the policy).
 `diff` compares two captures by pseudonym (via merged scrub maps). With
 `--policy` it adds a "Segmentation drift" section — conformance-tally
 deltas + per-violation new/resolved/persisting (P1-13).
+
+`slice` extracts a small PCAP containing only packets matching a host or
+flow filter (P1-7) — packets are copied verbatim from the source file,
+not reconstructed, so the output survives a round-trip through
+Wireshark/tshark/a vendor's support team. `--finding <ID>` (slice by
+which packets contributed to a specific finding) is not yet implemented;
+see `docs/ROADMAP.md` P1-7 for why.
 
 `zonewarden suggest` drafts a starter `zones.yaml` from the asset
 inventory (the only `zonewarden` subcommand; the conformance run itself
