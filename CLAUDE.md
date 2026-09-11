@@ -85,6 +85,8 @@ src/
 ├── diff.rs            # Cross-capture delta (P1-3) + segmentation drift (P1-13)
 ├── rule_catalog.rs    # Backing data for `otsniff rules` / docs/RULES.md
 ├── oui.rs             # Embedded OT-vendor OUI lookup
+├── packs.rs           # Pack catalog, `otsniff-<name>` resolution/dispatch,
+│                      #   pack add/remove (ADR-0019)
 ├── report.rs          # askama HTML rendering (templates/report.html, diff.html)
 ├── report_md.rs       # Markdown rendering (LLM-friendly text)
 ├── scrub.rs           # Population only: build_map/build_map_at/merge_map walk
@@ -186,6 +188,8 @@ otsniff zonewarden suggest <PCAP> [--ot-subnet ...]      # draft a policy from t
 otsniff scrub   <PCAP> -o report.md --map map.json [--ot-subnet ...] [--source-type ...]
 otsniff unscrub --map map.json [INPUT_FILE] [-o OUTPUT] [--strict]
 otsniff rules   [--format md|json]
+otsniff pack    list | add <name> [--version TAG] | remove <name>
+otsniff <pack>  ...                                      # dispatches to otsniff-<pack>
 ```
 
 `analyze` is the primary subcommand. Without flags it produces an HTML
@@ -227,6 +231,16 @@ manual two-step counterpart to `analyze --ai`.
 
 `rules` prints the detection catalog (same content as `docs/RULES.md`).
 
+`pack` manages optional components (ADR-0019). A pack is a separate
+binary, `otsniff-<name>`, installed next to the core one; `otsniff web …`
+then dispatches to `otsniff-web` the way `git foo` finds `git-foo`.
+`pack list` is offline (it only checks what's installed); `pack add`
+downloads the release tarball, verifies its SHA-256, and installs it by
+shelling out to `curl`/`tar` — no embedded HTTP client, and it never
+executes downloaded shell code. `install.sh --packs web` does the same at
+install time. Resolution order is sibling-of-the-running-binary, then
+`PATH`.
+
 **The privacy invariant is enforced by code, not convention.** See ADR-0007.
 `crates/otsniff-privacy/src/leak_detector.rs` (moved from `src/ai/leak_detector.rs`
 by ADR-0016) sits between scrub and any AI provider call and fails closed via
@@ -242,10 +256,14 @@ block the commit.
 
 ## Companion app: `otsniff-web`
 
-`cargo run -p otsniff-web -- --port 7878 --data-dir ./otsniff-web-data`
-starts a local web UI (ADR-0018) — upload a PCAP in a browser, view the
-same `analyze` report, browse past runs. `127.0.0.1`-only, no auth, v1
-scope only (no `--ai`, no diff yet). See `crates/otsniff-web/README.md`.
+Ships as the `web` pack (ADR-0019): `otsniff pack add web`, then
+`otsniff web --port 7878`. From a source checkout, `cargo build
+--workspace` already puts `otsniff-web` next to `otsniff` in
+`target/debug`, so dispatch resolves it with no install step.
+
+A local web UI (ADR-0018) — upload a PCAP in a browser, view the same
+`analyze` report, browse past runs. `127.0.0.1`-only, no auth, v1 scope
+only (no `--ai`, no diff yet). See `crates/otsniff-web/README.md`.
 
 ## Key Decisions
 
@@ -269,6 +287,7 @@ See `docs/adr/` for rationale:
 - **ADR-0016** — Extract the privacy/scrub layer into `crates/otsniff-privacy`
 - **ADR-0017** — Encrypted report bundle (`age` passphrase encryption; `--passphrase-env`, never a bare CLI arg)
 - **ADR-0018** — `otsniff-web` local web companion app (new workspace crate; async scoped to it, core pipeline stays sync)
+- **ADR-0019** — Packs: optional components as separate `otsniff-<name>` binaries, git-style dispatch, checksum-verified `pack add`
 
 When adding a non-trivial feature or making an architectural decision, add a new ADR.
 

@@ -104,6 +104,14 @@ pub enum OtError {
     /// conformance engine errored (ADR-0013).
     #[error("segmentation policy error: {0}")]
     Segmentation(#[from] ::zonewarden::errors::ZonewardenError),
+
+    /// Pack-system failure (ADR-0019): an unknown subcommand, a known pack
+    /// that isn't installed, or a failed download/verification during
+    /// `pack add`. Carries the whole message with no prefix — unlike
+    /// `Parse`, whose "pcap parse error:" framing would be nonsense for
+    /// "unknown subcommand 'frobnicate'".
+    #[error("{0}")]
+    Pack(String),
 }
 
 /// **F-002 (S-13.01 review):** hand-written instead of `#[from]` on a single
@@ -170,6 +178,10 @@ impl OtError {
             // underlying failure (e.g. Parse → 70, UnsupportedLinkType → 65).
             Self::StreamInFile { inner, .. } => inner.exit_code(),
             Self::Segmentation(_) => 2, // config/usage error, like bad input
+            // Usage/config condition the operator fixes by installing the
+            // pack or correcting the name — same class as a bad flag, and
+            // the same exit code clap uses for one (ADR-0019).
+            Self::Pack(_) => 2,
         }
     }
 }

@@ -1303,3 +1303,113 @@ fn bundle_missing_passphrase_env_var_is_a_clear_usage_error() {
             "OTSNIFF_DEFINITELY_UNSET_VAR' (named by --passphrase-env) is not set",
         ));
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0019 — packs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pack_list_shows_the_catalog() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["pack", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("web"))
+        .stdout(predicate::str::contains("otsniff pack add").or(
+            // Once the web pack is present next to the test binary (it is,
+            // in target/debug), the line reads "installed" instead.
+            predicate::str::contains("installed"),
+        ));
+}
+
+#[test]
+fn unknown_subcommand_points_at_help_and_pack_list() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .arg("frobnicate")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown subcommand 'frobnicate'"))
+        .stderr(predicate::str::contains("pack list"));
+}
+
+#[test]
+fn pack_add_rejects_an_unknown_pack_name() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["pack", "add", "nosuchpack"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown subcommand 'nosuchpack'"));
+}
+
+#[test]
+fn pack_remove_rejects_an_unknown_pack_name() {
+    // Deliberately not testing removal of a real pack: `web` resolves to
+    // target/debug/otsniff-web in the test environment, and removing it
+    // would delete a build artifact other tests dispatch to.
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["pack", "remove", "nosuchpack"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown subcommand 'nosuchpack'"));
+}
+
+/// End-to-end dispatch (ADR-0019 D2): an `otsniff-<name>` binary found on
+/// PATH runs as `otsniff <name>`, receiving the remaining arguments and
+/// owning the exit code. PATH is set for the child process only.
+#[test]
+#[cfg(unix)]
+fn dispatches_to_a_pack_binary_on_path() {
+    let tmp = TempDir::new().unwrap();
+    let fake = tmp.path().join("otsniff-fake");
+    std::fs::write(&fake, "#!/bin/sh\necho \"fake pack got: $*\"\nexit 7\n").unwrap();
+    let mut perms = std::fs::metadata(&fake).unwrap().permissions();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o755);
+    }
+    std::fs::set_permissions(&fake, perms).unwrap();
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["fake", "--flag", "value"])
+        .env("PATH", tmp.path())
+        .assert()
+        .code(7) // the pack's own exit code, not otsniff's
+        .stdout(predicate::str::contains("fake pack got: --flag value"));
+}
+
+/// Drift guard: every pack in the catalog must actually be packaged by the
+/// release workflow, or `pack add` would 404 against a real release.
+#[test]
+fn release_workflow_packages_every_catalogued_pack() {
+    let workflow = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/release.yml"),
+    )
+    .expect(".github/workflows/release.yml must exist");
+
+    // The packaging loop enumerates packs by name: `for pack in web; do`.
+    let loop_line = workflow
+        .lines()
+        .find(|l| l.trim_start().starts_with("for pack in "))
+        .expect("release.yml must have a `for pack in …` packaging loop");
+    let names: Vec<&str> = loop_line
+        .trim()
+        .trim_start_matches("for pack in ")
+        .trim_end_matches("; do")
+        .split_whitespace()
+        .collect();
+
+    for pack in otsniff::packs::PACKS {
+        assert!(
+            names.contains(&pack.name),
+            "pack '{}' is in the catalog but release.yml does not package it \
+             (found: {names:?}) — `otsniff pack add {}` would 404",
+            pack.name,
+            pack.name
+        );
+    }
+}

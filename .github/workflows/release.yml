@@ -43,26 +43,45 @@ jobs:
       - name: Build
         shell: bash
         run: |
+          # `-p otsniff-web` builds the pack binaries too (ADR-0019). Their
+          # dev-dependencies (reqwest) aren't built by `cargo build`, so this
+          # adds no C-toolchain requirements to the release matrix.
           if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
+            cross build --release --target ${{ matrix.target }} -p otsniff -p otsniff-web
           else
-            cargo build --release --target ${{ matrix.target }}
+            cargo build --release --target ${{ matrix.target }} -p otsniff -p otsniff-web
           fi
 
       - name: Package
         shell: bash
         run: |
+          # Core binary.
           name="otsniff-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp "target/${{ matrix.target }}/release/otsniff${{ matrix.ext }}" "dist/$name/"
           cp README.md LICENSE "dist/$name/"
+          stems=("$name")
+
+          # Packs (ADR-0019): one artifact each, named with the *release tag*
+          # rather than the pack crate's own version, so `otsniff pack add`
+          # and install.sh can build the URL from the core version alone.
+          for pack in web; do
+            stem="otsniff-${pack}-${GITHUB_REF_NAME}-${{ matrix.target }}"
+            mkdir -p "dist/$stem"
+            cp "target/${{ matrix.target }}/release/otsniff-${pack}${{ matrix.ext }}" "dist/$stem/"
+            cp "crates/otsniff-${pack}/README.md" LICENSE "dist/$stem/"
+            stems+=("$stem")
+          done
+
           cd dist
-          tar czf "$name.tar.gz" "$name"
-          if command -v sha256sum >/dev/null; then
-            sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
-          else
-            shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
-          fi
+          for stem in "${stems[@]}"; do
+            tar czf "$stem.tar.gz" "$stem"
+            if command -v sha256sum >/dev/null; then
+              sha256sum "$stem.tar.gz" > "$stem.tar.gz.sha256"
+            else
+              shasum -a 256 "$stem.tar.gz" > "$stem.tar.gz.sha256"
+            fi
+          done
 
       - uses: actions/upload-artifact@v7
         with:
