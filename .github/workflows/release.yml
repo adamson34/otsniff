@@ -134,14 +134,26 @@ jobs:
           # ADV-P2 F-P2-033: warn-on-unmatched is the default, so a release
           # could be created with no assets attached at all.
           fail_on_unmatched_files: true
-          # ADV-P2 F-P2-009: stable tags used to publish as **drafts**, and
-          # dev tags as prereleases — and `/releases/latest`, which
-          # install.sh and the README one-liner both resolve against,
-          # excludes *both* buckets. Every tag this workflow published landed
-          # somewhere `latest` could not see it, so the headline install
-          # command could never resolve a version. Stable tags now publish
-          # live; only pre-release tags (vX.Y.Z-dev.N) stay out of `latest`,
-          # which is what `prerelease` is for.
-          draft: false
+          # Stable releases (tag has no '-') draft for human review before
+          # publish; dev/pre-releases (tag like vX.Y.Z-dev.N) auto-publish.
+          # This is deliberate — see #106, which made `draft` conditional
+          # precisely so dev cuts stop needing a manual publish while stable
+          # ones keep the gate.
+          #
+          # ADV-P2 F-P2-009 read this as "every tag lands in a bucket
+          # `/releases/latest` excludes, so the README install command can
+          # never resolve a version." That inference is wrong, and a brief
+          # remediation that set `draft: false` here was wrong with it: a
+          # human publishes the stable draft as the last step of the release
+          # playbook, and it becomes `latest` at that point. v0.6.0 is live
+          # and `latest` today.
+          #
+          # What is true, and is handled in install.sh instead: between
+          # tagging a stable release and publishing its draft, `latest` still
+          # points at the *previous* stable — and a repo with no stable
+          # release at all (only vX.Y.Z-dev.N prereleases) has no `latest`
+          # whatsoever. install.sh falls back to enumerating `/releases` and
+          # taking the newest non-draft entry, which covers both.
+          draft: ${{ !contains(github.ref_name, '-') }}
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
