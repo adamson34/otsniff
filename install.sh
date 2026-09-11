@@ -173,12 +173,18 @@ fetch() {
 if [ -z "$VERSION" ]; then
     info "looking up latest release..."
     # ADV-P2 F-P2-009: `/releases/latest` excludes drafts *and* prereleases.
-    # release.yml now publishes stable tags live, so `latest` is the right
-    # first answer — but a repo whose newest tags are all `-dev.N`
-    # prereleases has no `latest` at all, and used to fail here with nothing
-    # to suggest but pinning a version by hand. Fall back to the full release
-    # list, which includes prereleases, and take the newest published entry.
-    _rel=$(mktemp 2>/dev/null || mktemp -t 'otsniff-rel')
+    # The published stable release is the right first answer and normally
+    # resolves fine — but there are two gaps, and this used to fail with
+    # nothing to suggest but pinning a version by hand:
+    #   1. A repo with no stable release at all (only vX.Y.Z-dev.N
+    #      prereleases) has no `latest` whatsoever.
+    #   2. Between tagging a stable release and a human publishing its draft
+    #      (release.yml keeps that gate deliberately — see #106), `latest`
+    #      still points at the previous stable.
+    # So fall back to the full release list, which includes prereleases, and
+    # take the newest published entry.
+    _rel=$(mktemp 2>/dev/null || mktemp /tmp/otsniff-rel.XXXXXXXXXX 2>/dev/null) \
+        || err "could not create a temporary file (tried \$TMPDIR and /tmp). Set TMPDIR to a writable directory and retry."
     VERSION=""
     if fetch "https://api.github.com/repos/$REPO/releases/latest" "$_rel" quiet 2>/dev/null; then
         VERSION=$(grep '"tag_name"' "$_rel" | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
