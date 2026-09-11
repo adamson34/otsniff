@@ -36,13 +36,15 @@ BIN_NAME="otsniff"
 INSTALL_DIR="${OTSNIFF_INSTALL_DIR:-$HOME/.local/bin}"
 
 err() { echo "otsniff-install: $*" >&2; exit 1; }
+warn() { echo "otsniff-install: WARNING: $*" >&2; }
 info() { echo "otsniff-install: $*"; }
 
 # ── Parse args ──────────────────────────────────────────────────
 # Positional arg is the version (kept for backwards compatibility);
-# --packs takes a comma-separated list. Pack names aren't validated here —
-# the installer has no catalog, so a typo surfaces as a clear download
-# failure naming the artifact it looked for.
+# --packs takes a comma-separated list. Names are shape-checked below (they
+# become filenames and URLs) but not checked against a catalog — the
+# installer has none, so an unknown-but-well-formed name surfaces as a
+# download failure naming the artifact it looked for.
 VERSION="${OTSNIFF_VERSION:-}"
 PACKS="${OTSNIFF_PACKS:-}"
 
@@ -137,23 +139,40 @@ install_artifact() {
         || err "checksum sidecar download failed for ${_tarball}."
 
     info "verifying ${_tarball}..."
+    # Compare digests ourselves rather than handing the sidecar to
+    # `sha256sum -c`: Darwin's /sbin/sha256sum exits 0 for a checklist with
+    # no properly formatted lines, so an empty or HTML sidecar body would
+    # "verify" (ADV-P1 F-P1-001). Computing the hash of one named file is
+    # safe on every implementation; it was only the -c decision that wasn't.
+    _expected=$(awk 'NR==1 {print $1}' "$TMP/${_tarball}.sha256" 2>/dev/null || true)
+    if [ "${#_expected}" -ne 64 ] || [ -n "$(printf '%s' "$_expected" | tr -d '0-9a-fA-F')" ]; then
+        err "the checksum sidecar for ${_tarball} does not contain a SHA-256 digest — refusing to install.
+  The download may have been intercepted, or the release may be malformed."
+    fi
     if command -v sha256sum >/dev/null 2>&1; then
-        ( cd "$TMP" && sha256sum -c "${_tarball}.sha256" >/dev/null ) \
-            || err "checksum verification FAILED for ${_tarball} — refusing to install."
+        _actual=$(sha256sum "$TMP/$_tarball" | awk '{print $1}')
     elif command -v shasum >/dev/null 2>&1; then
-        ( cd "$TMP" && shasum -a 256 -c "${_tarball}.sha256" >/dev/null ) \
-            || err "checksum verification FAILED for ${_tarball} — refusing to install."
+        _actual=$(shasum -a 256 "$TMP/$_tarball" | awk '{print $1}')
     else
         err "neither sha256sum nor shasum is available; refusing to install without verification."
     fi
+    _expected=$(printf '%s' "$_expected" | tr 'A-F' 'a-f')
+    _actual=$(printf '%s' "$_actual" | tr 'A-F' 'a-f')
+    if [ "$_actual" != "$_expected" ]; then
+        err "checksum verification FAILED for ${_tarball} (expected $_expected, got $_actual) — refusing to install."
+    fi
 
-    tar xzf "$TMP/$_tarball" -C "$TMP"
+    # --no-same-owner/--no-same-permissions: don't let a substituted archive
+    # choose the installed mode. Without them, `mv` preserves the member mode
+    # and `chmod +x` only *adds* bits, so a member with mode 04755 would land
+    # setuid-root under the documented sudo install (ADV-P1 F-P1-005).
+    tar --no-same-owner --no-same-permissions -xzf "$TMP/$_tarball" -C "$TMP"
     [ -f "$TMP/$_stem/$_base" ] \
         || err "${_tarball} did not contain ${_stem}/${_base} — malformed release artifact, please file a bug."
 
     mkdir -p "$INSTALL_DIR"
     mv "$TMP/$_stem/$_base" "$INSTALL_DIR/"
-    chmod +x "$INSTALL_DIR/$_base"
+    chmod 0755 "$INSTALL_DIR/$_base"
 
     # Strip macOS Gatekeeper quarantine (the binary isn't notarized;
     # without this the user gets a popup blocking the binary).
@@ -167,13 +186,42 @@ install_artifact "$BIN_NAME"
 
 # ── Install requested packs ─────────────────────────────────────
 INSTALLED_PACKS=""
+FAILED_PACKS=""
 if [ -n "$PACKS" ]; then
-    # Comma-separated; tolerate spaces around entries.
-    for pack in $(echo "$PACKS" | tr ',' ' '); do
+    # Comma-separated. `set -f` disables globbing for the split below —
+    # otherwise a pack name containing `*` or `?` would expand against the
+    # CWD before it was ever validated (ADV-P1 F-P1-021).
+    set -f
+    IFS=','
+    # shellcheck disable=SC2086  # deliberate split on IFS=','
+    set -- $PACKS
+    unset IFS
+    set +f
+    for pack in "$@"; do
+        # Trim surrounding whitespace, then validate: pack names are an
+        # identifier namespace, and this value becomes a filename and a URL.
+        pack=$(printf '%s' "$pack" | tr -d '[:space:]')
         [ -n "$pack" ] || continue
+        case "$pack" in
+            *[!A-Za-z0-9_-]*)
+                warn "skipping invalid pack name '$pack' — expected letters, digits, '-' or '_'."
+                FAILED_PACKS="$FAILED_PACKS $pack"
+                continue ;;
+        esac
         info "installing pack: $pack"
-        install_artifact "${BIN_NAME}-${pack}"
-        INSTALLED_PACKS="$INSTALLED_PACKS $pack"
+        # A pack failure must not sink a successful core install: the core is
+        # already on disk and working, and aborting here would skip the
+        # success banner entirely, so a single typo'd pack name looked like
+        # nothing installed at all (ADV-P1 F-P1-020). Packs are also
+        # run-verified, the same standard docs/specs/install-script.md sets
+        # for the core.
+        if ( install_artifact "${BIN_NAME}-${pack}" ) \
+            && "$INSTALL_DIR/${BIN_NAME}-${pack}" --help >/dev/null 2>&1; then
+            INSTALLED_PACKS="$INSTALLED_PACKS $pack"
+        else
+            warn "pack '$pack' could not be installed — the core is fine; retry with: $BIN_NAME pack add $pack"
+            FAILED_PACKS="$FAILED_PACKS $pack"
+        fi
     done
 fi
 
@@ -193,6 +241,9 @@ echo "  Version:   $INSTALLED_VERSION"
 if [ -n "$INSTALLED_PACKS" ]; then
     echo "  Packs:    $INSTALLED_PACKS"
 fi
+if [ -n "$FAILED_PACKS" ]; then
+    echo "  FAILED:   $FAILED_PACKS  (core install is fine — retry with '$BIN_NAME pack add <name>')"
+fi
 
 case ":$PATH:" in
     *":$INSTALL_DIR:"*)
@@ -210,3 +261,7 @@ case ":$PATH:" in
         echo "  Then reload your shell and run: $BIN_NAME --help"
         ;;
 esac
+
+# A requested pack that didn't install is a partial failure: the banner above
+# reports it either way, but automation should still see a non-zero status.
+[ -z "$FAILED_PACKS" ] || exit 1

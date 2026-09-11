@@ -1334,6 +1334,9 @@ fn unknown_subcommand_points_at_help_and_pack_list() {
         .stderr(predicate::str::contains("pack list"));
 }
 
+/// ADV-P1 F-P1-011: a bad *argument* to a valid subcommand must not be
+/// reported as an unknown subcommand pointing at `--help` — `--help` never
+/// lists packs. The previous version of this test asserted the wrong string.
 #[test]
 fn pack_add_rejects_an_unknown_pack_name() {
     Command::cargo_bin("otsniff")
@@ -1341,20 +1344,114 @@ fn pack_add_rejects_an_unknown_pack_name() {
         .args(["pack", "add", "nosuchpack"])
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("unknown subcommand 'nosuchpack'"));
+        .stderr(predicate::str::contains("no such pack 'nosuchpack'"))
+        .stderr(predicate::str::contains("pack list"))
+        .stderr(predicate::str::contains("unknown subcommand").not());
 }
 
 #[test]
 fn pack_remove_rejects_an_unknown_pack_name() {
-    // Deliberately not testing removal of a real pack: `web` resolves to
-    // target/debug/otsniff-web in the test environment, and removing it
-    // would delete a build artifact other tests dispatch to.
     Command::cargo_bin("otsniff")
         .unwrap()
         .args(["pack", "remove", "nosuchpack"])
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("unknown subcommand 'nosuchpack'"));
+        .stderr(predicate::str::contains("no such pack 'nosuchpack'"));
+}
+
+/// ADV-P1 F-P1-003: `remove` must only ever delete from the install
+/// directory. It used to delete whatever `resolve()` found first —
+/// including a copy on PATH that otsniff never installed.
+#[test]
+#[cfg(unix)]
+fn pack_remove_refuses_a_copy_it_did_not_install() {
+    use std::os::unix::fs::PermissionsExt;
+    let install_dir = TempDir::new().unwrap(); // empty: nothing installed here
+    let elsewhere = TempDir::new().unwrap(); // a copy otsniff didn't install
+
+    let foreign = elsewhere.path().join("otsniff-web");
+    std::fs::write(&foreign, b"#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&foreign, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["pack", "remove", "web"])
+        .env("OTSNIFF_INSTALL_DIR", install_dir.path())
+        .env("PATH", elsewhere.path())
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("will not remove it"));
+
+    assert!(
+        foreign.exists(),
+        "otsniff must not delete a pack copy it did not install"
+    );
+}
+
+/// ADV-P1 F-P1-002: `OTSNIFF_INSTALL_DIR` must be searched, not just
+/// written to. Previously `add` installed there while `list`/dispatch
+/// ignored it, so the tool told you to run the command that just worked.
+#[test]
+#[cfg(unix)]
+fn install_dir_override_is_searched_by_list_and_dispatch() {
+    use std::os::unix::fs::PermissionsExt;
+    let install_dir = TempDir::new().unwrap();
+    let planted = install_dir.path().join("otsniff-web");
+    std::fs::write(&planted, "#!/bin/sh\necho dispatched-from-install-dir\n").unwrap();
+    std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["pack", "list"])
+        .env("OTSNIFF_INSTALL_DIR", install_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("installed"));
+
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .arg("web")
+        .env("OTSNIFF_INSTALL_DIR", install_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dispatched-from-install-dir"));
+}
+
+/// ADV-P1 F-P1-004: an empty PATH entry must not make dispatch execute
+/// `./otsniff-<name>` out of the current directory.
+#[test]
+#[cfg(unix)]
+fn empty_path_entry_does_not_execute_from_the_cwd() {
+    use std::os::unix::fs::PermissionsExt;
+    let cwd = TempDir::new().unwrap();
+    let planted = cwd.path().join("otsniff-evil");
+    std::fs::write(&planted, "#!/bin/sh\necho CWD-EXEC-HIT\n").unwrap();
+    std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    for path in ["/usr/bin:", ":/usr/bin", "/usr/bin:."] {
+        Command::cargo_bin("otsniff")
+            .unwrap()
+            .arg("evil")
+            .current_dir(cwd.path())
+            .env("PATH", path)
+            .env_remove("OTSNIFF_INSTALL_DIR")
+            .assert()
+            .code(2)
+            .stdout(predicate::str::contains("CWD-EXEC-HIT").not())
+            .stderr(predicate::str::contains("unknown subcommand 'evil'"));
+    }
+}
+
+/// ADV-P1 F-P1-008: `--version` is interpolated into a release URL, so a
+/// path-traversal value must be refused before any download is attempted.
+#[test]
+fn pack_add_rejects_a_malformed_version() {
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["pack", "add", "web", "--version", "../../../../etc/passwd"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("is not a valid release tag"));
 }
 
 /// End-to-end dispatch (ADR-0019 D2): an `otsniff-<name>` binary found on
@@ -1382,10 +1479,17 @@ fn dispatches_to_a_pack_binary_on_path() {
         .stdout(predicate::str::contains("fake pack got: --flag value"));
 }
 
-/// Drift guard: every pack in the catalog must actually be packaged by the
-/// release workflow, or `pack add` would 404 against a real release.
+/// Drift guard: the pack catalog and the release workflow's packaging loop
+/// must name exactly the same packs. A catalogued pack that isn't packaged
+/// makes `pack add` 404; a packaged pack that isn't catalogued publishes an
+/// artifact no `pack add` can reach.
+///
+/// POL-11 (ADV-P1 F-P1-012): the original version of this test asserted
+/// only "did not panic" — it iterated `PACKS` and would have passed green
+/// having validated nothing if `PACKS` were ever emptied, and never
+/// checked that its own text extraction produced anything.
 #[test]
-fn release_workflow_packages_every_catalogued_pack() {
+fn release_workflow_packages_exactly_the_catalogued_packs() {
     let workflow = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/release.yml"),
     )
@@ -1396,20 +1500,42 @@ fn release_workflow_packages_every_catalogued_pack() {
         .lines()
         .find(|l| l.trim_start().starts_with("for pack in "))
         .expect("release.yml must have a `for pack in …` packaging loop");
-    let names: Vec<&str> = loop_line
+    let mut packaged: Vec<&str> = loop_line
         .trim()
         .trim_start_matches("for pack in ")
         .trim_end_matches("; do")
         .split_whitespace()
         .collect();
+    packaged.sort_unstable();
 
-    for pack in otsniff::packs::PACKS {
-        assert!(
-            names.contains(&pack.name),
-            "pack '{}' is in the catalog but release.yml does not package it \
-             (found: {names:?}) — `otsniff pack add {}` would 404",
-            pack.name,
-            pack.name
-        );
-    }
+    // (d) the parser itself is exercised: distinguish "extracted nothing"
+    // from "matched", so an inert parser can't masquerade as a pass.
+    assert!(
+        !packaged.is_empty(),
+        "parsed zero pack names out of release.yml's loop line ({loop_line:?}) — \
+         the extraction is inert, not passing"
+    );
+    // (c) the catalog side is non-vacuous too.
+    let mut catalogued: Vec<&str> = otsniff::packs::PACKS.iter().map(|p| p.name).collect();
+    catalogued.sort_unstable();
+    assert!(
+        !catalogued.is_empty(),
+        "the pack catalog is empty — this guard would validate nothing"
+    );
+
+    // Both directions at once.
+    assert_eq!(
+        catalogued, packaged,
+        "pack catalog and release.yml packaging loop disagree — catalogued: \
+         {catalogued:?}, packaged by release.yml: {packaged:?}. A catalogued pack \
+         that isn't packaged makes `otsniff pack add` 404; a packaged pack that \
+         isn't catalogued can never be installed."
+    );
+
+    // (b)/(f) positive-coverage signal, not just exit-0.
+    eprintln!(
+        "Check passed: {} catalogued pack(s) {:?} validated against release.yml",
+        catalogued.len(),
+        catalogued
+    );
 }
