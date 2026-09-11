@@ -78,13 +78,13 @@ fn run(
 ) -> Result<String> {
     use std::io::IsTerminal as _;
 
-    if which_ollama().is_none() {
-        return Err(OtError::Parse(
+    let ollama = which_ollama().ok_or_else(|| {
+        OtError::Parse(
             "Ollama not found on PATH. Install from https://ollama.com, pull a model \
              (e.g. `ollama pull llama3.1`), then pass --provider ollama --model llama3.1."
                 .to_string(),
-        ));
-    }
+        )
+    })?;
 
     let verbose = verbose_flag || std::io::stderr().is_terminal();
     // No separate system-prompt channel on the plain CLI — concatenate.
@@ -93,7 +93,7 @@ fn run(
     let model = model.to_string();
 
     let task = move || -> crate::error::Result<Vec<u8>> {
-        let mut cmd = build_command(&model);
+        let mut cmd = build_command(&ollama, &model);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -143,20 +143,16 @@ fn run(
         .map_err(|e| OtError::Parse(format!("ollama stdout was not valid UTF-8: {e}")))
 }
 
+/// Resolves the `ollama` binary to an absolute path. Same CRITICAL as
+/// `claude_cli::which_claude` — see [`crate::which`] (ADV-P2 F-P2-001).
 fn which_ollama() -> Option<std::path::PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join("ollama");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    crate::which::find_executable("ollama")
 }
 
 /// Build the `ollama run <model>` command.
-pub(crate) fn build_command(model: &str) -> Command {
-    let mut cmd = Command::new("ollama");
+pub(crate) fn build_command(program: &std::path::Path, model: &str) -> Command {
+    // Spawn the resolved absolute path, not the bare name (ADV-P2 F-P2-001).
+    let mut cmd = Command::new(program);
     cmd.arg("run").arg(model);
     cmd
 }
@@ -167,7 +163,7 @@ mod tests {
 
     #[test]
     fn build_command_runs_the_given_model() {
-        let cmd = build_command("llama3.1");
+        let cmd = build_command(std::path::Path::new("/usr/local/bin/ollama"), "llama3.1");
         let args: Vec<&std::ffi::OsStr> = cmd.get_args().collect();
         let strs: Vec<&str> = args.iter().filter_map(|a| a.to_str()).collect();
         assert_eq!(strs, vec!["run", "llama3.1"]);

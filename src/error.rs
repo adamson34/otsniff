@@ -112,6 +112,20 @@ pub enum OtError {
     /// "unknown subcommand 'frobnicate'".
     #[error("{0}")]
     Pack(String),
+
+    /// A downloaded release artifact failed integrity verification: the
+    /// checksum did not match, the sidecar was not a checksum, or the
+    /// archive contained something a genuine release never does (a symlink
+    /// where the binary should be).
+    ///
+    /// **ADV-P2 F-P2-028.** Split out of [`OtError::Pack`] purely for the
+    /// exit code. A checksum mismatch used to exit 2 — the same code as
+    /// `pack add nosuchpack` and a clap usage error — so the one failure
+    /// automation most needs to escalate was indistinguishable from a typo.
+    /// The repo already set this precedent for [`OtError::Privacy`] (exit
+    /// 75, "so CI scripts can detect it without grepping stderr").
+    #[error("{0}")]
+    PackIntegrity(String),
 }
 
 /// **F-002 (S-13.01 review):** hand-written instead of `#[from]` on a single
@@ -180,8 +194,18 @@ impl OtError {
             Self::Segmentation(_) => 2, // config/usage error, like bad input
             // Usage/config condition the operator fixes by installing the
             // pack or correcting the name — same class as a bad flag, and
-            // the same exit code clap uses for one (ADR-0019).
+            // the same exit code clap uses for one. (ADR-0019 D5 records the
+            // subcommand-dispatch decision, not this mapping; the exit-code
+            // rationale lives here.)
             Self::Pack(_) => 2,
+            // ADV-P2 F-P2-028: an artifact that failed verification is not a
+            // usage error and must not share an exit code with one. 76 =
+            // EX_PROTOCOL in sysexits.h — "remote error in protocol", which
+            // is exactly what a digest mismatch or a substituted sidecar is.
+            // Same rationale as `Privacy(_) => 75` above: an automated
+            // installer has to be able to escalate this without grepping
+            // stderr, and a retry will not help.
+            Self::PackIntegrity(_) => 76,
         }
     }
 }

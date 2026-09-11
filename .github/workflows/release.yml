@@ -4,8 +4,12 @@ on:
   push:
     tags: ["v*"]
 
+# Least privilege by default; only the `release` job gets write (ADV-P1
+# F-P1-023). The build job compiles build.rs from the whole dependency
+# tree — now two crates' worth — and has no business holding a token that
+# can push to the repo or mutate releases.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -28,29 +32,26 @@ jobs:
             os: windows-latest
             ext: .exe
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, pinned
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross
-        if: matrix.use_cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: Swatinem/rust-cache@v2
-
+      # ADV-P2 F-P2-044: the cross-rs branch that used to live here keyed off
+      # `matrix.use_cross`, which no matrix entry ever set — unreachable code
+      # that looked like proof the cross-compile path worked. When
+      # aarch64-unknown-linux-gnu is re-added, add the branch back *with* the
+      # matrix key that selects it, in the same commit.
       - name: Build
         shell: bash
         run: |
           # `-p otsniff-web` builds the pack binaries too (ADR-0019). Their
           # dev-dependencies (reqwest) aren't built by `cargo build`, so this
           # adds no C-toolchain requirements to the release matrix.
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} -p otsniff -p otsniff-web
-          else
-            cargo build --release --target ${{ matrix.target }} -p otsniff -p otsniff-web
-          fi
+          cargo build --release --target ${{ matrix.target }} -p otsniff -p otsniff-web
 
       - name: Package
         shell: bash
@@ -78,14 +79,38 @@ jobs:
             tar czf "$stem.tar.gz" "$stem"
             if command -v sha256sum >/dev/null; then
               sha256sum "$stem.tar.gz" > "$stem.tar.gz.sha256"
-            else
+            elif command -v shasum >/dev/null; then
               shasum -a 256 "$stem.tar.gz" > "$stem.tar.gz.sha256"
+            else
+              echo "::error::no sha256sum or shasum on this runner" >&2
+              exit 1
             fi
           done
 
-      - uses: actions/upload-artifact@v7
+          # ADV-P2 F-P2-033: every installer refuses to install without a
+          # sidecar, so a release published with tarballs and no sidecars is
+          # 100% broken while CI reports green. Assert the pairing here, in
+          # the only job that can still see both files.
+          for stem in "${stems[@]}"; do
+            for f in "$stem.tar.gz" "$stem.tar.gz.sha256"; do
+              [ -s "$f" ] || { echo "::error::packaging produced no $f" >&2; exit 1; }
+            done
+            # A sidecar that doesn't verify here cannot verify on a user's
+            # machine either — same computation, same bytes.
+            if command -v sha256sum >/dev/null; then
+              sha256sum -c "$stem.tar.gz.sha256" >/dev/null
+            else
+              shasum -a 256 -c "$stem.tar.gz.sha256" >/dev/null
+            fi
+            echo "packaged $stem.tar.gz (+ sidecar, verified)"
+          done
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.target }}
+          # ADV-P2 F-P2-033: default is `warn`, which uploads nothing and
+          # still goes green.
+          if-no-files-found: error
           path: |
             dist/*.tar.gz
             dist/*.sha256
@@ -94,18 +119,29 @@ jobs:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           files: |
             dist/*.tar.gz
             dist/*.sha256
-          # Stable releases (tag has no '-') draft for human review before
-          # publish; dev/pre-releases (tag like vX.Y.Z-dev.N) auto-publish.
-          draft: ${{ !contains(github.ref_name, '-') }}
+          # ADV-P2 F-P2-033: warn-on-unmatched is the default, so a release
+          # could be created with no assets attached at all.
+          fail_on_unmatched_files: true
+          # ADV-P2 F-P2-009: stable tags used to publish as **drafts**, and
+          # dev tags as prereleases — and `/releases/latest`, which
+          # install.sh and the README one-liner both resolve against,
+          # excludes *both* buckets. Every tag this workflow published landed
+          # somewhere `latest` could not see it, so the headline install
+          # command could never resolve a version. Stable tags now publish
+          # live; only pre-release tags (vX.Y.Z-dev.N) stay out of `latest`,
+          # which is what `prerelease` is for.
+          draft: false
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}

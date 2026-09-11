@@ -24,11 +24,60 @@ Script behavior:
   `OTSNIFF_VERSION` env var)
 - Downloads tarball + sha256 sidecar, verifies the checksum
 - Extracts to a tmp dir, moves the binary to `$OTSNIFF_INSTALL_DIR`
-  (default `~/.local/bin`)
+  (default `~/.local/bin`), `chmod 0755`
 - Strips macOS Gatekeeper quarantine (binary isn't notarized)
 - Verifies the binary runs (`--version` succeeds)
+- Repeats download/verify/extract/run-verify for each pack requested via
+  `--packs` or `OTSNIFF_PACKS` (ADR-0019), installing each as
+  `otsniff-<pack>` in the same directory
 - Warns if the install dir isn't on PATH and prints the exact line to
   add to the user's shell profile
+
+### Packs (ADR-0019)
+
+`install.sh [VERSION] [--packs a,b,c]`. Pack artifacts are named and laid
+out identically to the core (`otsniff-<pack>-<tag>-<target>.tar.gz`
+containing `<stem>/otsniff-<pack>`), so one `install_artifact()` covers
+both.
+
+- Pack names are shape-checked (`[A-Za-z0-9_-]+`) before becoming a
+  filename or URL, but **not** checked against a catalog — the installer
+  has none. An unknown-but-well-formed name surfaces as a download
+  failure naming the artifact it looked for.
+- **A failing pack does not fail the core install.** The core is already
+  on disk and working by then, so a pack failure is a warning, the
+  success banner still prints (with a `FAILED:` line naming the pack and
+  the `otsniff pack add` retry), and the script exits non-zero so
+  automation still sees the partial failure (ADV-P1 F-P1-020).
+- Each pack is run-verified (`--help` succeeds) to the same standard as
+  the core, so a pack that installs but can't execute is caught here
+  rather than on first use. A pack that fails run-verify is **removed**,
+  not left on disk: reported-FAILED and present-in-`$INSTALL_DIR` must not
+  both be true, or `otsniff pack list` would report it installed and
+  dispatch would run it (ADV-P2 F-P2-014). `otsniff pack add` does the same
+  (ADV-P2 F-P2-015 — it did not, while this document already claimed
+  parity).
+
+### Checksum verification
+
+Compares digests directly: parse the first field of **line 1** of the
+sidecar, require exactly 64 hex characters, require the sidecar's filename
+field (if present) to name the artifact being verified, compute the
+tarball's own digest, compare. `otsniff pack add` parses it identically —
+the two used to disagree about leading blank lines, and neither checked the
+filename (ADV-P2 F-P2-022).
+
+It deliberately does **not** use `sha256sum -c`. That is fail-open on
+macOS — Darwin's `/sbin/sha256sum` exits 0 for a checklist containing no
+properly formatted lines, so an empty or HTML sidecar body would "verify"
+(ADV-P1 F-P1-001). Computing the digest of one named file is safe on every
+implementation; only the `-c` decision was not.
+
+`tar` is invoked with `--no-same-owner --no-same-permissions`, and the
+installed mode is set with an absolute `chmod 0755` rather than `chmod +x`
+— `+x` only *adds* bits, so a substituted archive member with mode `04755`
+would otherwise land setuid under the documented sudo install
+(ADV-P1 F-P1-005).
 
 ## Scope
 
@@ -39,8 +88,9 @@ Script behavior:
 - POSIX shell only (`#!/usr/bin/env sh`, no bash-isms) so it runs on
   systems with `dash` as `/bin/sh`
 - Honors env vars: `OTSNIFF_VERSION` (pin a version), `OTSNIFF_INSTALL_DIR`
-  (override install location)
-- Both `sha256sum` (Linux) and `shasum -a 256` (macOS) for verification
+  (override install location), `OTSNIFF_PACKS` (comma-separated packs)
+- Either `sha256sum` (Linux) or `shasum -a 256` (macOS) to *compute* the
+  digest; the comparison is done by the script, not by the tool
 
 **Not in scope:**
 

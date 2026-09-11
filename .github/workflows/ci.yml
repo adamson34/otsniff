@@ -96,6 +96,45 @@ jobs:
       - uses: actions/checkout@v7
       - run: scripts/lint-no-user-paths.sh
 
+  # ADV-P2 F-P2-018: install.sh is the most exposed code in the repo — it is
+  # delivered via `curl … | sh` — and had no linter, no syntax check, and no
+  # CI job at all, while the Rust side runs clippy `-D warnings`, Kani, fuzz,
+  # and an 80% mutation floor. It even carried a `# shellcheck disable=`
+  # directive for a linter that never ran. The behavioural half of this gap
+  # is covered by tests/install_sh.rs, which runs in the `test` job.
+  shell:
+    name: Shell lint (install.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Each script is parsed by the shell its own shebang names — install.sh
+      # declares `sh` and must stay POSIX (users run it under dash), while
+      # scripts/*.sh declare bash and use arrays. Forcing `sh -n` on all of
+      # them reports a bash array as a syntax error, which is a bug in the
+      # check, not the script.
+      - name: Syntax check
+        run: |
+          for f in install.sh scripts/*.sh; do
+            [ -e "$f" ] || continue
+            case "$(head -1 "$f")" in
+              *bash) shell=bash ;;
+              *) shell=sh ;;
+            esac
+            "$shell" -n "$f"
+            echo "$shell -n ok: $f"
+          done
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --version
+          # install.sh declares `#!/usr/bin/env sh`; check it as POSIX sh so
+          # a bashism can't creep into a script users run under dash.
+          shellcheck -s sh -S warning install.sh
+          for f in scripts/*.sh; do
+            [ -e "$f" ] || continue
+            shellcheck -S warning "$f"
+          done
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
