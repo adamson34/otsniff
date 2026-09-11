@@ -107,12 +107,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: POSIX sh syntax check
+      # Each script is parsed by the shell its own shebang names — install.sh
+      # declares `sh` and must stay POSIX (users run it under dash), while
+      # scripts/*.sh declare bash and use arrays. Forcing `sh -n` on all of
+      # them reports a bash array as a syntax error, which is a bug in the
+      # check, not the script.
+      - name: Syntax check
         run: |
           for f in install.sh scripts/*.sh; do
             [ -e "$f" ] || continue
-            sh -n "$f"
-            echo "sh -n ok: $f"
+            case "$(head -1 "$f")" in
+              *bash) shell=bash ;;
+              *) shell=sh ;;
+            esac
+            "$shell" -n "$f"
+            echo "$shell -n ok: $f"
           done
       - name: shellcheck
         run: |

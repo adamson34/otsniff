@@ -62,7 +62,12 @@ impl Sandbox {
         let serve = root.join("serve");
         let bin = root.join("stubbin");
         let install_dir = root.join("install");
-        for d in [&serve, &bin, &install_dir] {
+        // `tmp` is handed to the script as $TMPDIR, so it has to exist:
+        // otherwise every run silently falls through to install.sh's
+        // `mktemp` fallback and the tests stop being hermetic. (That is how
+        // the GNU/BSD `mktemp -t` split below was found — on Linux the
+        // fallback failed outright, on macOS it quietly used /tmp.)
+        for d in [&serve, &bin, &install_dir, &root.join("tmp")] {
             fs::create_dir_all(d).unwrap();
         }
         let sandbox = Sandbox {
@@ -738,6 +743,56 @@ fn a_permissive_umask_does_not_create_a_world_writable_install_dir() {
         mode, 0o755,
         "install dir created mode {mode:o} under umask 000"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The staging directory must be creatable on GNU and BSD alike.
+// ---------------------------------------------------------------------------
+
+/// The fallback was `mktemp -d -t 'otsniff-install'` — a BSD-ism. GNU
+/// coreutils rejects it with `mktemp: too few X's in template`, so on Linux
+/// the fallback was dead code and any first-attempt failure aborted with
+/// that message rather than something an operator could act on.
+///
+/// Driven through an unusable `$TMPDIR`, which is the realistic trigger:
+/// a stale `TMPDIR` in a shell profile, a container with no `/tmp` mount, a
+/// CI runner that cleaned up underneath the job.
+#[test]
+fn an_unusable_tmpdir_falls_back_cleanly_on_both_gnu_and_bsd_mktemp() {
+    let sb = Sandbox::new("badtmpdir");
+    sb.publish("otsniff");
+
+    let path = format!(
+        "{}:{}",
+        sb.bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = Command::new("sh")
+        .arg(repo_root().join("install.sh"))
+        .arg(VERSION)
+        .env("PATH", path)
+        .env("OTSNIFF_TEST_SERVE", &sb.serve)
+        .env("OTSNIFF_INSTALL_DIR", &sb.install_dir)
+        .env("TMPDIR", sb.root.join("does-not-exist"))
+        .output()
+        .unwrap();
+
+    assert!(
+        !stderr(&out).contains("too few X's"),
+        "the mktemp fallback is not portable: {}",
+        stderr(&out)
+    );
+    // Either it fell back to /tmp and installed, or it refused with an
+    // actionable message. Both are fine; a raw mktemp error is not.
+    if out.status.success() {
+        assert!(sb.installed("otsniff").is_file());
+    } else {
+        assert!(
+            stderr(&out).contains("TMPDIR"),
+            "a temp-dir failure must name TMPDIR as the fix: {}",
+            stderr(&out)
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

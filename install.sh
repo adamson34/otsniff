@@ -203,7 +203,15 @@ if [ -z "$VERSION" ]; then
 fi
 
 # ── Stage in temp dir ───────────────────────────────────────────
-TMP=$(mktemp -d 2>/dev/null || mktemp -d -t 'otsniff-install')
+# The fallback used to be `mktemp -d -t 'otsniff-install'`, which is a
+# BSD-ism: on macOS `-t` takes a *prefix*, but GNU coreutils requires a
+# template with at least three X's and fails with
+# `mktemp: too few X's in template`. So on Linux — the majority install
+# target — the fallback was dead, and any first-attempt failure (an unset,
+# unwritable, or nonexistent $TMPDIR) aborted with that message instead of
+# something actionable. An explicit template works on both.
+TMP=$(mktemp -d 2>/dev/null || mktemp -d /tmp/otsniff-install.XXXXXXXXXX 2>/dev/null) \
+    || err "could not create a temporary directory (tried \$TMPDIR and /tmp). Set TMPDIR to a writable directory and retry."
 # ADV-P2 F-P2-038: a POSIX trap handler that does not itself exit returns
 # control to the interrupted point — so Ctrl-C deleted $TMP and the script
 # then carried on against a directory that no longer existed. Only the EXIT
