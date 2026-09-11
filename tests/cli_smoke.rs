@@ -1359,6 +1359,23 @@ fn pack_remove_rejects_an_unknown_pack_name() {
         .stderr(predicate::str::contains("no such pack 'nosuchpack'"));
 }
 
+/// Copies the built `otsniff` into a fresh directory and returns the path.
+///
+/// **ADV-P2 F-P2-026.** `resolve()` searches the running binary's own
+/// directory before `PATH`, and under `cargo test` that directory is
+/// `target/debug`, which holds a freshly built `otsniff-web`. Any test that
+/// plants an `otsniff-web` on `PATH` and then asserts on *which* copy was
+/// found is therefore testing the build tree, not the search order — the
+/// refusal message named the sibling-dir copy, and whether it did depended
+/// on whether `-p otsniff-web` had been built. Running the binary from a
+/// directory we control removes that leg from the search entirely.
+#[cfg(unix)]
+fn otsniff_in_isolated_dir(dir: &std::path::Path) -> std::path::PathBuf {
+    let dest = dir.join("otsniff");
+    std::fs::copy(assert_cmd::cargo::cargo_bin("otsniff"), &dest).unwrap();
+    dest
+}
+
 /// ADV-P1 F-P1-003: `remove` must only ever delete from the install
 /// directory. It used to delete whatever `resolve()` found first —
 /// including a copy on PATH that otsniff never installed.
@@ -1366,25 +1383,102 @@ fn pack_remove_rejects_an_unknown_pack_name() {
 #[cfg(unix)]
 fn pack_remove_refuses_a_copy_it_did_not_install() {
     use std::os::unix::fs::PermissionsExt;
+    let exe_dir = TempDir::new().unwrap(); // holds only otsniff itself
     let install_dir = TempDir::new().unwrap(); // empty: nothing installed here
     let elsewhere = TempDir::new().unwrap(); // a copy otsniff didn't install
 
+    let otsniff = otsniff_in_isolated_dir(exe_dir.path());
     let foreign = elsewhere.path().join("otsniff-web");
     std::fs::write(&foreign, b"#!/bin/sh\n").unwrap();
     std::fs::set_permissions(&foreign, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    Command::cargo_bin("otsniff")
-        .unwrap()
+    Command::new(&otsniff)
         .args(["pack", "remove", "web"])
         .env("OTSNIFF_INSTALL_DIR", install_dir.path())
         .env("PATH", elsewhere.path())
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("will not remove it"));
+        .stderr(predicate::str::contains("will not remove it"))
+        // The message must name the copy actually found. Without this the
+        // assertion above passes even when `resolve` returned some unrelated
+        // build artifact — which is exactly what it was doing.
+        .stderr(predicate::str::contains(foreign.display().to_string()));
 
     assert!(
         foreign.exists(),
         "otsniff must not delete a pack copy it did not install"
+    );
+}
+
+/// ADV-P2 F-P2-016: a third-party `otsniff-<name>` dispatches, so it must
+/// also be listable and removable. Previously `pack list` never mentioned it
+/// and `pack remove` said "no such pack" — a pack the tool would happily run
+/// but could neither audit nor take away.
+#[test]
+#[cfg(unix)]
+fn a_third_party_pack_can_be_listed_and_removed() {
+    use std::os::unix::fs::PermissionsExt;
+    let exe_dir = TempDir::new().unwrap();
+    let install_dir = TempDir::new().unwrap();
+    let otsniff = otsniff_in_isolated_dir(exe_dir.path());
+
+    let planted = install_dir.path().join("otsniff-acme");
+    std::fs::write(&planted, "#!/bin/sh\necho acme-ran\n").unwrap();
+    std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    // It dispatches…
+    Command::new(&otsniff)
+        .arg("acme")
+        .env("OTSNIFF_INSTALL_DIR", install_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("acme-ran"));
+
+    // …so it must appear in the listing…
+    Command::new(&otsniff)
+        .args(["pack", "list"])
+        .env("OTSNIFF_INSTALL_DIR", install_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("acme"))
+        .stdout(predicate::str::contains(planted.display().to_string()));
+
+    // …and be removable.
+    Command::new(&otsniff)
+        .args(["pack", "remove", "acme"])
+        .env("OTSNIFF_INSTALL_DIR", install_dir.path())
+        .assert()
+        .success();
+    assert!(
+        !planted.exists(),
+        "pack remove did not delete the third-party pack"
+    );
+}
+
+/// ADV-P2 F-P2-028: a checksum mismatch is the one pack failure automation
+/// has to escalate, and it used to exit 2 — the same code as a typo'd pack
+/// name and a clap usage error.
+#[test]
+fn pack_integrity_failures_do_not_share_an_exit_code_with_usage_errors() {
+    // A usage error: unknown pack name.
+    Command::cargo_bin("otsniff")
+        .unwrap()
+        .args(["pack", "add", "nosuchpack"])
+        .assert()
+        .code(2);
+
+    // And the integrity class is a different code. Asserted through the
+    // error type's own mapping, since reaching a real mismatch needs a
+    // release server; tests/install_sh.rs covers the download path end to
+    // end for the shell copy.
+    assert_eq!(
+        otsniff::error::OtError::PackIntegrity("x".into()).exit_code(),
+        76,
+        "integrity failures must be distinguishable from usage errors"
+    );
+    assert_ne!(
+        otsniff::error::OtError::PackIntegrity("x".into()).exit_code(),
+        otsniff::error::OtError::Pack("x".into()).exit_code(),
     );
 }
 

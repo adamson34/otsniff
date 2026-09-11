@@ -40,6 +40,18 @@ pub fn path_dirs() -> Vec<PathBuf> {
 /// `is_file()` alone matches a non-executable file, which would then be
 /// handed to `exec` for a confusing failure — and could mask a real
 /// executable further down the search path.
+///
+/// **Deliberately follows symlinks** (`fs::metadata`, not
+/// `symlink_metadata`): a symlinked executable on `PATH` is how essentially
+/// every package manager and version manager works, so refusing one would
+/// break more than it protected. The consequence, which ADR-0019 `:52-55`
+/// sanctions but did not spell out (ADV-P2 F-P2-047), is that an
+/// `otsniff-web -> /bin/sh` in a search directory resolves and runs; so does
+/// a replacement swapped in between this check and the `exec` that follows
+/// it. Both require write access to a directory on the operator's own search
+/// path, which is already code execution by other means. What is *not*
+/// accepted is a symlink inside a downloaded release artifact — `pack add`
+/// checks that one with `symlink_metadata` (F-P2-004).
 #[cfg(unix)]
 pub fn is_executable_file(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;

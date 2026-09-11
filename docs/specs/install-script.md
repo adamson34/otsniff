@@ -51,12 +51,21 @@ both.
   automation still sees the partial failure (ADV-P1 F-P1-020).
 - Each pack is run-verified (`--help` succeeds) to the same standard as
   the core, so a pack that installs but can't execute is caught here
-  rather than on first use.
+  rather than on first use. A pack that fails run-verify is **removed**,
+  not left on disk: reported-FAILED and present-in-`$INSTALL_DIR` must not
+  both be true, or `otsniff pack list` would report it installed and
+  dispatch would run it (ADV-P2 F-P2-014). `otsniff pack add` does the same
+  (ADV-P2 F-P2-015 — it did not, while this document already claimed
+  parity).
 
 ### Checksum verification
 
-Compares digests directly: parse the first field of the sidecar, require
-exactly 64 hex characters, compute the tarball's own digest, compare.
+Compares digests directly: parse the first field of **line 1** of the
+sidecar, require exactly 64 hex characters, require the sidecar's filename
+field (if present) to name the artifact being verified, compute the
+tarball's own digest, compare. `otsniff pack add` parses it identically —
+the two used to disagree about leading blank lines, and neither checked the
+filename (ADV-P2 F-P2-022).
 
 It deliberately does **not** use `sha256sum -c`. That is fail-open on
 macOS — Darwin's `/sbin/sha256sum` exits 0 for a checklist containing no

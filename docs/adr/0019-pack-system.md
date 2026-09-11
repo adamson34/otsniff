@@ -46,6 +46,16 @@ is deliberate — `install.sh` puts core and packs in the same directory, so
 the common case never consults `PATH`, and a writable-but-unrelated `PATH`
 entry can't shadow an installed pack.
 
+"The directory containing the running `otsniff`" is *not* unambiguous, and
+this ADR previously implied it was (ADV-P2 F-P2-046). `current_exe()` is
+fully symlink-resolved, so under Homebrew, Nix, or GNU Stow it is the
+read-only *store* directory the user's `~/.local/bin/otsniff` points into,
+not the directory they think of as holding otsniff. `pack add` will fail to
+write there, and packs installed next to the symlink will not be found by
+that leg. `OTSNIFF_INSTALL_DIR` is the escape hatch for exactly this shape;
+it must be an absolute path, because a relative one would make the write
+path and the search path disagree (ADV-P2 F-P2-005).
+
 Two honest limits on that (ADV-P1 F-P1-002, F-P1-004):
 
 - It narrows *shadowing*, not the general surface. Dispatching to a
@@ -105,13 +115,29 @@ directions; see Consequences.)
 F-P1-001).** The first implementation handed the downloaded sidecar to
 `sha256sum -c` and trusted its exit status. That is fail-open on macOS:
 Darwin's `/sbin/sha256sum` exits 0 for a checklist containing no properly
-formatted lines, so an empty or HTML sidecar body "verified" — and
-`which` finds it before the fail-closed `shasum` fallback on a default
-macOS `PATH`. Both copies now parse the expected digest out of the
-sidecar, compute the tarball's digest themselves, and compare: `sha2` is
-already a dependency of the core crate, so the Rust path needs no external
-checksum tool at all. Fail-closed by construction — a missing, empty, or
-non-checksum sidecar cannot produce a passing comparison.
+formatted lines, so an empty or HTML sidecar body "verified".
+
+The original wording of this paragraph blamed `PATH` order — "`which` finds
+it before the fail-closed `shasum` fallback" — which is simply not true, and
+ADV-P2 F-P2-030 verified it: `sha256sum` and `shasum` are *different
+program names* (`/sbin/sha256sum`, `/usr/bin/shasum`), so no `PATH`
+ordering could ever make one shadow the other. The real cause was the
+script's own probe order: it tried `sha256sum` first and only fell through
+to `shasum` if that binary was absent, which on macOS it is not. The
+decision below was right; the reason given for it was wrong.
+
+Both copies now parse the expected digest out of the sidecar, compute the
+tarball's digest themselves, and compare: `sha2` is already a dependency of
+the core crate, so the Rust path needs no external checksum tool at all.
+Fail-closed by construction — a missing, empty, or non-checksum sidecar
+cannot produce a passing comparison. Both copies read the digest from
+**line 1** and, when the sidecar names a file, require that name to match
+the artifact being verified (ADV-P2 F-P2-022; previously the two parsers
+disagreed about leading blank lines and neither checked the name at all).
+
+A verification failure exits **76** (`EX_PROTOCOL`), not 2 — an installer
+script has to be able to tell a substituted artifact from a mistyped pack
+name without grepping stderr (ADV-P2 F-P2-028).
 
 Note what the checksum does and does not buy: the sidecar ships from the
 same release as the tarball, so it protects against a corrupted or
@@ -125,10 +151,28 @@ the destination is replaced rather than written through.
 
 `pack remove` deletes the binary **in the install directory** and nothing
 else. If a copy exists elsewhere on `PATH` it reports the path and
-refuses, since otsniff didn't install it — deleting it could corrupt a
-package manager's manifest (ADV-P1 F-P1-003). Packs own no state outside
-their own data directories (`otsniff-web` has `--data-dir`), so removal
-never touches user data.
+refuses — deleting it could corrupt a package manager's manifest (ADV-P1
+F-P1-003). Packs own no state outside their own data directories
+(`otsniff-web` has `--data-dir`), so removal never touches user data.
+
+Be precise about what that guard actually distinguishes, because an earlier
+version of this ADR was not (ADV-P2 F-P2-032). "otsniff didn't install it"
+is inferred **purely from location** — it is not provenance. Where the core
+is package-managed (`/opt/homebrew/bin/otsniff`), the install directory *is*
+the package manager's directory, so the one place `remove` deletes from
+unconditionally is the place this paragraph claims to protect, while a
+hand-built copy in `~/.local/bin` is the one it refuses to touch. The
+protected and unprotected cases are inverted in exactly the deployment shape
+where it matters most. The guard is still worth having — it makes `remove`
+idempotent and stops it walking `PATH` — but it is a scoping rule, not a
+safety guarantee, and `OTSNIFF_INSTALL_DIR` is how a package-managed
+install should point it somewhere writable.
+
+`pack remove` also accepts any dispatchable `otsniff-<name>`, not just
+catalog entries, and `pack list` reports them (ADV-P2 F-P2-016). The
+execution surface and the management surface have to cover the same set: a
+third-party pack that `otsniff <name>` will run must be one the operator can
+see and remove with the same tool.
 
 ### D4 — The registry is a static list in the core binary
 
@@ -158,11 +202,36 @@ theoretical one.** ADV-P1 found they had already diverged in both
 directions within a single PR: the shell copy guarded aarch64-Linux and
 used `mktemp -d`; the Rust copy cleared setuid and failed closed on a
 missing checksum tool. Neither was a superset of the other, and the same
-fail-open checksum bug existed in both. They have been reconciled, but
-nothing structurally prevents the next divergence — the honest options are
-to keep them in deliberate lockstep with paired tests, or to have
-`install.sh` bootstrap only the core and let `otsniff pack add` be the
-sole pack installer. That consolidation is not done here.
+fail-open checksum bug existed in both.
+
+An earlier revision of this section claimed they "have been reconciled."
+That was false when it was written, and ADV-P2 F-P2-027 verified it false on
+four security-relevant properties at the time: version-charset validation
+(shell copy missing), staged rename (shell copy missing), curl protocol and
+size pinning (shell copy missing), and run-verify (Rust copy missing). The
+section's own predicted failure mode had already occurred inside the PR that
+documented it — which is the most useful thing this ADR records. **Do not
+restate reconciliation as a fact here.** The property is now asserted by
+`tests/install_sh.rs`, which drives the real `install.sh` against a stubbed
+`curl` and a fixture release, with one test per shared property; when the
+two copies drift again, that suite is what should notice, not this
+paragraph.
+
+Nothing structurally prevents the next divergence. The honest options remain
+to keep the copies in deliberate lockstep with paired tests, or to have
+`install.sh` bootstrap only the core and let `otsniff pack add` be the sole
+pack installer. That consolidation is still not done here.
+
+**There is no core↔pack version-skew check, and `pack list` does not claim
+otherwise** (ADV-P2 F-P2-017). `pack add` defaults to the running core's tag,
+so a matching pair is the default outcome — but a pack installed at v0.6.0
+alongside a core upgraded to v0.7.0 is reported simply as "installed," with
+no indication it is stale. Detecting skew means executing the pack binary to
+ask its version, which `pack list` deliberately does not do: listing is the
+one command that must work offline, instantly, and without running anything
+an attacker may have planted in the install directory. The trade is
+deliberate; the gap is real, and the packs published today are independent
+enough that a mismatched pair degrades rather than breaks.
 
 **We gain** a distribution answer for P1-8 (IOC matching against curated
 OT threat-intel): a data pack can version and ship on its own cadence
