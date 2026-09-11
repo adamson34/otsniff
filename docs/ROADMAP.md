@@ -1030,6 +1030,40 @@ index, `main.rs`/`lib.rs` the axum app), `templates/dashboard.html`.
 **Deps:** `axum`, `tokio`, plus `askama`/`serde`/`clap`/`ipnet`/`chrono`
 already used elsewhere in the workspace.
 
+### P2-10: Pack system — optional components (M) — ✅ shipped (ADR-0019)
+
+`install.sh` gives you the core binary; everything else is a pack you add
+when you want it. A pack is a separate binary `otsniff-<name>` published
+as its own release artifact and installed next to the core one:
+
+```
+curl -fsSL .../install.sh | sh -s -- --packs web   # at install time
+otsniff pack list | add <name> | remove <name>      # any time after
+otsniff web --port 7878                             # runs otsniff-web
+```
+
+Dispatch is git-style (`otsniff foo` → `otsniff-foo`), resolving
+sibling-of-the-running-binary before `PATH`. `pack list` is offline;
+`pack add` constructs the release URL itself, verifies the SHA-256, and
+shells out to `curl`/`tar` rather than embedding an HTTP client
+(ADR-0007's stance) — it never executes downloaded shell code.
+
+**Why:** the core is a single lean static binary and should stay that
+way, but `otsniff-web` (P2-9) already has a dependency tree nobody
+running PCAP triage should have to carry, and more components are coming.
+A pack boundary lets each ship on its own terms.
+
+**Catalog today:** `web`. It grows as otsniff-hunt (ADR-0016) lands.
+**Bonus:** this is also the distribution answer for P1-8 (IOC matching) —
+a curated threat-intel feed can ship and version as a data pack instead of
+being compiled into the core on a code-release cadence. That removes the
+"where would it live" half of P1-8; the sourcing/licensing half is still
+open.
+
+**Touches:** `src/packs.rs`, `pack` subcommand + `external_subcommand`
+dispatch in `cli.rs`, `OtError::Pack` (exit 2), `install.sh` (`--packs`),
+`.github/workflows/release.yml` (per-pack artifacts).
+
 ---
 
 ## Explicitly not in scope

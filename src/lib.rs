@@ -10,6 +10,7 @@ pub mod findings;
 pub mod inventory;
 pub mod observe;
 pub mod oui;
+pub mod packs;
 pub mod parse;
 pub mod pcap;
 pub mod progress;

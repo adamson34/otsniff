@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Packs — optional components** (P2-10, ADR-0019): the installer gives
+  you the core binary; everything else is a pack you add when you want it.
+  `curl … | sh -s -- --packs web` at install time, or `otsniff pack list /
+  add <name> / remove <name>` any time after. A pack is a separate binary
+  `otsniff-<name>` published as its own release artifact and installed
+  next to the core one; an installed pack runs as a subcommand
+  (`otsniff web --port 7878`) the way `git foo` runs `git-foo`, resolving
+  sibling-of-the-running-binary before `PATH`. `pack list` works offline;
+  `pack add` verifies the artifact's SHA-256 before installing and shells
+  out to `curl`/`tar` rather than embedding an HTTP client — it never
+  pipes a downloaded script to a shell. Catalog today: `web`.
 - **`otsniff-web` — local web companion app** (P2-9, ADR-0018, new
   workspace crate): `cargo run -p otsniff-web -- --port 7878 --data-dir
   ./otsniff-web-data` starts a `127.0.0.1`-only web UI — upload a PCAP,

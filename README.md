@@ -114,6 +114,30 @@ curl -fsSL https://raw.githubusercontent.com/adamson34/otsniff/main/install.sh |
 
 Installs to `~/.local/bin/otsniff` by default; set `OTSNIFF_INSTALL_DIR=/usr/local/bin` (or wherever) to override. Verifies the SHA-256 checksum before installing. Read `--help` after install for the next step.
 
+### Packs (optional components)
+
+The one-liner installs the core CLI. Everything beyond that is a **pack** — a separate binary you add when you want it, so the core stays a single lean static binary ([ADR-0019](docs/adr/0019-pack-system.md)).
+
+Add packs at install time:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/adamson34/otsniff/main/install.sh | sh -s -- --packs web
+```
+
+…or any time after:
+
+```sh
+otsniff pack list          # what's available, and what you have
+otsniff pack add web       # download, checksum-verify, install
+otsniff pack remove web
+```
+
+An installed pack runs as a subcommand — `otsniff web --port 7878` — the way `git foo` runs `git-foo`. `pack add` verifies the SHA-256 before installing anything and never pipes a downloaded script to a shell.
+
+| Pack  | What it is |
+|-------|------------|
+| `web` | Local web companion app: upload a PCAP in a browser, view the report, browse past runs. `127.0.0.1`-only. ([details](crates/otsniff-web/README.md)) |
+
 ### From source
 
 ```sh

@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -136,6 +137,38 @@ pub enum Command {
     /// Zonewarden segmentation-conformance tools (ADR-0013).
     #[command(subcommand)]
     Zonewarden(ZonewardenCmd),
+    /// List, install, or remove optional packs (ADR-0019) — components
+    /// distributed separately from the core binary, like the `web`
+    /// companion app. An installed pack runs as a subcommand:
+    /// `otsniff web --help`.
+    #[command(subcommand)]
+    Pack(PackCmd),
+    /// Anything that isn't a built-in subcommand is resolved as a pack:
+    /// `otsniff web …` runs the `otsniff-web` binary (ADR-0019 D2), the
+    /// way `git foo` finds `git-foo`.
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PackCmd {
+    /// Show every known pack and whether it's installed. Works offline.
+    List,
+    /// Download, checksum-verify, and install a pack next to the otsniff
+    /// binary (or into `OTSNIFF_INSTALL_DIR` if set).
+    Add {
+        /// Pack name, e.g. `web`.
+        name: String,
+        /// Release tag to install from. Defaults to the running otsniff's
+        /// own version, since packs and core ship from the same tag.
+        #[arg(long)]
+        version: Option<String>,
+    },
+    /// Delete an installed pack's binary. Never touches a pack's data.
+    Remove {
+        /// Pack name, e.g. `web`.
+        name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -408,6 +441,15 @@ pub fn run() -> Result<()> {
         Command::Zonewarden(ZonewardenCmd::Suggest { input, ot_subnets }) => {
             run_zonewarden_suggest(input, ot_subnets)
         }
+        Command::Pack(PackCmd::List) => {
+            print!("{}", crate::packs::render_list());
+            Ok(())
+        }
+        Command::Pack(PackCmd::Add { name, version }) => {
+            crate::packs::add(&name, version.as_deref())
+        }
+        Command::Pack(PackCmd::Remove { name }) => crate::packs::remove(&name),
+        Command::External(args) => crate::packs::dispatch(&args),
     }
 }
 

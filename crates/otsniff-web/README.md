@@ -4,6 +4,17 @@ Local web companion app for [otsniff](../../README.md) (ADR-0018). Upload a
 PCAP in a browser, get the same `analyze` report the CLI produces, browse
 past runs — for anyone who doesn't want to run the CLI directly.
 
+Ships as the `web` pack (ADR-0019):
+
+```bash
+otsniff pack add web
+otsniff web --port 7878
+```
+
+From a source checkout, `cargo build --workspace` already puts
+`otsniff-web` next to `otsniff` in `target/debug`, so `otsniff web` works
+with no install step — or run it directly:
+
 ```bash
 cargo run -p otsniff-web -- --port 7878 --data-dir ./otsniff-web-data
 ```
