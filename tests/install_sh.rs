@@ -804,6 +804,49 @@ fn an_unusable_tmpdir_falls_back_cleanly_on_both_gnu_and_bsd_mktemp() {
 /// the stem in any one of them 404s every install while both existing drift
 /// guards (which check only the pack *name list*) stay green.
 #[test]
+fn the_stable_release_draft_gate_is_conditional_not_hardcoded() {
+    // A stable release must stay a draft until a human publishes it. #106
+    // made `draft` conditional on tag shape deliberately — "auto-publish
+    // dev/pre-releases, keep draft gate for stable" — so dev cuts publish
+    // themselves while the artifact users actually download gets reviewed.
+    //
+    // This test exists because that gate was removed once already, by a
+    // remediation acting on a misread of ADV-P2 F-P2-009 (which inferred
+    // from the same two lines that `/releases/latest` could never resolve a
+    // version — it resolves fine; a human publishes the draft). Nothing in
+    // the suite noticed, because nothing asserted on this flag. Now it does.
+    //
+    // If you are here because this test failed: publishing stable releases
+    // non-draft is a release-process decision, not a bug fix. Change #106's
+    // decision explicitly, and update this test with the reason.
+    let raw = fs::read_to_string(repo_root().join(".github/workflows/release.yml")).unwrap();
+    // Assert against *directives only*. The comments around this setting
+    // quote the wrong values in order to explain why they are wrong, so a
+    // naive substring search over the whole file matches its own
+    // documentation — which is how the first version of this test failed.
+    let workflow: String = raw
+        .lines()
+        .map(|l| l.split('#').next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        workflow.contains(r#"draft: ${{ !contains(github.ref_name, '-') }}"#),
+        "the conditional stable-release draft gate is gone from release.yml"
+    );
+    assert!(
+        !workflow.contains("draft: false") && !workflow.contains("draft: true"),
+        "`draft` must stay conditional on the tag shape, not hardcoded"
+    );
+    // Pre-release tags are the ones that auto-publish, and must be marked
+    // prerelease so they stay out of `/releases/latest`.
+    assert!(
+        workflow.contains(r#"prerelease: ${{ contains(github.ref_name, '-') }}"#),
+        "dev tags must be marked prerelease"
+    );
+}
+
+#[test]
 fn the_artifact_stem_format_is_the_same_in_all_three_definitions() {
     let workflow = fs::read_to_string(repo_root().join(".github/workflows/release.yml")).unwrap();
     let script = fs::read_to_string(repo_root().join("install.sh")).unwrap();
