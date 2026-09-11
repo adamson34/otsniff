@@ -86,6 +86,21 @@ USAGE
     esac
 done
 
+# ADV-P2 F-P2-002: VERSION reaches the download URL from three untrusted-ish
+# sources (env var, positional arg, API scrape). curl performs RFC 3986
+# dot-segment removal, so a value containing `../` escapes the repo path
+# entirely — and the attacker then supplies both the tarball and its sidecar,
+# so checksum verification passes and the binary is executed below. Mirrors
+# release_tag()'s charset check in the Rust copy.
+validate_version() {
+    case "$1" in
+        "" ) err "empty version. Set OTSNIFF_VERSION=vX.Y.Z and retry." ;;
+        *[!A-Za-z0-9.+-]* )
+            err "refusing version '$1': expected something like v0.7.0 (letters, digits, '.', '+', '-' only)." ;;
+    esac
+}
+[ -z "$VERSION" ] || validate_version "$VERSION"
+
 # ── Detect OS ───────────────────────────────────────────────────
 case "$(uname -s)" in
     Linux*)   OS=unknown-linux-gnu ;;
@@ -113,6 +128,8 @@ if [ -z "$VERSION" ]; then
     VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
         | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
     [ -n "$VERSION" ] || err "could not determine latest release. Set OTSNIFF_VERSION=vX.Y.Z and retry."
+    # The scrape is unauthenticated text from the network — validate it too.
+    validate_version "$VERSION"
 fi
 
 # ── Stage in temp dir ───────────────────────────────────────────
@@ -166,13 +183,27 @@ install_artifact() {
     # choose the installed mode. Without them, `mv` preserves the member mode
     # and `chmod +x` only *adds* bits, so a member with mode 04755 would land
     # setuid-root under the documented sudo install (ADV-P1 F-P1-005).
-    tar --no-same-owner --no-same-permissions -xzf "$TMP/$_tarball" -C "$TMP"
+    tar --no-same-owner --no-same-permissions -xzf "$TMP/$_tarball" -C "$TMP" \
+        || err "could not extract ${_tarball} — malformed or truncated archive."
+    # ADV-P2 F-P2-004: `[ -f ]` follows symlinks, so a symlink member would
+    # pass, `mv` would relocate the *link*, and `chmod` would then follow it
+    # — a root-privileged arbitrary chmod under the documented sudo install.
+    if [ -L "$TMP/$_stem/$_base" ]; then
+        err "${_tarball} contains ${_stem}/${_base} as a symlink — refusing to install."
+    fi
     [ -f "$TMP/$_stem/$_base" ] \
         || err "${_tarball} did not contain ${_stem}/${_base} — malformed release artifact, please file a bug."
 
     mkdir -p "$INSTALL_DIR"
-    mv "$TMP/$_stem/$_base" "$INSTALL_DIR/"
-    chmod 0755 "$INSTALL_DIR/$_base"
+    # `install -m` sets the mode atomically on create and never follows a
+    # symlink at the destination, unlike mv-then-chmod.
+    if command -v install >/dev/null 2>&1; then
+        install -m 0755 "$TMP/$_stem/$_base" "$INSTALL_DIR/$_base"
+    else
+        rm -f "$INSTALL_DIR/$_base"
+        mv "$TMP/$_stem/$_base" "$INSTALL_DIR/$_base"
+        chmod 0755 "$INSTALL_DIR/$_base"
+    fi
 
     # Strip macOS Gatekeeper quarantine (the binary isn't notarized;
     # without this the user gets a popup blocking the binary).

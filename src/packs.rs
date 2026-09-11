@@ -55,7 +55,22 @@ pub fn binary_name(name: &str) -> String {
 /// core binary sits somewhere the operator can't write).
 pub fn install_dir() -> Result<PathBuf> {
     if let Some(dir) = std::env::var_os("OTSNIFF_INSTALL_DIR") {
-        return Ok(PathBuf::from(dir));
+        let dir = PathBuf::from(dir);
+        // ADV-P2 F-P2-005: `search_dirs` drops non-absolute entries (they
+        // resolve against the CWD), so a relative value here would make the
+        // write path and the search path disagree — `add` would install to
+        // ./otsniff-web and report success while `list` said "not
+        // installed", and `remove` would delete from whatever directory the
+        // operator happened to be in. Reject rather than silently diverge.
+        if !dir.is_absolute() {
+            return Err(OtError::Pack(format!(
+                "OTSNIFF_INSTALL_DIR must be an absolute path (got '{}') — a relative \
+                 install directory resolves against the current directory, which is \
+                 exactly what pack resolution refuses to search",
+                dir.display()
+            )));
+        }
+        return Ok(dir);
     }
     let exe = std::env::current_exe().map_err(|e| {
         OtError::Pack(format!(
@@ -108,8 +123,10 @@ pub fn resolve(name: &str) -> Option<PathBuf> {
 /// silently void, because nothing would be found in the sibling dir at all.
 fn search_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    if let Some(dir) = std::env::var_os("OTSNIFF_INSTALL_DIR") {
-        dirs.push(PathBuf::from(dir));
+    // Use the *validated* install dir rather than re-reading the env var, so
+    // the write path and the search path cannot disagree (ADV-P2 F-P2-005).
+    if let Ok(dir) = install_dir() {
+        dirs.push(dir);
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
@@ -134,22 +151,11 @@ fn resolve_in(dirs: Vec<PathBuf>, binary: &str) -> Option<PathBuf> {
         .find(|candidate| is_executable_file(candidate))
 }
 
-/// **F-P1-018 (ADV-P1).** `is_file()` alone matches a non-executable file,
-/// which resolution would then hand to `exec` for a confusing failure —
-/// and would let a stray `otsniff-web` data file mask a real pack further
-/// down the search path.
-#[cfg(unix)]
-fn is_executable_file(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable_file(path: &Path) -> bool {
-    path.is_file()
-}
+/// F-P1-018 (ADV-P1): resolution requires an *executable* file, not just a
+/// present one. Shared with the AI providers via [`crate::which`] — having
+/// three private copies of this logic is what let ADV-P2 F-P2-001 survive
+/// the ADV-P1 fix.
+use crate::which::is_executable_file;
 
 /// Rendered `pack list` output: every known pack with its installed state.
 pub fn render_list() -> String {
@@ -429,6 +435,18 @@ pub fn add(name: &str, version: Option<&str>) -> Result<()> {
 
     let binary = binary_name(pack.name);
     let extracted = tmp.0.join(&stem).join(&binary);
+    // ADV-P2 F-P2-004: `is_file()` follows symlinks, so a symlink member
+    // would pass the check and then be copied/chmod'd through to whatever
+    // it points at. Check the link itself.
+    if extracted
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(OtError::Pack(format!(
+            "{tarball} contains {stem}/{binary} as a symlink — refusing to install.              This is not something a genuine release artifact does."
+        )));
+    }
     if !extracted.is_file() {
         return Err(OtError::Pack(format!(
             "{tarball} did not contain {stem}/{binary} — the release artifact \
@@ -454,7 +472,24 @@ pub fn add(name: &str, version: Option<&str>) -> Result<()> {
             dest_dir.display()
         ))
     };
-    std::fs::copy(&extracted, &staged).map_err(staging_failed)?;
+    // ADV-P2 F-P2-010: `fs::copy` is O_CREAT|O_TRUNC and follows symlinks,
+    // so a pre-planted symlink at `staged` would be written through and then
+    // chmod'd. `create_new` fails if the path exists at all — including as a
+    // symlink — which is the property that matters here, since the staged
+    // name is only unpredictable-ish.
+    {
+        use std::io::Write as _;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o700);
+        }
+        let bytes = std::fs::read(&extracted).map_err(staging_failed)?;
+        let mut out = opts.open(&staged).map_err(staging_failed)?;
+        out.write_all(&bytes).map_err(staging_failed)?;
+    }
 
     let finish = |staged: &Path| -> Result<()> {
         make_executable(staged)?;

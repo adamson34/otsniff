@@ -1406,7 +1406,13 @@ fn install_dir_override_is_searched_by_list_and_dispatch() {
         .env("OTSNIFF_INSTALL_DIR", install_dir.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("installed"));
+        // ADV-P2 F-P2-006: `contains("installed")` is also satisfied by
+        // "not installed" — the substring made this guard half-inert.
+        // Assert on the resolved path, which only appears when found.
+        .stdout(predicate::str::contains(
+            planted.to_str().expect("temp path is utf-8"),
+        ))
+        .stdout(predicate::str::contains("not installed").not());
 
     Command::cargo_bin("otsniff")
         .unwrap()
@@ -1532,10 +1538,89 @@ fn release_workflow_packages_exactly_the_catalogued_packs() {
          isn't catalogued can never be installed."
     );
 
-    // (b)/(f) positive-coverage signal, not just exit-0.
-    eprintln!(
-        "Check passed: {} catalogued pack(s) {:?} validated against release.yml",
-        catalogued.len(),
-        catalogued
-    );
+    // (b)/(f) positive-coverage signal. ADV-P2 F-P2-013: an `eprintln!` in a
+    // *passing* test is swallowed by libtest's capture, so the line never
+    // reached CI logs — 0 occurrences under `cargo test`, 1 under
+    // `--nocapture`. Write to the process stderr directly, which libtest
+    // does not intercept.
+    {
+        use std::io::Write as _;
+        let _ = writeln!(
+            std::io::stderr(),
+            "Check passed: {} catalogued pack(s) {:?} validated against release.yml",
+            catalogued.len(),
+            catalogued
+        );
+    }
+}
+
+/// ADV-P2 F-P2-001 (CRITICAL): `analyze --ai` executed an attacker-planted
+/// `./claude` when PATH contained an empty component. Two compounding
+/// defects — unfiltered `split_paths`, and spawning the bare name so
+/// `execvp` re-resolved it. Reproduced end-to-end before the fix: rc=0,
+/// arbitrary code execution, the scrubbed report on the planted binary's
+/// stdin, and its output embedded in the rendered HTML.
+///
+/// This is the same defect class as F-P1-004 in `packs.rs`, which was
+/// fixed in one of three sites. Both providers are covered here.
+#[test]
+#[cfg(unix)]
+fn ai_providers_never_execute_a_planted_binary_from_the_cwd() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for (provider, planted_name, extra_args) in [
+        ("claude", "claude", vec![]),
+        (
+            "ollama",
+            "ollama",
+            vec!["--provider", "ollama", "--model", "llama3.1"],
+        ),
+    ] {
+        let cwd = TempDir::new().unwrap();
+
+        // A minimal but valid pcap: just the 24-byte global header.
+        let pcap = cwd.path().join("empty.pcap");
+        std::fs::write(
+            &pcap,
+            [
+                0xd4u8, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+            ],
+        )
+        .unwrap();
+
+        let marker = cwd.path().join("PWNED");
+        let planted = cwd.path().join(planted_name);
+        std::fs::write(
+            &planted,
+            format!(
+                "#!/bin/sh\ntouch '{}'\ncat > /dev/null\necho poisoned\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut cmd = Command::cargo_bin("otsniff").unwrap();
+        cmd.args(["analyze"])
+            .arg(&pcap)
+            .arg("-o")
+            .arg(cwd.path().join("rep.html"))
+            .arg("--ai");
+        for a in &extra_args {
+            cmd.arg(a);
+        }
+        // The hostile shape: a trailing empty component. `/usr/bin:/bin` are
+        // real dirs so the provider genuinely isn't installed there.
+        cmd.current_dir(cwd.path())
+            .env("PATH", "/usr/bin:/bin:")
+            .assert()
+            .failure();
+
+        assert!(
+            !marker.exists(),
+            "{provider}: otsniff executed a planted ./{planted_name} from the working \
+             directory — arbitrary code execution (ADV-P2 F-P2-001)"
+        );
+    }
 }

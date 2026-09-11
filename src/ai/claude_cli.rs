@@ -76,13 +76,13 @@ impl AiProvider for ClaudeCliProvider {
     fn augment(&self, system_prompt: &str, scrubbed_md: &str) -> Result<String> {
         use std::io::IsTerminal as _;
 
-        if which_claude().is_none() {
-            return Err(OtError::Parse(
+        let claude = which_claude().ok_or_else(|| {
+            OtError::Parse(
                 "Claude Code CLI not found on PATH. Install from https://claude.com/code, \
                  then run `claude` once to authenticate."
                     .to_string(),
-            ));
-        }
+            )
+        })?;
 
         let verbose = self.verbose || std::io::stderr().is_terminal();
         let prompt_bytes = scrubbed_md.as_bytes().to_vec();
@@ -90,7 +90,7 @@ impl AiProvider for ClaudeCliProvider {
         let system = system_prompt.to_string();
 
         let task = move || -> crate::error::Result<Vec<u8>> {
-            let mut cmd = build_command(model.as_deref(), &system);
+            let mut cmd = build_command(&claude, model.as_deref(), &system);
             cmd.stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
@@ -146,13 +146,13 @@ impl AiProvider for ClaudeCliProvider {
 
         // Verify claude is installed before doing anything else. A clear
         // error is far better than a cryptic NotFound from spawn().
-        if which_claude().is_none() {
-            return Err(OtError::Parse(
+        let claude = which_claude().ok_or_else(|| {
+            OtError::Parse(
                 "Claude Code CLI not found on PATH. Install from https://claude.com/code, \
                  then run `claude` once to authenticate."
                     .to_string(),
-            ));
-        }
+            )
+        })?;
 
         // AC-004: emit heartbeats when the caller set verbose=true OR when
         // stderr is a TTY. Combining both lets `-v` work in piped shells while
@@ -169,7 +169,7 @@ impl AiProvider for ClaudeCliProvider {
         // returns stdout bytes (or an error). Returning Vec<u8> satisfies the
         // R: AsRef<[u8]> bound required for byte-count reporting.
         let task = move || -> crate::error::Result<Vec<u8>> {
-            let mut cmd = build_command(model.as_deref(), &system);
+            let mut cmd = build_command(&claude, model.as_deref(), &system);
             cmd.stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
@@ -318,16 +318,16 @@ where
     Ok(result)
 }
 
+/// Resolves the `claude` binary to an absolute path.
+///
+/// **ADV-P2 F-P2-001 (CRITICAL).** This used to walk `PATH` unfiltered,
+/// so an empty component (`PATH="/usr/bin:"`) resolved against the working
+/// directory and otsniff would run a planted `./claude` — with the
+/// scrubbed report on its stdin and control of a section of the rendered
+/// report. Resolution now goes through [`crate::which`], and callers spawn
+/// the returned absolute path rather than the bare name.
 fn which_claude() -> Option<std::path::PathBuf> {
-    // Minimal `which`. Don't pull in a crate for this.
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join("claude");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    crate::which::find_executable("claude")
 }
 
 /// Disallowed Claude Code tools. The leak detector covers prompt bytes;
@@ -343,8 +343,15 @@ pub(crate) const DISALLOWED_TOOLS: &str =
 /// instance from reading the filesystem or reaching the network at
 /// runtime. Two airlocks: the leak detector enforces prompt bytes;
 /// this flag enforces runtime access.
-pub(crate) fn build_command(model: Option<&str>, system_prompt: &str) -> Command {
-    let mut cmd = Command::new("claude");
+pub(crate) fn build_command(
+    program: &std::path::Path,
+    model: Option<&str>,
+    system_prompt: &str,
+) -> Command {
+    // Spawn the resolved absolute path: `Command::new("claude")` would hand
+    // resolution back to `execvp`, which re-walks the raw PATH and undoes
+    // the absolute-only filtering (ADV-P2 F-P2-001).
+    let mut cmd = Command::new(program);
     cmd.arg("-p").arg(system_prompt);
     cmd.args(["--disallowed-tools", DISALLOWED_TOOLS]);
     if let Some(m) = model {
@@ -357,6 +364,7 @@ pub(crate) fn build_command(model: Option<&str>, system_prompt: &str) -> Command
 mod tests {
     use super::*;
     use std::ffi::OsStr;
+    use std::path::Path;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
@@ -554,7 +562,7 @@ mod tests {
     /// BC-6.03.002: the spawned command MUST always include --disallowed-tools.
     #[test]
     fn test_bc_6_03_002_build_command_includes_disallowed_tools_flag() {
-        let cmd = build_command(None, "system prompt");
+        let cmd = build_command(Path::new("/usr/local/bin/claude"), None, "system prompt");
         let args: Vec<&OsStr> = cmd.get_args().collect();
         let strs: Vec<&str> = args.iter().filter_map(|a| a.to_str()).collect();
         assert!(
@@ -568,7 +576,7 @@ mod tests {
     /// the network, as defined in AC-001.
     #[test]
     fn test_bc_6_03_002_disallowed_tools_lists_all_filesystem_and_network_tools() {
-        let cmd = build_command(None, "system prompt");
+        let cmd = build_command(Path::new("/usr/local/bin/claude"), None, "system prompt");
         let strs: Vec<String> = cmd
             .get_args()
             .filter_map(|a| a.to_str().map(String::from))
@@ -603,7 +611,11 @@ mod tests {
     /// (Secondary concern — the real Red Gate is the --disallowed-tools tests above.)
     #[test]
     fn test_bc_6_03_002_build_command_passes_model_when_provided() {
-        let cmd = build_command(Some("claude-opus-4-5"), "system prompt");
+        let cmd = build_command(
+            Path::new("/usr/local/bin/claude"),
+            Some("claude-opus-4-5"),
+            "system prompt",
+        );
         let strs: Vec<String> = cmd
             .get_args()
             .filter_map(|a| a.to_str().map(String::from))
